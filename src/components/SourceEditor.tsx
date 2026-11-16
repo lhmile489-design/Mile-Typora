@@ -5,6 +5,8 @@ import type { HeadingLevel, ParagraphEdit, Snapshot } from "../editor/paragraph"
 
 type ParagraphModule = typeof import("../editor/paragraph");
 type InlineModule = typeof import("../editor/inline");
+type SearchModule = typeof import("../editor/search");
+type LineOpsModule = typeof import("../editor/lineops");
 
 /** Commands the app and, later, the Edit menu call on the editor. */
 export type SourceCommands = {
@@ -45,6 +47,15 @@ export type SourceCommands = {
   toggleStrikethrough(): boolean;
   insertLink(): boolean;
   clearFormatting(): boolean;
+  selectAll(): void;
+  selectLine(): boolean;
+  selectParagraph(): boolean;
+  moveLine(direction: "up" | "down"): boolean;
+  deleteForward(): boolean;
+  find(query: string): { count: number; index: number };
+  stepFind(query: string, index: number, backwards: boolean): { count: number; index: number };
+  replace(query: string, replacement: string, index: number): { count: number; index: number; replaced: boolean };
+  replaceAll(query: string, replacement: string): { count: number; replaced: number };
 };
 
 type Props = {
@@ -81,12 +92,14 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, r
   } | null>(null);
   const paragraph = useRef<ParagraphModule | null>(null);
   const inline = useRef<InlineModule | null>(null);
+  const search = useRef<SearchModule | null>(null);
+  const lineops = useRef<LineOpsModule | null>(null);
   const isolateHistory = useRef<AnnotationType<"after" | "before" | "full"> | null>(null);
   const stateCtor = useRef<typeof import("@codemirror/state").EditorState | null>(null);
   const extensions = useRef<Extension[] | null>(null);
 
   /** applyEdit dispatches one transaction so one command is one undo step. */
-  const applyEdit = (edit: ParagraphEdit): boolean => {
+  const applyEdit = (edit: ParagraphEdit, focus = true): boolean => {
     const view = viewRef.current;
     if (!view || !edit) return false;
     const current = view.state.doc.toString();
@@ -108,7 +121,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, r
     } else {
       view.dispatch({ selection: { anchor: edit.anchor, head: edit.head }, scrollIntoView: true });
     }
-    view.focus();
+    if (focus) view.focus();
     return true;
   };
 
@@ -119,6 +132,13 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, r
     if (!view || !mod) return false;
     const range = view.state.selection.main;
     return applyEdit(transform(mod, { text: view.state.doc.toString(), anchor: range.anchor, head: range.head }));
+  };
+
+  /** selectMatch moves the editor selection without stealing find-input focus. */
+  const selectMatch = (from: number, to: number): void => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({ selection: { anchor: from, head: to }, scrollIntoView: true });
   };
 
   /** runInline is the same contract for the inline formatting transforms. */
@@ -249,6 +269,91 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, r
       clearFormatting() {
         return runInline((mod, snapshot) => mod.clearFormatting(snapshot));
       },
+      selectAll() {
+        const view = viewRef.current;
+        if (!view) return;
+        view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } });
+        view.focus();
+      },
+      selectLine() {
+        const view = viewRef.current;
+        const mod = lineops.current;
+        if (!view || !mod) return false;
+        const range = view.state.selection.main;
+        return applyEdit(mod.selectLine({ text: view.state.doc.toString(), anchor: range.anchor, head: range.head }));
+      },
+      selectParagraph() {
+        const view = viewRef.current;
+        const mod = lineops.current;
+        if (!view || !mod) return false;
+        const range = view.state.selection.main;
+        return applyEdit(mod.selectParagraph({ text: view.state.doc.toString(), anchor: range.anchor, head: range.head }));
+      },
+      moveLine(direction) {
+        const view = viewRef.current;
+        const mod = lineops.current;
+        if (!view || !mod) return false;
+        const range = view.state.selection.main;
+        return applyEdit(mod.moveLines({ text: view.state.doc.toString(), anchor: range.anchor, head: range.head }, direction));
+      },
+      deleteForward() {
+        const view = viewRef.current;
+        const mod = lineops.current;
+        if (!view || !mod) return false;
+        const range = view.state.selection.main;
+        return applyEdit(mod.deleteForward({ text: view.state.doc.toString(), anchor: range.anchor, head: range.head }));
+      },
+      find(query) {
+        const view = viewRef.current;
+        const mod = search.current;
+        if (!view || !mod) return { count: 0, index: 0 };
+        const matches = mod.findMatches(view.state.doc.toString(), query);
+        if (matches.length === 0) return { count: 0, index: 0 };
+        selectMatch(matches[0]!.from, matches[0]!.to);
+        return { count: matches.length, index: 0 };
+      },
+      stepFind(query, index, backwards) {
+        const view = viewRef.current;
+        const mod = search.current;
+        if (!view || !mod) return { count: 0, index: 0 };
+        const matches = mod.findMatches(view.state.doc.toString(), query);
+        if (matches.length === 0) return { count: 0, index: 0 };
+        const next = (index + (backwards ? -1 : 1) + matches.length) % matches.length;
+        selectMatch(matches[next]!.from, matches[next]!.to);
+        return { count: matches.length, index: next };
+      },
+      replace(query, replacement, index) {
+        const view = viewRef.current;
+        const mod = search.current;
+        if (!view || !mod) return { count: 0, index: 0, replaced: false };
+        const text = view.state.doc.toString();
+        const result = mod.replaceOne(text, query, replacement, index);
+        if (!result.replaced) return { count: result.matches.length, index: result.index, replaced: false };
+        const target = result.matches[result.index];
+        applyEdit(
+          {
+            text: result.text,
+            anchor: target ? target.from : Math.min(text.length, result.text.length),
+            head: target ? target.to : Math.min(text.length, result.text.length),
+          },
+          false,
+        );
+        return { count: result.matches.length, index: result.index, replaced: true };
+      },
+      replaceAll(query, replacement) {
+        const view = viewRef.current;
+        const mod = search.current;
+        if (!view || !mod) return { count: 0, replaced: 0 };
+        const text = view.state.doc.toString();
+        const result = mod.replaceEvery(text, query, replacement);
+        if (result.count === 0) return { count: 0, replaced: 0 };
+        const target = result.matches[0];
+        applyEdit(
+          { text: result.text, anchor: target ? target.from : 0, head: target ? target.to : 0 },
+          false,
+        );
+        return { count: result.matches.length, replaced: result.count };
+      },
     }),
     [],
   );
@@ -263,6 +368,8 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, r
         { markdown },
         paragraphModule,
         inlineModule,
+        searchModule,
+        lineopsModule,
       ] = await Promise.all([
         import("@codemirror/view"),
         import("@codemirror/state"),
@@ -270,12 +377,16 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, r
         import("@codemirror/lang-markdown"),
         import("../editor/paragraph"),
         import("../editor/inline"),
+        import("../editor/search"),
+        import("../editor/lineops"),
       ]);
       if (!alive || !host.current) return;
       historyActions.current = { undo, redo };
       isolateHistory.current = isolateHistoryType;
       paragraph.current = paragraphModule;
       inline.current = inlineModule;
+      search.current = searchModule;
+      lineops.current = lineopsModule;
       stateCtor.current = EditorState;
 
       const theme = EditorView.theme({

@@ -39,6 +39,8 @@ export type Command =
   | "strikethrough"
   | "link"
   | "clear-format"
+  | "move-line-up"
+  | "move-line-down"
   | "dismiss";
 
 /** The keyboard fields the table reads. */
@@ -74,7 +76,9 @@ export function commandFor(e: KeyPress): Command | null {
 
   if (!ctrl && !shift && !e.altKey && key === "F5") return "refresh";
   if (!ctrl && !shift && !e.altKey && key === "Escape") return "dismiss";
-  if (!ctrl && shift && e.altKey && !e.metaKey && (key === "5" || key === "%")) return "strikethrough";
+  if (!e.ctrlKey && shift && e.altKey && !e.metaKey && (key === "5" || key === "%")) return "strikethrough";
+  if (!e.ctrlKey && !shift && e.altKey && !e.metaKey && key === "ArrowUp") return "move-line-up";
+  if (!e.ctrlKey && !shift && e.altKey && !e.metaKey && key === "ArrowDown") return "move-line-down";
   if (!ctrl) return null;
 
   if (!shift && key === "o") return "open-file";
@@ -145,4 +149,6 @@ export const SHORTCUT_HINT: Partial<Record<Command, string>> = {
   strikethrough: "Alt+Shift+5",
   link: "Ctrl+K",
   "clear-format": "Ctrl+\\",
+  "move-line-up": "Alt+↑",
+  "move-line-down": "Alt+↓",
 };

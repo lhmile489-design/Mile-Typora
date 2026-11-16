@@ -566,6 +566,72 @@ describe("keyboard commands", () => {
     fireEvent.keyDown(window, { key: "1", ctrlKey: true });
     expect(renderSource).toHaveBeenCalledTimes(1);
   });
+  it("moves the current line with Alt+Down and undoes it", async () => {
+    const doc = {
+      name: "笔记.md",
+      path: "E:/notes/笔记.md",
+      size: 6,
+      hasBom: false,
+      lineEnding: "LF",
+      hash: "",
+      text: "一\n二",
+      html: "<h1>一</h1>",
+      counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
+    };
+    render(<App transport={fakeTransport({ openFile: async () => ({ kind: "loaded" as const, doc }) })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "一" });
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    content.focus();
+
+    fireEvent.keyDown(window, { key: "ArrowDown", altKey: true });
+    await waitFor(() => expect(Array.from(document.querySelectorAll(".cm-line")).map((line) => line.textContent)).toEqual(["二", "一"]));
+    fireEvent.keyDown(content, { key: "z", ctrlKey: true });
+    await waitFor(() => expect(Array.from(document.querySelectorAll(".cm-line")).map((line) => line.textContent)).toEqual(["一", "二"]));
+  });
+
+  it("replaces in source editing and undoes the whole replacement", async () => {
+    const doc = {
+      name: "笔记.md",
+      path: "E:/notes/笔记.md",
+      size: 12,
+      hasBom: false,
+      lineEnding: "LF",
+      hash: "",
+      text: "foo bar\nbar",
+      html: "<h1>foo bar</h1>",
+      counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
+    };
+    render(<App transport={fakeTransport({ openFile: async () => ({ kind: "loaded" as const, doc }) })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "foo bar" });
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    content.focus();
+
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const query = await screen.findByRole("textbox", { name: "在文中查找" });
+    fireEvent.change(query, { target: { value: "bar" } });
+    expect(await screen.findByText("1 / 2")).toBeTruthy();
+
+    const replacement = screen.getByRole("textbox", { name: "替换为" });
+    fireEvent.change(replacement, { target: { value: "X" } });
+    const lineTexts = () => Array.from(document.querySelectorAll(".cm-line")).map((line) => line.textContent);
+    fireEvent.click(screen.getByRole("button", { name: "替换" }));
+    await waitFor(() => expect(lineTexts()).toEqual(["foo X", "bar"]));
+    expect(await screen.findByText("1 / 1")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "全部替换" }));
+    await waitFor(() => expect(lineTexts()).toEqual(["foo X", "X"]));
+    expect(content.textContent).not.toContain("bar");
+
+    fireEvent.keyDown(content, { key: "z", ctrlKey: true });
+    await waitFor(() => expect(lineTexts()).toEqual(["foo X", "bar"]));
+    fireEvent.keyDown(content, { key: "z", ctrlKey: true });
+    await waitFor(() => expect(lineTexts()).toEqual(["foo bar", "bar"]));
+  });
+
 
   it("closes the find bar with Escape before anything else", async () => {
     const doc = {

@@ -78,6 +78,8 @@ const EDITOR_ACTIONS: Partial<Record<Command, (editor: SourceCommands) => boolea
   strikethrough: (editor) => editor.toggleStrikethrough(),
   link: (editor) => editor.insertLink(),
   "clear-format": (editor) => editor.clearFormatting(),
+  "move-line-up": (editor) => editor.moveLine("up"),
+  "move-line-down": (editor) => editor.moveLine("down"),
 };
 
 export function App({ transport }: { transport: Transport }) {
@@ -114,6 +116,7 @@ export function App({ transport }: { transport: Transport }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
+  const [findReplacement, setFindReplacement] = useState("");
   const [findIndex, setFindIndex] = useState(0);
   const [findCount, setFindCount] = useState(0);
   const [recent, setRecent] = useState<RecentEntry[]>([]);
@@ -836,9 +839,13 @@ export function App({ transport }: { transport: Transport }) {
         return;
       }
       setPreview({ html: result.html, counts: result.counts });
+      setFindOpen(false);
+      clearHighlights();
       setMode("preview");
       return;
     }
+    setFindOpen(false);
+    clearHighlights();
     setMode("editing");
   }, [buffer, transport]);
 
@@ -871,10 +878,10 @@ export function App({ transport }: { transport: Transport }) {
 
   // Search the rendered document without touching its DOM (PRD FR-05).
   useEffect(() => {
-    if (!findOpen) {
+    if (!findOpen || mode === "editing") {
       clearHighlights();
       findRanges.current = [];
-      setFindCount(0);
+      if (!findOpen) setFindCount(0);
       return;
     }
     const article = readerRef.current?.querySelector(".markdown");
@@ -890,7 +897,17 @@ export function App({ transport }: { transport: Transport }) {
     paint(ranges, current);
     const active = ranges[current];
     if (active) scrollToRange(active);
-  }, [findOpen, findQuery, doc?.html]);
+  }, [findOpen, findQuery, doc?.html, mode]);
+
+  // Source editing searches the buffer, not the rendered DOM. The find input
+  // keeps focus; the editor only moves its selection.
+  useEffect(() => {
+    if (!findOpen || mode !== "editing") return;
+    const result = editorRef.current?.find(findQuery);
+    if (!result) return;
+    setFindCount(result.count);
+    setFindIndex(result.index);
+  }, [findOpen, findQuery, mode]);
 
   // Put the reader back where it was in this file (PRD FR-07.3).
   useEffect(() => {
@@ -902,6 +919,13 @@ export function App({ transport }: { transport: Transport }) {
 
   const stepFind = useCallback(
     (backwards: boolean) => {
+      if (modeRef.current === "editing") {
+        const result = editorRef.current?.stepFind(findQuery, findIndex, backwards);
+        if (!result) return;
+        setFindCount(result.count);
+        setFindIndex(result.index);
+        return;
+      }
       const ranges = findRanges.current;
       if (ranges.length === 0) return;
       const next = advance(findIndex, ranges.length, backwards);
@@ -910,7 +934,7 @@ export function App({ transport }: { transport: Transport }) {
       const active = ranges[next];
       if (active) scrollToRange(active);
     },
-    [findIndex],
+    [findIndex, findQuery],
   );
 
   const closeFind = useCallback(() => {
@@ -918,12 +942,35 @@ export function App({ transport }: { transport: Transport }) {
     setFindQuery("");
     setFindIndex(0);
     clearHighlights();
+    if (modeRef.current === "editing") editorRef.current?.focus();
   }, []);
 
   const changeQuery = useCallback((query: string) => {
     setFindQuery(query);
     setFindIndex(0);
   }, []);
+
+  const replaceFind = useCallback(() => {
+    if (modeRef.current !== "editing") {
+      setNotice("替换仅在源码编辑模式可用");
+      return;
+    }
+    const result = editorRef.current?.replace(findQuery, findReplacement, findIndex);
+    if (!result) return;
+    setFindCount(result.count);
+    setFindIndex(result.index);
+  }, [findIndex, findQuery, findReplacement]);
+
+  const replaceAllFind = useCallback(() => {
+    if (modeRef.current !== "editing") {
+      setNotice("替换仅在源码编辑模式可用");
+      return;
+    }
+    const result = editorRef.current?.replaceAll(findQuery, findReplacement);
+    if (!result) return;
+    setFindCount(result.count);
+    setFindIndex(0);
+  }, [findQuery, findReplacement]);
 
   // One key listener runs the table in src/lib/shortcuts.ts. The find bar
   // and the settings dialog handle their own keys first, so a handled press
@@ -971,10 +1018,7 @@ export function App({ transport }: { transport: Transport }) {
           return;
         case "find":
           e.preventDefault();
-          if (modeRef.current === "editing") {
-            setNotice("查找在预览或阅读模式可用");
-            return;
-          }
+          if (!findOpen) setFindQuery("");
           setFindOpen(true);
           // Ctrl+F again returns to the open bar; opening it already focuses
           // the input through the bar's own mount effect.
@@ -1136,7 +1180,7 @@ export function App({ transport }: { transport: Transport }) {
           </aside>
         )}
         <main className="center">
-          {findOpen && doc && mode !== "editing" && (
+          {findOpen && doc && (
             <FindBar
               query={findQuery}
               count={findCount}
@@ -1144,6 +1188,11 @@ export function App({ transport }: { transport: Transport }) {
               onChange={changeQuery}
               onStep={stepFind}
               onClose={closeFind}
+              editing={mode === "editing"}
+              replacement={findReplacement}
+              onReplacementChange={setFindReplacement}
+              onReplace={replaceFind}
+              onReplaceAll={replaceAllFind}
             />
           )}
           {doc && stale && mode === "reading" && (
