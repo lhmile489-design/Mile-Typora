@@ -17,10 +17,11 @@ type Window struct {
 	q intentQueue
 	// state is what the window is showing. M1-3 tracks the open file, M1-7
 	// the watch on it.
-	stateMu   sync.Mutex
-	openFile  string
-	root      string
-	stopWatch func()
+	stateMu    sync.Mutex
+	refreshSeq int64
+	openFile   string
+	root       string
+	stopWatch  func()
 }
 
 // ID is the native window's ID, as mygo.Window.ID reports it.
@@ -37,6 +38,21 @@ func (w *Window) SetRoot(root string) {
 	w.root = root
 	w.openFile = ""
 	w.stateMu.Unlock()
+}
+
+// NextRefresh numbers a reload, so a late result never replaces a newer one.
+func (w *Window) NextRefresh() int64 {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	w.refreshSeq++
+	return w.refreshSeq
+}
+
+// IsLatestRefresh reports whether seq is still the newest reload.
+func (w *Window) IsLatestRefresh(seq int64) bool {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	return seq == w.refreshSeq
 }
 
 // IsEmpty reports whether the window shows nothing yet: no document and no

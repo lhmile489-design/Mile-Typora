@@ -7,6 +7,7 @@ import {
   WindowService,
   events,
   type Doc,
+  type DocUpdate,
   type OpenRequest,
   type ReadyInfo,
   type LinkTarget,
@@ -20,7 +21,7 @@ import {
 } from "../mygo";
 import { failureMessage } from "./errors";
 
-export type { Doc as OpenedDoc, OpenRequest, ReadyInfo, ScanFrame };
+export type { Doc as OpenedDoc, DocUpdate, OpenRequest, ReadyInfo, ScanFrame };
 
 /** One row of the file tree, as Go sends it. */
 export type TreeEntry = ScanFrame["entries"][number];
@@ -89,6 +90,15 @@ export interface Transport {
   openLink(href: string): Promise<LinkOutcome>;
   /** Subscribes to appearance changes made in any window. */
   onThemeChange(listener: (change: ThemeChange) => void): () => void;
+  /**
+   * Subscribes to changes the app noticed in the file the window shows. A
+   * failure leaves the old document on screen, marked stale (PRD FR-07).
+   */
+  onDocUpdated(listener: (update: DocUpdate) => void): () => void;
+  /** Reads the window's document again (F5, or the stale banner's retry). */
+  refresh(): Promise<OpenFileResult>;
+  /** Drops the window's document, leaving its folder open (PRD FR-07.5). */
+  closeDocument(): Promise<Outcome<void>>;
   /** Reads the settings and the recent list. */
   getSettings(): Promise<SettingsOutcome>;
   /** Writes the settings the page edited. */
@@ -171,6 +181,12 @@ export const mygoTransport: Transport = {
   openRequested: async (seq) => requestedOutcome(() => WindowService.openRequested(seq)),
   openLink: async (href) => linkOutcome(() => WindowService.openLink(href)),
   onThemeChange: (listener) => events.themeChange.on(listener),
+  onDocUpdated: (listener) => events.docUpdated.on(listener),
+  refresh: async () => openResult(() => WindowService.refresh()),
+  closeDocument: () =>
+    wrap(async () => {
+      await WindowService.closeDocument();
+    }),
   getSettings: async () => {
     try {
       const result = await WindowService.getSettings();

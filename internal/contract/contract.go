@@ -133,6 +133,16 @@ type LinkTarget struct {
 	Reason string `json:"reason,omitempty"`
 }
 
+// DocUpdate tells a window that its document changed outside the app
+// (PRD FR-07). Failure means the old content stays and is marked stale.
+type DocUpdate struct {
+	Doc     *Doc     `json:"doc,omitempty"`
+	Failure *Failure `json:"failure,omitempty"`
+	// Seq increases per refresh: the page drops anything older than what it
+	// already shows (PRD §9.2.5).
+	Seq int64 `json:"seq"`
+}
+
 // ThemeChange tells every window that the appearance preference changed
 // (PRD FR-10.12: all windows switch at once).
 type ThemeChange struct {

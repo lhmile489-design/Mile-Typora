@@ -35,10 +35,6 @@ var (
 // registers the window; tests supply their own.
 type Opener func() (int, error)
 
-// WatchFunc watches a file and reports its changes until stopped. main
-// supplies one over mygo's file watch; tests may supply their own.
-type WatchFunc func(ctx context.Context, path string, onEvent func(watch.Event)) (stop func(), err error)
-
 // Picker shows the system file dialog and returns the chosen path, or "" when
 // the user cancelled. Tests supply their own.
 type Picker func(ctx context.Context) (string, error)
@@ -52,7 +48,10 @@ type Deps struct {
 	PickFile   Picker
 	PickFolder Picker
 	Resources  *resource.Store
-	Watch      WatchFunc
+	// Watcher shares one file watch between the windows that show a file.
+	Watcher *watch.Pool
+	// DocUpdated tells one window its document changed.
+	DocUpdated func(windowID int, update contract.DocUpdate)
 	// State is the settings store; nil when the app data directory is not
 	// usable, in which case the app still reads documents.
 	State *appstate.Store
@@ -76,11 +75,12 @@ type WindowService struct {
 	pickDir   Picker
 	render    *markdown.Renderer
 	resources *resource.Store
-	watch     WatchFunc
+	watcher   *watch.Pool
 	state     *appstate.Store
 	// startupNotice is handed to the first page once.
 	startupNotice string
 	themeChanged  func(appearance string)
+	docUpdated    func(windowID int, update contract.DocUpdate)
 	confirm       func(ctx context.Context, title, message, detail string) bool
 	external      func(url string) error
 }
@@ -115,7 +115,8 @@ func NewWindowService(d Deps) *WindowService {
 		pickDir:       d.PickFolder,
 		render:        markdown.New(),
 		resources:     d.Resources,
-		watch:         d.Watch,
+		watcher:       d.Watcher,
+		docUpdated:    d.DocUpdated,
 		state:         d.State,
 		startupNotice: d.StartupNotice,
 		themeChanged:  d.ThemeChanged,
@@ -508,17 +509,28 @@ func (s *WindowService) currentContent(ctx context.Context, w *winctx.Window) (c
 // openPath validates a path the user chose or was handed, reads and renders
 // it, and makes it the window's document.
 func (s *WindowService) openPath(ctx context.Context, w *winctx.Window, chosen string) (contract.LoadResult, error) {
+	result := s.readAndRender(ctx, w, chosen)
+	if result.Failure != nil || result.Doc == nil {
+		return result, nil
+	}
+	s.finishOpen(w, result.Doc.Path)
+	return result, nil
+}
+
+// readAndRender turns a path into the document a page shows. Opening and
+// refreshing need exactly these steps, so they share them.
+func (s *WindowService) readAndRender(ctx context.Context, w *winctx.Window, chosen string) contract.LoadResult {
 	real, pathFailure := pathguard.Canon(chosen)
 	if pathFailure != nil {
 		return contract.LoadResult{Failure: &contract.Failure{
 			Code: pathFailure.Code, Detail: pathFailure.Detail,
-		}}, nil
+		}}
 	}
 	if !pathguard.MarkdownExt(real) {
 		return contract.LoadResult{Failure: &contract.Failure{
 			Code:   "unsupported_type",
 			Detail: "只支持 .md 和 .markdown 文件",
-		}}, nil
+		}}
 	}
 	doc, readFailure := docread.Read(real)
 	if readFailure != nil {
@@ -527,36 +539,14 @@ func (s *WindowService) openPath(ctx context.Context, w *winctx.Window, chosen s
 			Detail: readFailure.Detail,
 			Size:   readFailure.Size,
 			Limit:  readFailure.Limit,
-		}}, nil
+		}}
 	}
 	s.resources.ForgetWindow(w.ID())
 	rendered, renderFailure := s.render.Render(ctx, []byte(doc.Text), s.imageResolver(w.ID(), filepath.Dir(real)))
 	if renderFailure != nil {
 		return contract.LoadResult{Failure: &contract.Failure{
 			Code: renderFailure.Code, Detail: renderFailure.Detail,
-		}}, nil
-	}
-	return s.showDocument(ctx, w, real, doc, rendered)
-}
-
-// showDocument finishes an open: the window remembers the file, watches it for
-// changes, and the page receives the document.
-func (s *WindowService) showDocument(ctx context.Context, w *winctx.Window, real string, doc *docread.Doc, rendered markdown.Result) (contract.LoadResult, error) {
-	w.SetOpenFile(real)
-	s.recordRecent(real, false)
-	s.recordResumeOf(w)
-	// Watch the file so a change outside the app can be picked up. M3-4
-	// refreshes the document here; M1-7 records that events arrive.
-	if s.watch != nil {
-		stop, err := s.watch(w.Context(), real, func(ev watch.Event) {
-			// The path is the user's file name: log the kind, never it.
-			log.Printf("window %d: file %s", w.ID(), ev.Op)
-		})
-		if err != nil {
-			log.Printf("window %d: cannot watch its file: %v", w.ID(), err)
-		} else {
-			w.SetStopWatch(stop)
-		}
+		}}
 	}
 	return contract.LoadResult{Doc: &contract.Doc{
 		Name:       filepath.Base(real),
@@ -572,7 +562,92 @@ func (s *WindowService) showDocument(ctx context.Context, w *winctx.Window, real
 			Mermaid:        rendered.Counts.Mermaid,
 			MermaidLimited: rendered.Counts.MermaidLimited,
 		},
-	}}, nil
+	}}
+}
+
+// finishOpen records the document and starts watching its file.
+func (s *WindowService) finishOpen(w *winctx.Window, real string) {
+	w.SetOpenFile(real)
+	s.recordRecent(real, false)
+	s.recordResumeOf(w)
+	if s.watcher == nil {
+		return
+	}
+	release, err := s.watcher.Acquire(real, func(ev watch.Event) {
+		s.onFileEvent(w, ev)
+	})
+	if err != nil {
+		log.Printf("window %d: cannot watch its file: %v", w.ID(), err)
+		return
+	}
+	w.SetStopWatch(release)
+}
+
+// onFileEvent refreshes the window's document after a change outside the app.
+// The path stays out of the log: it is the user's file name (CLAUDE.md §6).
+func (s *WindowService) onFileEvent(w *winctx.Window, ev watch.Event) {
+	if ev.Op == watch.Gone {
+		log.Printf("window %d: the watch on its file ended", w.ID())
+		return
+	}
+	log.Printf("window %d: its file %s", w.ID(), ev.Op)
+	go s.reload(w)
+}
+
+// reload reads the window's file again and tells its page. A result that a
+// newer change has overtaken is dropped (PRD §9.2.5, AC-12).
+func (s *WindowService) reload(w *winctx.Window) {
+	path, ok := w.OpenFile()
+	if !ok {
+		return
+	}
+	seq := w.NextRefresh()
+	result := s.readAndRender(context.Background(), w, path)
+	if !w.IsLatestRefresh(seq) {
+		log.Printf("window %d: a late reload was dropped", w.ID())
+		return
+	}
+	if s.docUpdated == nil {
+		return
+	}
+	s.docUpdated(w.ID(), contract.DocUpdate{Seq: seq, Doc: result.Doc, Failure: result.Failure})
+}
+
+// Refresh reads the window's document again, for F5 and the stale banner
+// (PRD FR-07.2). A missing file comes back as a failure the page shows.
+func (s *WindowService) Refresh(ctx context.Context) (contract.LoadResult, error) {
+	w, err := s.callerWindow(ctx)
+	if err != nil {
+		return contract.LoadResult{}, err
+	}
+	path, ok := w.OpenFile()
+	if !ok {
+		return contract.LoadResult{Failure: &contract.Failure{
+			Code:   "not_found",
+			Detail: "尚未打开文档",
+		}}, nil
+	}
+	w.NextRefresh()
+	return s.readAndRender(ctx, w, path), nil
+}
+
+// CloseDocument drops the window's document: the page returns to its start
+// state and the watch ends. A folder stays open (PRD FR-07.5).
+func (s *WindowService) CloseDocument(ctx context.Context) error {
+	w, err := s.callerWindow(ctx)
+	if err != nil {
+		return err
+	}
+	w.StopWatch()
+	w.SetOpenFile("")
+	// With a folder still open the resume target becomes the folder; without
+	// one there is nothing to restore, so the old file is forgotten.
+	if s.state != nil {
+		if err := s.state.SetResume(resumeOf(w)); err != nil {
+			log.Printf("settings: cannot forget the closed document: %v", err)
+		}
+	}
+	return nil
 }
 
 // callerWindow resolves the window a call came from. The window ID the page

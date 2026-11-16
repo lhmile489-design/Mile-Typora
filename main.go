@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"log"
 	"net/url"
@@ -72,6 +73,9 @@ var windows = winctx.NewRegistry()
 // themeChange tells every window that the appearance preference changed.
 var themeChange = mygo.NewEvent[contract.ThemeChange]("theme-change")
 
+// docUpdated tells one window its document changed outside the app.
+var docUpdated = mygo.NewEvent[contract.DocUpdate]("doc-updated")
+
 // openRequest tells one window to open something after its page is ready.
 // Only the target window receives it (CLAUDE.md §5, decisions.md D-T01).
 var openRequest = mygo.NewEvent[contract.OpenRequest]("open-request")
@@ -109,6 +113,10 @@ func main() {
 	// Images load through the app's own protocol, registered before any
 	// window exists (decisions.md D-T01). Only registered files are served.
 	resources := resource.New()
+	// One watch per file, shared by every window that shows it (PRD FR-07.4).
+	watcher := watch.NewPool(func(path string, onEvent func(watch.Event)) (func(), error) {
+		return watch.Start(context.Background(), path, onEvent)
+	})
 	if err := mygo.Protocol.HandleFunc(resource.Scheme, resources.ServeHTTP); err != nil {
 		log.Fatal(err)
 	}
@@ -120,12 +128,20 @@ func main() {
 		startup, notice = startupTarget(state)
 	}
 	windowsSvc := service.NewWindowService(service.Deps{
-		Windows:       windows,
-		Open:          openWindow,
-		PickFile:      service.PickMarkdown,
-		PickFolder:    service.PickFolder,
-		Resources:     resources,
-		Watch:         watch.Start,
+		Windows:    windows,
+		Open:       openWindow,
+		PickFile:   service.PickMarkdown,
+		PickFolder: service.PickFolder,
+		Resources:  resources,
+		Watcher:    watcher,
+		DocUpdated: func(windowID int, update contract.DocUpdate) {
+			for _, w := range mygo.Windows() {
+				if w.ID() == windowID {
+					_ = docUpdated.Emit(w, update)
+					return
+				}
+			}
+		},
 		State:         state,
 		StartupNotice: notice,
 		ThemeChanged:  applyAppearance,

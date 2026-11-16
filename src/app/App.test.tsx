@@ -26,6 +26,9 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     clearRecent: async () => ({ ok: true as const, value: undefined }),
     openRecent: async () => ({ kind: "handedOff" as const }),
     onThemeChange: () => () => {},
+    onDocUpdated: () => () => {},
+    refresh: async () => ({ kind: "cancelled" as const }),
+    closeDocument: async () => ({ ok: true as const, value: undefined }),
     scan: () => ({ abort: () => {}, done: Promise.resolve() }),
     ...overrides,
   };

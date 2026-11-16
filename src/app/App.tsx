@@ -14,6 +14,7 @@ import {
   SquarePlus,
 } from "lucide-react";
 import type {
+  DocUpdate,
   OpenedDoc,
   OpenRequest,
   ReadyInfo,
@@ -51,6 +52,12 @@ export function App({ transport }: { transport: Transport }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [doc, setDoc] = useState<OpenedDoc | null>(null);
   const [loadError, setLoadError] = useState<LoadError | null>(null);
+  // stale is why the content on screen may no longer match its file; the
+  // document stays until a refresh succeeds (PRD FR-07.5, FR-07.11).
+  const [stale, setStale] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  // updatedAt is the status bar's "已更新 14:32" (DESIGN.md §8.8).
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [folder, setFolder] = useState<{ root: string; name: string } | null>(null);
   const [tree, setTree] = useState<TreeEntry[]>([]);
   const [treeNotice, setTreeNotice] = useState<string | null>(null);
@@ -81,21 +88,38 @@ export function App({ transport }: { transport: Transport }) {
     folderRef.current = next;
     setFolder(next);
   }, []);
+  // Where the reader is in this file, kept before the content changes.
+  const captureHere = useCallback(() => {
+    const current = docRef.current;
+    const scroller = readerRef.current;
+    if (!current || !scroller) return;
+    positions.current.set(current.path, capture(metricsOf(scroller)));
+  }, []);
+
   const findRanges = useRef<Range[]>([]);
+  const docRef = useRef<OpenedDoc | null>(null);
+  const refreshingRef = useRef(false);
+  // The newest document update applied; an older one arrives too late.
+  const updateSeq = useRef(0);
   const positions = useRef(new Map<string, Position>());
   const [showLeft, setShowLeft] = useState(true);
   // The reserved pane starts collapsed: reading comes first, and the pane
   // has nothing in it yet (PRD D-06, decisions.md D-T23).
   const [showRight, setShowRight] = useState(false);
 
-  // Start reading a folder: the tree streams in while the page draws.
+  // Start reading a folder: the tree streams in while the page draws. A
+  // refresh keeps the open document until its own reload answers.
   const startScan = useCallback(
-    (root: string, name: string) => {
+    (root: string, name: string, keepDoc = false) => {
       scanRef.current?.abort();
       applyFolder({ root, name });
-      setDoc(null);
-      setLoadError(null);
-      setSelected(null);
+      if (!keepDoc) {
+        setDoc(null);
+        setLoadError(null);
+        setSelected(null);
+        setStale(null);
+        setUpdatedAt(null);
+      }
       setTree([]);
       setTreeNotice(null);
       setScanning(true);
@@ -114,6 +138,11 @@ export function App({ transport }: { transport: Transport }) {
         if (frame.done) {
           setScanning(false);
           setTreeNotice(frame.truncated ? scanNotice(frame) : null);
+          if (keepDoc) {
+            // A selected file the rescan no longer has is unselected; the
+            // reader keeps what it shows (PRD FR-07.6).
+            setSelected((prev) => (prev && rows.some((row) => row.path === prev) ? prev : null));
+          }
         }
       });
     },
@@ -142,6 +171,31 @@ export function App({ transport }: { transport: Transport }) {
     return transport.onThemeChange((change) => applyTheme(change.appearance));
   }, [applyTheme, transport]);
 
+  useEffect(() => {
+    docRef.current = doc;
+  }, [doc]);
+
+  // A change outside the app replaces the document, or marks it stale when
+  // the file cannot be read any more (PRD FR-07.1, FR-07.5, FR-07.11).
+  useEffect(() => {
+    return transport.onDocUpdated((update: DocUpdate) => {
+      if (update.seq <= updateSeq.current) return;
+      updateSeq.current = update.seq;
+      if (update.failure) {
+        if (!docRef.current) return;
+        setStale(failureMessage(update.failure.code, update.failure.detail));
+        return;
+      }
+      if (!update.doc) return;
+      // A refresh keeps the reading position (PRD FR-07.3, AC-11).
+      captureHere();
+      setDoc(update.doc);
+      setStale(null);
+      setLoadError(null);
+      setUpdatedAt(nowHM());
+    });
+  }, [captureHere, transport]);
+
   // The settings and the recent list (PRD FR-08, FR-10).
   const loadSettings = useCallback(async () => {
     const result = await transport.getSettings();
@@ -165,12 +219,10 @@ export function App({ transport }: { transport: Transport }) {
     else setNotice(result.message);
   }, [transport]);
 
-  // Where the reader is in this file, kept before another replaces it.
+  // The same, for opening another file from a click handler.
   const rememberHere = useCallback(() => {
-    const scroller = readerRef.current;
-    if (!doc || !scroller) return;
-    positions.current.set(doc.path, capture(metricsOf(scroller)));
-  }, [doc]);
+    captureHere();
+  }, [captureHere]);
 
   // Everything that opens something ends here: a request, the tree, or a
   // dialog whose result a new window may take instead.
@@ -182,6 +234,8 @@ export function App({ transport }: { transport: Transport }) {
           setDoc(result.doc);
           void loadSettings();
           setLoadError(null);
+          setStale(null);
+          setUpdatedAt(nowHM());
           // A file inside the folder being browsed keeps the tree and
           // becomes its selection (PRD FR-10.5, AC-06); another one makes
           // this a single-file window.
@@ -303,6 +357,8 @@ export function App({ transport }: { transport: Transport }) {
     if (result.kind === "loaded") {
       setDoc(result.doc);
       setLoadError(null);
+      setStale(null);
+      setUpdatedAt(nowHM());
     } else if (result.kind === "failed") {
       setLoadError({ code: result.code, message: result.message });
     }
@@ -321,6 +377,53 @@ export function App({ transport }: { transport: Transport }) {
   }, [startScan, transport]);
 
   useEffect(() => () => scanRef.current?.abort(), []);
+
+  // F5 and the toolbar refresh the reading context: the tree as well in a
+  // folder window (PRD FR-07.8). A failure keeps what is on screen.
+  const refresh = useCallback(async () => {
+    if (refreshingRef.current) return;
+    const openFolder = folderRef.current;
+    const hasDoc = docRef.current !== null;
+    // With no document selected, F5 refreshes the tree alone (PRD FR-07.8).
+    if (!hasDoc && !openFolder) return;
+    if (openFolder) startScan(openFolder.root, openFolder.name, true);
+    if (!hasDoc) return;
+    refreshingRef.current = true;
+    setRefreshing(true);
+    const result = await transport.refresh();
+    refreshingRef.current = false;
+    setRefreshing(false);
+    if (result.kind === "loaded") {
+      captureHere();
+      setDoc(result.doc);
+      setStale(null);
+      setLoadError(null);
+      setUpdatedAt(nowHM());
+    } else if (result.kind === "failed") {
+      setStale(result.message);
+    }
+  }, [captureHere, startScan, transport]);
+
+  // Closing the document returns the window to its start state; the file
+  // tree stays when a folder is open (PRD FR-07.5).
+  const closeDocument = useCallback(async () => {
+    const result = await transport.closeDocument();
+    if (!result.ok) {
+      setNotice(result.message);
+      return;
+    }
+    setDoc(null);
+    setStale(null);
+    setLoadError(null);
+    setSelected(null);
+    setUpdatedAt(null);
+    // A handled request must not read as pending once the document is gone.
+    setRequests([]);
+    setFindOpen(false);
+    setFindQuery("");
+    setFindIndex(0);
+    clearHighlights();
+  }, [transport]);
 
   const saveSettings = useCallback(async () => {
     setSettingsSaving(true);
@@ -405,6 +508,11 @@ export function App({ transport }: { transport: Transport }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === "F5") {
+        e.preventDefault();
+        void refresh();
+        return;
+      }
       if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key === ",") {
         e.preventDefault();
         setSettingsError(null);
@@ -438,7 +546,7 @@ export function App({ transport }: { transport: Transport }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [closeFind, findOpen, newWindow, openFile, openFolder]);
+  }, [closeFind, findOpen, newWindow, openFile, openFolder, refresh]);
 
   return (
     <div className="win">
@@ -447,7 +555,12 @@ export function App({ transport }: { transport: Transport }) {
         <ToolButton label="打开目录" icon={<FolderOpen />} labeled onClick={() => void openFolder()} />
         <ToolButton label="新建窗口" icon={<SquarePlus />} onClick={() => void newWindow()} />
         <span className="sep" aria-hidden="true" />
-        <ToolButton label="刷新" icon={<RefreshCw />} disabled />
+        <ToolButton
+          label="刷新"
+          icon={<RefreshCw />}
+          disabled={(!doc && !folder) || refreshing}
+          onClick={() => void refresh()}
+        />
         <ToolButton label="查找" icon={<Search />} onClick={() => setFindOpen(true)} />
         <span className="spacer" />
         <ToolButton
@@ -501,6 +614,18 @@ export function App({ transport }: { transport: Transport }) {
               onStep={stepFind}
               onClose={closeFind}
             />
+          )}
+          {doc && stale && (
+            <div className="stale-banner" role="alert">
+              <CircleAlert aria-hidden="true" />
+              <span className="txt">{stale}</span>
+              <button className="btn text" type="button" disabled={refreshing} onClick={() => void refresh()}>
+                重试
+              </button>
+              <button className="btn text" type="button" onClick={() => void closeDocument()}>
+                关闭当前文档
+              </button>
+            </div>
           )}
           {loadError ? (
             <LoadFailure error={loadError} onRetry={() => void openFile()} />
@@ -574,6 +699,11 @@ export function App({ transport }: { transport: Transport }) {
               {doc.name}
             </span>
             <span className="grow" />
+            {refreshing ? (
+              <span className="item">刷新中</span>
+            ) : updatedAt ? (
+              <span className="item">已更新 {updatedAt}</span>
+            ) : null}
             <span className="item">{formatBytes(doc.size)}</span>
             <span className="item">{doc.hasBom ? "UTF-8 BOM" : "UTF-8"}</span>
             <span className="item">{doc.lineEnding}</span>
@@ -737,6 +867,12 @@ function ReadyBadge({ state }: { state: ReadyState }) {
         </span>
       );
   }
+}
+
+/** nowHM is the status bar's "已更新 14:32" (DESIGN.md §8.8). */
+function nowHM(): string {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 /** scanNotice says which bound stopped the scan and what it left out. */

@@ -34,6 +34,20 @@ export interface Doc {
 }
 
 /**
+ * DocUpdate tells a window that its document changed outside the app
+ * (PRD FR-07). Failure means the old content stays and is marked stale.
+ */
+export interface DocUpdate {
+  doc?: Doc;
+  failure?: Failure;
+  /**
+   * Seq increases per refresh: the page drops anything older than what it
+   * already shows (PRD §9.2.5).
+   */
+  seq: number;
+}
+
+/**
  * Failure is an expected, user-facing failure. Detail never contains
  * document text or unauthorized paths.
  */
@@ -217,6 +231,13 @@ export const WindowService = {
     return call("WindowService.ClearRecent");
   },
   /**
+   * CloseDocument drops the window's document: the page returns to its start
+   * state and the watch ends. A folder stays open (PRD FR-07.5).
+   */
+  closeDocument(): Promise<void> {
+    return call("WindowService.CloseDocument");
+  },
+  /**
    * GetSettings hands the page the settings and the recent list. A damaged file
    * is reported rather than hidden (PRD FR-10.11).
    */
@@ -298,6 +319,13 @@ export const WindowService = {
     return call("WindowService.RecordFocus", id);
   },
   /**
+   * Refresh reads the window's document again, for F5 and the stale banner
+   * (PRD FR-07.2). A missing file comes back as a failure the page shows.
+   */
+  refresh(): Promise<LoadResult> {
+    return call("WindowService.Refresh");
+  },
+  /**
    * SaveSettings writes the settings the page edited. A failed write keeps the
    * previous settings (PRD FR-10.2).
    */
@@ -320,6 +348,8 @@ export const WindowService = {
 export const events = {
   /** themeChange tells every window that the appearance preference changed. */
   themeChange: event<ThemeChange>("theme-change"),
+  /** docUpdated tells one window its document changed outside the app. */
+  docUpdated: event<DocUpdate>("doc-updated"),
   /**
    * openRequest tells one window to open something after its page is ready.
    * Only the target window receives it (CLAUDE.md §5, decisions.md D-T01).
