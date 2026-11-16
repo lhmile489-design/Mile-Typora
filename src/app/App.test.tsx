@@ -35,12 +35,12 @@ describe("App shell", () => {
 
   it("keeps unwired toolbar commands visible but disabled", () => {
     render(<App transport={fakeTransport()} />);
-    for (const name of ["刷新", "查找", "设置"]) {
+    for (const name of ["刷新", "设置"]) {
       const b = screen.getByRole("button", { name });
       expect(b.getAttribute("aria-disabled")).toBe("true");
     }
     // Wired commands work, so they are not disabled.
-    for (const name of ["打开文件", "打开目录", "新建窗口", "左侧栏", "预留侧栏"]) {
+    for (const name of ["打开文件", "打开目录", "新建窗口", "查找", "左侧栏", "预留侧栏"]) {
       expect(screen.getByRole("button", { name }).getAttribute("aria-disabled")).toBeNull();
     }
   });
@@ -347,5 +347,45 @@ describe("links in a document", () => {
     fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
     fireEvent.click(await screen.findByText("附件"));
     expect(await screen.findByText(/暂不支持打开此类附件/)).toBeTruthy();
+  });
+});
+
+describe("in-document search", () => {
+  const doc = {
+    kind: "loaded" as const,
+    doc: {
+      ...loadedDoc.doc,
+      html: "<h1>标题</h1><p>正文里有标题两个字，还有标题。</p>",
+    },
+  };
+
+  it("opens with Ctrl+F and counts the matches", async () => {
+    render(<App transport={fakeTransport({ openFile: async () => doc })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = await screen.findByRole("textbox", { name: "在文中查找" });
+    fireEvent.change(input, { target: { value: "标题" } });
+    expect(await screen.findByText("1 / 3")).toBeTruthy();
+  });
+
+  it("says so when nothing matches", async () => {
+    render(<App transport={fakeTransport({ openFile: async () => doc })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    fireEvent.change(await screen.findByRole("textbox", { name: "在文中查找" }), {
+      target: { value: "找不到的词" },
+    });
+    expect(await screen.findByText("未找到匹配内容")).toBeTruthy();
+  });
+
+  it("closes with Escape and clears the bar", async () => {
+    render(<App transport={fakeTransport({ openFile: async () => doc })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("searchbox", { name: "在文中查找" })).toBeNull();
   });
 });

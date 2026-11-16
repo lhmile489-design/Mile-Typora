@@ -172,3 +172,39 @@ body {
 .ti.focus .ti-open-new { opacity: 1; }
 .ti .ti-open-new:hover { background: var(--bg-active); color: var(--text-strong); }
 .ti .ti-open-new svg { width: var(--icon-sm); height: var(--icon-sm); }
+
+/* 查找条（DESIGN.md §8.5）：浮在正文区右上角，宽 360、高 40 */
+.center { position: relative; }
+.find-bar {
+  position: absolute;
+  top: var(--sp-3);
+  right: var(--sp-4);
+  z-index: var(--z-popover);
+  display: flex; align-items: center; gap: var(--sp-1);
+  width: 360px; height: 40px;
+  padding: 0 var(--sp-1) 0 var(--sp-3);
+  background: var(--bg-raised);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1);
+}
+.find-bar input {
+  flex: 1; min-width: 0;
+  height: 100%;
+  border: 0; outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit; font-size: var(--ui-base);
+}
+.find-bar input::placeholder { color: var(--text-faint); }
+.find-count {
+  flex: none;
+  font-size: var(--ui-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.find-bar .tb { min-width: 28px; height: 28px; }
+.find-bar .tb svg { width: var(--icon-sm); height: var(--icon-sm); }
+
+/* 命中高亮：不改 DOM，只上色（PRD FR-05） */
+::highlight(find) { background-color: var(--mark); color: var(--text-strong); }
+::highlight(find-current) { background-color: var(--mark-current); color: var(--text-strong); }

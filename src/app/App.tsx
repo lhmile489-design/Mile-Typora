@@ -23,6 +23,9 @@ import type {
 } from "../lib/transport";
 import { failureMessage, formatBytes } from "../lib/errors";
 import { FileTree } from "../components/FileTree";
+import { FindBar } from "../components/FindBar";
+import { advance, clearHighlights, collectRanges, paint, scrollToRange } from "../render/find";
+import { capture, metricsOf, restore, type Position } from "../render/position";
 import { renderMath } from "../render/math";
 import { renderDiagrams } from "../render/mermaid";
 
@@ -50,7 +53,14 @@ export function App({ transport }: { transport: Transport }) {
   const [treeNotice, setTreeNotice] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findIndex, setFindIndex] = useState(0);
+  const [findCount, setFindCount] = useState(0);
   const scanRef = useRef<{ abort: () => void } | null>(null);
+  const readerRef = useRef<HTMLDivElement>(null);
+  const findRanges = useRef<Range[]>([]);
+  const positions = useRef(new Map<string, Position>());
   const [showLeft, setShowLeft] = useState(true);
   // The reserved pane starts collapsed: reading comes first, and the pane
   // has nothing in it yet (PRD D-06, decisions.md D-T23).
@@ -88,12 +98,20 @@ export function App({ transport }: { transport: Transport }) {
     [transport],
   );
 
+  // Where the reader is in this file, kept before another replaces it.
+  const rememberHere = useCallback(() => {
+    const scroller = readerRef.current;
+    if (!doc || !scroller) return;
+    positions.current.set(doc.path, capture(metricsOf(scroller)));
+  }, [doc]);
+
   // Everything that opens something ends here: a request, the tree, or a
   // dialog whose result a new window may take instead.
   const applyOutcome = useCallback(
     (result: RequestedOutcome) => {
       switch (result.kind) {
         case "file":
+          rememberHere();
           setDoc(result.doc);
           setLoadError(null);
           // The window now shows one file, not a folder.
@@ -113,7 +131,7 @@ export function App({ transport }: { transport: Transport }) {
           return;
       }
     },
-    [startScan],
+    [rememberHere, startScan],
   );
 
   // Opening what a request names: a double-clicked file, a command-line
@@ -226,8 +244,74 @@ export function App({ transport }: { transport: Transport }) {
     if (!r.ok) setNotice(r.message);
   }, [transport]);
 
+  // Search the rendered document without touching its DOM (PRD FR-05).
+  useEffect(() => {
+    if (!findOpen) {
+      clearHighlights();
+      findRanges.current = [];
+      setFindCount(0);
+      return;
+    }
+    const article = readerRef.current?.querySelector(".markdown");
+    if (!article) {
+      findRanges.current = [];
+      setFindCount(0);
+      return;
+    }
+    const ranges = collectRanges(article, findQuery);
+    findRanges.current = ranges;
+    setFindCount(ranges.length);
+    const current = Math.min(findIndex, Math.max(0, ranges.length - 1));
+    paint(ranges, current);
+    const active = ranges[current];
+    if (active) scrollToRange(active);
+  }, [findOpen, findQuery, doc?.html]);
+
+  // Put the reader back where it was in this file (PRD FR-07.3).
+  useEffect(() => {
+    const scroller = readerRef.current;
+    if (!doc || !scroller) return;
+    const saved = positions.current.get(doc.path);
+    if (saved) scroller.scrollTop = restore(metricsOf(scroller), saved);
+  }, [doc?.path, doc?.html]);
+
+  const stepFind = useCallback(
+    (backwards: boolean) => {
+      const ranges = findRanges.current;
+      if (ranges.length === 0) return;
+      const next = advance(findIndex, ranges.length, backwards);
+      setFindIndex(next);
+      paint(ranges, next);
+      const active = ranges[next];
+      if (active) scrollToRange(active);
+    },
+    [findIndex],
+  );
+
+  const closeFind = useCallback(() => {
+    setFindOpen(false);
+    setFindQuery("");
+    setFindIndex(0);
+    clearHighlights();
+  }, []);
+
+  const changeQuery = useCallback((query: string) => {
+    setFindQuery(query);
+    setFindIndex(0);
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "f" || e.key === "F")) {
+        e.preventDefault();
+        setFindOpen(true);
+        return;
+      }
+      if (e.key === "Escape" && findOpen) {
+        e.preventDefault();
+        closeFind();
+        return;
+      }
       if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "o" || e.key === "O")) {
         e.preventDefault();
         void openFile();
@@ -245,7 +329,7 @@ export function App({ transport }: { transport: Transport }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openFile, openFolder, newWindow]);
+  }, [closeFind, findOpen, newWindow, openFile, openFolder]);
 
   return (
     <div className="win">
@@ -255,7 +339,7 @@ export function App({ transport }: { transport: Transport }) {
         <ToolButton label="新建窗口" icon={<SquarePlus />} onClick={() => void newWindow()} />
         <span className="sep" aria-hidden="true" />
         <ToolButton label="刷新" icon={<RefreshCw />} disabled />
-        <ToolButton label="查找" icon={<Search />} disabled />
+        <ToolButton label="查找" icon={<Search />} onClick={() => setFindOpen(true)} />
         <span className="spacer" />
         <ToolButton
           label="左侧栏"
@@ -292,10 +376,20 @@ export function App({ transport }: { transport: Transport }) {
           </aside>
         )}
         <main className="center">
+          {findOpen && doc && (
+            <FindBar
+              query={findQuery}
+              count={findCount}
+              index={findIndex}
+              onChange={changeQuery}
+              onStep={stepFind}
+              onClose={closeFind}
+            />
+          )}
           {loadError ? (
             <LoadFailure error={loadError} onRetry={() => void openFile()} />
           ) : doc ? (
-            <Reader doc={doc} onLink={(href) => void handleLink(href)} />
+            <Reader doc={doc} scrollerRef={readerRef} onLink={(href) => void handleLink(href)} />
           ) : (
             <div className="start-wrap">
               <div className="start">
@@ -350,7 +444,15 @@ export function App({ transport }: { transport: Transport }) {
  * The reader shows the HTML Go rendered and cleaned (decisions.md D-T02):
  * whatever the document contains, only whitelisted markup arrives here.
  */
-function Reader({ doc, onLink }: { doc: OpenedDoc; onLink: (href: string) => void }) {
+function Reader({
+  doc,
+  onLink,
+  scrollerRef,
+}: {
+  doc: OpenedDoc;
+  onLink: (href: string) => void;
+  scrollerRef: React.RefObject<HTMLDivElement | null>;
+}) {
   const ref = useRef<HTMLElement>(null);
 
   // One pass per document: formulas and diagrams are the page's job (D-T02).
@@ -383,7 +485,7 @@ function Reader({ doc, onLink }: { doc: OpenedDoc; onLink: (href: string) => voi
     );
   }
   return (
-    <div className="reader">
+    <div className="reader" ref={scrollerRef}>
       <article ref={ref} className="markdown" dangerouslySetInnerHTML={{ __html: doc.html }} />
     </div>
   );
