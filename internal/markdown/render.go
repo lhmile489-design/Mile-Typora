@@ -67,6 +67,9 @@ type Renderer struct {
 	md     goldmark.Markdown
 	policy *bluemonday.Policy
 	counts Counts
+	// images resolves image references of the render in progress; it is set
+	// under mu, like counts.
+	images ImageResolver
 }
 
 // New returns a Renderer for CommonMark with GFM and formula delimiters.
@@ -84,8 +87,13 @@ func New() *Renderer {
 	return r
 }
 
-// Render returns sanitized HTML for src. A nil Failure means success.
-func (r *Renderer) Render(ctx context.Context, src []byte) (Result, *Failure) {
+// ImageResolver decides what a document's image reference may load. It
+// returns the URL to use, or the reason the image is not shown.
+type ImageResolver func(ref string) (url string, reason string)
+
+// Render returns sanitized HTML for src. A nil image resolver leaves image
+// sources as the document wrote them, which tests and future hosts may want.
+func (r *Renderer) Render(ctx context.Context, src []byte, images ImageResolver) (Result, *Failure) {
 	ctx, cancel := context.WithTimeout(ctx, Timeout)
 	defer cancel()
 
@@ -98,6 +106,7 @@ func (r *Renderer) Render(ctx context.Context, src []byte) (Result, *Failure) {
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		r.counts = Counts{}
+		r.images = images
 		defer func() {
 			if rec := recover(); rec != nil {
 				done <- outcome{err: fmt.Errorf("renderer panic: %v", rec)}
@@ -133,6 +142,7 @@ func (r *Renderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
 	reg.Register(ast.KindRawHTML, r.renderRawInline)
 	reg.Register(KindMathInline, r.renderMathInline)
 	reg.Register(ast.KindFencedCodeBlock, r.renderFence)
+	reg.Register(ast.KindImage, r.renderImage)
 }
 
 // rawHTMLRenderer behaviour: raw HTML is shown as text, never parsed
@@ -244,6 +254,39 @@ func (r *Renderer) renderFence(w util.BufWriter, source []byte, node ast.Node, e
 	_, _ = w.Write(util.EscapeHTML(lines))
 	_, _ = w.WriteString("</pre>\n")
 	return ast.WalkContinue, nil
+}
+
+// renderImage rewrites an image source to a resource URL, or leaves a note
+// where the image cannot be shown (PRD FR-06).
+func (r *Renderer) renderImage(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+	if !entering {
+		return ast.WalkContinue, nil
+	}
+	img, ok := node.(*ast.Image)
+	if !ok {
+		return ast.WalkContinue, nil
+	}
+	ref := string(img.Destination)
+	alt := string(img.Text(source))
+	if r.images != nil {
+		url, reason := r.images(ref)
+		if url == "" {
+			if reason == "" {
+				reason = "图片无法显示"
+			}
+			_, _ = fmt.Fprintf(w, `<div class="limited" data-kind="image" data-reason=%q>`, reason)
+			_, _ = w.Write(util.EscapeHTML([]byte(alt)))
+			_, _ = w.WriteString(`</div>`)
+			return ast.WalkSkipChildren, nil
+		}
+		ref = url
+	}
+	_, _ = w.WriteString(`<img src="`)
+	_, _ = w.Write(util.EscapeHTML([]byte(ref)))
+	_, _ = w.WriteString(`" alt="`)
+	_, _ = w.Write(util.EscapeHTML([]byte(alt)))
+	_, _ = w.WriteString(`">`)
+	return ast.WalkSkipChildren, nil
 }
 
 func isMermaid(language []byte) bool {

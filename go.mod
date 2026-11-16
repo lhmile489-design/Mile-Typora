@@ -13,5 +13,6 @@ require (
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/ebitengine/purego v0.11.1 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
-	golang.org/x/text v0.43.0 // indirect
+	golang.org/x/image v0.48.0 // indirect
+	golang.org/x/text v0.44.0 // indirect
 )

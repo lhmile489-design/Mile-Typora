@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/lhmile489-design/mile-typora/internal/markdown"
+	"github.com/lhmile489-design/mile-typora/internal/resource"
 	"github.com/lhmile489-design/mile-typora/internal/winctx"
 )
 
@@ -18,12 +19,13 @@ func newTestService(callerID int, registered bool) (*WindowService, *winctx.Regi
 		reg.Add(callerID)
 	}
 	return &WindowService{
-		caller:  func(context.Context) (int, bool) { return callerID, true },
-		version: func() string { return "0.1.0" },
-		windows: reg,
-		open:    func() (int, error) { return 99, nil },
-		pick:    func(context.Context) (string, error) { return "", nil },
-		render:  markdown.New(),
+		caller:    func(context.Context) (int, bool) { return callerID, true },
+		version:   func() string { return "0.1.0" },
+		windows:   reg,
+		open:      func() (int, error) { return 99, nil },
+		pick:      func(context.Context) (string, error) { return "", nil },
+		render:    markdown.New(),
+		resources: resource.New(),
 	}, reg
 }
 
@@ -137,7 +139,7 @@ func TestNewWindowRequiresCaller(t *testing.T) {
 
 func TestNewWindowServiceOutsideCall(t *testing.T) {
 	// A context that did not come from a page call has no window.
-	s := NewWindowService(winctx.NewRegistry(), func() (int, error) { return 1, nil }, nil)
+	s := NewWindowService(winctx.NewRegistry(), func() (int, error) { return 1, nil }, nil, resource.New())
 	if _, err := s.Ready(context.Background()); !errors.Is(err, ErrNoCallerWindow) {
 		t.Fatalf("Ready error = %v, want ErrNoCallerWindow", err)
 	}
@@ -223,5 +225,72 @@ func TestOpenFileDialogReportsMissingFile(t *testing.T) {
 	got, _ := s.OpenFileDialog(context.Background())
 	if got.Failure == nil || got.Failure.Code != "not_found" {
 		t.Fatalf("failure = %+v, want not_found", got.Failure)
+	}
+}
+
+func TestImageResolverScope(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "images")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	png := []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}
+	if err := os.WriteFile(filepath.Join(sub, "a.png"), png, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.svg"), []byte("<svg/>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "secret.png")
+	if err := os.WriteFile(outside, png, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, _ := newTestService(1, true)
+	resolve := s.imageResolver(1, dir)
+
+	if url, reason := resolve("images/a.png"); !strings.HasPrefix(url, "http://mtres.localhost/") || reason != "" {
+		t.Fatalf("inside image: %q %q, want a token URL", url, reason)
+	}
+	for ref, wantReason := range map[string]string{
+		"https://example.com/x.png":    "远程图片未加载",
+		"javascript:alert(1)":          "不支持此图片地址",
+		"b.svg":                        "不支持的图片格式",
+		"missing.png":                  "图片不存在",
+		"../" + filepath.Base(outside): "只能显示文档目录内的图片",
+		"images/../../x.png":           "只能显示文档目录内的图片",
+		"":                             "图片地址为空",
+	} {
+		url, reason := resolve(ref)
+		if url != "" || reason != wantReason {
+			t.Errorf("resolve(%q) = %q, %q; want %q", ref, url, reason, wantReason)
+		}
+	}
+}
+
+func TestOpenFileDialogServesImagesThroughTokens(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "图.png"), []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	docPath := filepath.Join(dir, "笔记.md")
+	if err := os.WriteFile(docPath, []byte("# 图\n\n![图](图.png)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := newTestService(1, true)
+	s.pick = func(context.Context) (string, error) { return docPath, nil }
+
+	got, err := s.OpenFileDialog(context.Background())
+	if err != nil {
+		t.Fatalf("OpenFileDialog: %v", err)
+	}
+	if got.Failure != nil || got.Doc == nil {
+		t.Fatalf("result = %+v, want a document", got)
+	}
+	if !strings.Contains(got.Doc.HTML, "http://mtres.localhost/") {
+		t.Fatalf("html = %s, want a token URL for the image", got.Doc.HTML)
+	}
+	if strings.Contains(got.Doc.HTML, "图.png\"") {
+		t.Fatalf("the raw image path reached the page: %s", got.Doc.HTML)
 	}
 }

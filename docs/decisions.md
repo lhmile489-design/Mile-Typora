@@ -162,3 +162,13 @@ M1 需验证：mermaid 12 的 `securityLevel: "strict"` 与 `%%{init}%%` 指令�
 
 - **图表 SVG 里的 `<img>` 一律去掉**：实测 mermaid 在 strict 模式下会保留标签里的 `<img src=x>`（只剥掉 `onerror`），那会让文档指向的地址被请求。DOMPurify 清理时 `FORBID_TAGS: ["img"]`，图表不需要图片。
 - **块级公式改用预处理**：goldmark 的块解析器把 `$$…$$` 之间的行吞成了节点子节点，拿不到原文；passthrough v0.6.0 的块级形式也从未产出块节点。现在在解析前把 `$$`/`\[` 块改写成 `mtmath` 围栏（围栏长度按内容里的反引号数量计算），由我们自己的围栏渲染器处理，代码围栏内的 `$$` 不受影响。
+
+### D-T20 · 本地图片只经 mtres 协议，按 token 取
+
+- 渲染时把相对图片路径解析成真实路径（词法先判范围，再 `EvalSymlinks` + 逐级查重解析点），登记到 `internal/resource` 的 token 表，页面只看到 `http://mtres.localhost/<128 位随机 token>`。文档无法凭路径直接取文件：没有 token 就没有访问。
+- 协议处理器不认识扩展名，只认文件头（PNG、JPEG、GIF、WebP 的魔数）；伪造成 `.png` 的 SVG 返回 415。大小 20 MiB、像素 2500 万，先 `Stat` 再读头、用 `image.DecodeConfig` 读尺寸而不解像素。
+- 不能显示的图片一律换成 `div.limited[data-kind=image][data-reason]`，保留 alt 文本，原因写明（远程、越界、不存在、格式、超限），不静默留空。
+- 远程图片在渲染阶段就不产出 `<img>`，页面根本不会发请求；CSP 的 `img-src` 也只放行 `'self'` 与 `http://mtres.localhost`。
+- 范围判定把词法检查放在文件系统之前：`../` 越界直接拒绝，不泄露外面文件是否存在。
+- 页面侧：`PageOptions.DevTools = DevToolsAuto`（`mygo build` 的产物里自动关闭，连同 WebView2 的 F5/Ctrl+F 等默认键）、`OnWillNavigate` 只放行应用自身来源（开发期另放行 `localhost:5273`）、`OnContextMenu` 置 `Menu = nil` 关掉右键菜单（否则会露出 Reload/Back）。
+- CSP 在生产构建注入（`vite-plugins/csp.ts`，`apply: "build"`）：`script-src 'self'`、`style-src 'self' 'unsafe-inline'`（KaTeX 与 Mermaid 需要内联样式）、`img-src 'self' http://mtres.localhost`，其余按 PRD 收紧。开发期不注入，Vite 自己要写内联脚本。

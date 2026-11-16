@@ -12,7 +12,7 @@ import (
 
 func render(t *testing.T, src string) string {
 	t.Helper()
-	res, failure := New().Render(context.Background(), []byte(src))
+	res, failure := New().Render(context.Background(), []byte(src), nil)
 	if failure != nil {
 		t.Fatalf("Render: %+v", failure)
 	}
@@ -157,7 +157,7 @@ func TestMaliciousSample(t *testing.T) {
 func TestRenderStopsWhenTheContextEnds(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, failure := New().Render(ctx, []byte("# 标题")); failure == nil || failure.Code != "render_timeout" {
+	if _, failure := New().Render(ctx, []byte("# 标题"), nil); failure == nil || failure.Code != "render_timeout" {
 		t.Fatalf("failure = %+v, want render_timeout", failure)
 	}
 }
@@ -183,7 +183,7 @@ func FuzzRender(f *testing.F) {
 
 	renderer := New()
 	f.Fuzz(func(t *testing.T, src []byte) {
-		res, failure := renderer.Render(context.Background(), src)
+		res, failure := renderer.Render(context.Background(), src, nil)
 		out := res.HTML
 		if failure != nil {
 			// A timeout or a refused render is an answer; what matters is that
@@ -196,7 +196,7 @@ func FuzzRender(f *testing.F) {
 
 func renderResult(t *testing.T, src string) Result {
 	t.Helper()
-	res, failure := New().Render(context.Background(), []byte(src))
+	res, failure := New().Render(context.Background(), []byte(src), nil)
 	if failure != nil {
 		t.Fatalf("Render: %+v", failure)
 	}
@@ -301,4 +301,34 @@ func mustRead(t *testing.T, path string) []byte {
 		t.Fatal(err)
 	}
 	return src
+}
+
+func TestImagesUseTheResolver(t *testing.T) {
+	src := "![图](images/a.png)\n\n![远](https://example.com/x.png)\n"
+	res, failure := New().Render(context.Background(), []byte(src), func(ref string) (string, string) {
+		if ref == "images/a.png" {
+			return "http://mtres.localhost/tok123", ""
+		}
+		return "", "远程图片未加载"
+	})
+	if failure != nil {
+		t.Fatalf("Render: %+v", failure)
+	}
+	if !strings.Contains(res.HTML, `<img src="http://mtres.localhost/tok123" alt="图">`) {
+		t.Fatalf("the local image was not rewritten\n%s", res.HTML)
+	}
+	if !strings.Contains(res.HTML, `data-kind="image" data-reason="远程图片未加载"`) {
+		t.Fatalf("the remote image is not marked\n%s", res.HTML)
+	}
+	if !strings.Contains(res.HTML, ">远</div>") {
+		t.Fatalf("the alt text of the blocked image is missing\n%s", res.HTML)
+	}
+	assertSafe(t, "images", res.HTML)
+}
+
+func TestImagesWithoutResolverKeepTheirSource(t *testing.T) {
+	res := renderResult(t, "![图](images/a.png)\n")
+	if !strings.Contains(res.HTML, `<img src="images/a.png" alt="图">`) {
+		t.Fatalf("output = %s, want the source untouched", res.HTML)
+	}
 }

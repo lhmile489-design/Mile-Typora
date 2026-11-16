@@ -4,7 +4,9 @@ package service
 import (
 	"context"
 	"errors"
+	"net/url"
 	"path/filepath"
+	"strings"
 
 	"github.com/egoist/mygo"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/lhmile489-design/mile-typora/internal/docread"
 	"github.com/lhmile489-design/mile-typora/internal/markdown"
 	"github.com/lhmile489-design/mile-typora/internal/pathguard"
+	"github.com/lhmile489-design/mile-typora/internal/resource"
 	"github.com/lhmile489-design/mile-typora/internal/winctx"
 )
 
@@ -34,16 +37,18 @@ type Picker func(ctx context.Context) (string, error)
 // WindowService manages the windows of the app.
 type WindowService struct {
 	// caller finds the calling window's ID; tests replace it.
-	caller  func(ctx context.Context) (int, bool)
-	version func() string
-	windows *winctx.Registry
-	open    Opener
-	pick    Picker
-	render  *markdown.Renderer
+	caller    func(ctx context.Context) (int, bool)
+	version   func() string
+	windows   *winctx.Registry
+	open      Opener
+	pick      Picker
+	render    *markdown.Renderer
+	resources *resource.Store
 }
 
-// NewWindowService returns a WindowService over the open windows.
-func NewWindowService(windows *winctx.Registry, open Opener, pick Picker) *WindowService {
+// NewWindowService returns a WindowService over the open windows. resources is
+// the store the mtres protocol serves from; main registers that handler.
+func NewWindowService(windows *winctx.Registry, open Opener, pick Picker, resources *resource.Store) *WindowService {
 	if pick == nil {
 		pick = PickMarkdown
 	}
@@ -55,12 +60,89 @@ func NewWindowService(windows *winctx.Registry, open Opener, pick Picker) *Windo
 			}
 			return w.ID(), true
 		},
-		version: mygo.App.Version,
-		windows: windows,
-		open:    open,
-		pick:    pick,
-		render:  markdown.New(),
+		version:   mygo.App.Version,
+		windows:   windows,
+		open:      open,
+		pick:      pick,
+		render:    markdown.New(),
+		resources: resources,
 	}
+}
+
+// imageResolver answers a document's image references: only files inside the
+// document's own directory, only the formats the app serves, each under a
+// fresh token (PRD FR-06).
+func (s *WindowService) imageResolver(window int, dir string) markdown.ImageResolver {
+	return func(ref string) (string, string) {
+		trimmed := strings.TrimSpace(ref)
+		if trimmed == "" {
+			return "", "图片地址为空"
+		}
+		lower := strings.ToLower(trimmed)
+		if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+			// No request leaves the app for document content (PRD §8.4).
+			return "", "远程图片未加载"
+		}
+		if hasScheme(trimmed) {
+			return "", "不支持此图片地址"
+		}
+		unescaped, err := url.PathUnescape(trimmed)
+		if err != nil {
+			return "", "图片地址无效"
+		}
+		if strings.HasPrefix(unescaped, "/") || strings.HasPrefix(unescaped, `\`) ||
+			filepath.IsAbs(unescaped) || filepath.VolumeName(unescaped) != "" {
+			return "", "只能显示文档目录内的图片"
+		}
+		target := filepath.Join(dir, filepath.FromSlash(unescaped))
+		// Lexically first: a reference that climbs out is refused before the
+		// file system is asked, so nothing about it leaks.
+		if ok, _ := pathguard.Within(dir, filepath.Clean(target)); !ok {
+			return "", "只能显示文档目录内的图片"
+		}
+		real, pathFailure := pathguard.Canon(target)
+		if pathFailure != nil {
+			if pathFailure.Code == "out_of_scope" {
+				return "", "此图片不在允许的范围内"
+			}
+			return "", "图片不存在"
+		}
+		if ok, _ := pathguard.Within(dir, real); !ok {
+			return "", "此图片不在文档目录内"
+		}
+		if componentFailure := pathguard.CheckComponents(dir, real); componentFailure != nil {
+			return "", componentFailure.Detail
+		}
+		if !imageExt(real) {
+			return "", "不支持的图片格式"
+		}
+		return resourceURL(s.resources.Add(window, real)), ""
+	}
+}
+
+// hasScheme reports whether ref names a scheme, as "javascript:alert(1)" does.
+func hasScheme(ref string) bool {
+	for i, c := range ref {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z':
+			continue
+		case c == ':' && i > 0:
+			return true
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+// imageExt accepts the extensions of the formats the store serves. The bytes
+// decide in the end; the extension only keeps obvious mistakes out early.
+func imageExt(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
+		return true
+	}
+	return false
 }
 
 // PickMarkdown asks the system for one Markdown file. Choosing it is the
@@ -119,7 +201,8 @@ func (s *WindowService) OpenFileDialog(ctx context.Context) (contract.LoadResult
 			Limit:  readFailure.Limit,
 		}}, nil
 	}
-	rendered, renderFailure := s.render.Render(ctx, []byte(doc.Text))
+	s.resources.ForgetWindow(w.ID())
+	rendered, renderFailure := s.render.Render(ctx, []byte(doc.Text), s.imageResolver(w.ID(), filepath.Dir(real)))
 	if renderFailure != nil {
 		return contract.LoadResult{Failure: &contract.Failure{
 			Code: renderFailure.Code, Detail: renderFailure.Detail,
@@ -215,4 +298,10 @@ func (s *WindowService) NewWindow(ctx context.Context) (contract.NewWindowResult
 		}}, nil
 	}
 	return contract.NewWindowResult{WindowID: id}, nil
+}
+
+// resourceURL is where the page fetches a registered resource. WebView2
+// answers a custom scheme at <scheme>.localhost (decisions.md D-T01).
+func resourceURL(token string) string {
+	return "http://" + resource.Scheme + ".localhost/" + token
 }

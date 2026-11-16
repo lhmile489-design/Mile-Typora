@@ -3,11 +3,13 @@ package main
 import (
 	"errors"
 	"log"
+	"net/url"
 	"os"
 
 	"github.com/egoist/mygo"
 
 	"github.com/lhmile489-design/mile-typora/internal/contract"
+	"github.com/lhmile489-design/mile-typora/internal/resource"
 	"github.com/lhmile489-design/mile-typora/internal/service"
 	"github.com/lhmile489-design/mile-typora/internal/winctx"
 )
@@ -34,7 +36,13 @@ func main() {
 	// appearance. M3-3 reads the saved preference instead.
 	mygo.Theme.SetSource(mygo.ThemeSystem)
 
-	mygo.Bind(service.NewWindowService(windows, openWindow, service.PickMarkdown))
+	// Images load through the app's own protocol, registered before any
+	// window exists (decisions.md D-T01). Only registered files are served.
+	resources := resource.New()
+	if err := mygo.Protocol.HandleFunc(resource.Scheme, resources.ServeHTTP); err != nil {
+		log.Fatal(err)
+	}
+	mygo.Bind(service.NewWindowService(windows, openWindow, service.PickMarkdown, resources))
 
 	mygo.App.WhenReady(func() {
 		// The window opened for this launch: its page loads next, so these
@@ -67,6 +75,11 @@ func newWindow() *mygo.Window {
 		// --bg-app of the light and dark themes (DESIGN.md §1).
 		BackgroundColor: "light-dark(#FFFFFF, #1C1D20)",
 		URL:             "/",
+		Page: mygo.PageOptions{
+			// The inspector is off in builds, and with it the web view's
+			// browser keys (decisions.md D-T01).
+			DevTools: mygo.DevToolsAuto,
+		},
 	})
 	id := w.ID()
 	ctx := windows.Add(id)
@@ -74,11 +87,44 @@ func newWindow() *mygo.Window {
 	ctx.SetNotify(func(it winctx.Intent) error {
 		return openRequest.Emit(w, contract.OpenRequest{Seq: it.Seq, Path: it.Path})
 	})
+	page := w.Page()
+	// The page stays on the app's own content; a link never replaces it
+	// (CLAUDE.md §5.9). M2-4 hands external links to the system browser.
+	page.OnWillNavigate(func(e *mygo.NavigateEvent) {
+		if !isAppURL(e.URL) {
+			e.PreventDefault()
+		}
+	})
+	// P0 has no context menu of its own, and the web view's offers
+	// Reload and Back, which would reload the document on a right-click.
+	page.OnContextMenu(func(e *mygo.ContextMenuEvent) {
+		e.Menu = nil
+	})
 	// Closing the window cancels its context, so work started for it stops.
 	w.OnClosed(func() {
 		windows.Remove(id)
 	})
 	return w
+}
+
+// isAppURL reports whether the page may navigate to raw: the app's own
+// content, and the development server while developing.
+func isAppURL(raw string) bool {
+	if raw == "" || raw == "about:blank" {
+		return true
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	host := u.Hostname()
+	if host == "mygo.localhost" {
+		return true
+	}
+	return os.Getenv("MYGO_DEV") == "1" && (host == "localhost" || host == "127.0.0.1") && u.Port() == "5273"
 }
 
 // routeOpenRequests hands a second instance's command line to the window the
