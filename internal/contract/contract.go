@@ -77,10 +77,10 @@ type TreeEntry struct {
 type ScanFrame struct {
 	Entries   []TreeEntry `json:"entries"`
 	Done      bool        `json:"done"`
-	Truncated bool     `json:"truncated,omitempty"`
-	Bound     string   `json:"bound,omitempty"`
-	Skipped   int      `json:"skipped,omitempty"`
-	Failure   *Failure `json:"failure,omitempty"`
+	Truncated bool        `json:"truncated,omitempty"`
+	Bound     string      `json:"bound,omitempty"`
+	Skipped   int         `json:"skipped,omitempty"`
+	Failure   *Failure    `json:"failure,omitempty"`
 }
 
 // OpenFolderResult answers the folder dialog. Root is empty when cancelled.
@@ -95,4 +95,20 @@ type OpenFolderResult struct {
 type NewWindowResult struct {
 	WindowID int      `json:"windowId"`
 	Failure  *Failure `json:"failure,omitempty"`
+}
+
+// FolderInfo is a folder a request opened.
+type FolderInfo struct {
+	Root string `json:"root"`
+	Name string `json:"name"`
+}
+
+// OpenRequestResult answers an open request. Kind says what opened: "file"
+// carries Doc, "folder" carries Folder. Kind is empty when the request went to
+// a new window, which opens it there.
+type OpenRequestResult struct {
+	Kind    string      `json:"kind"`
+	Doc     *Doc        `json:"doc,omitempty"`
+	Folder  *FolderInfo `json:"folder,omitempty"`
+	Failure *Failure    `json:"failure,omitempty"`
 }

@@ -39,6 +39,14 @@ func (w *Window) SetRoot(root string) {
 	w.stateMu.Unlock()
 }
 
+// IsEmpty reports whether the window shows nothing yet: no document and no
+// folder. PRD FR-02 reuses an empty window instead of opening another.
+func (w *Window) IsEmpty() bool {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	return w.openFile == "" && w.root == ""
+}
+
 // Root is the folder the window browses, if any.
 func (w *Window) Root() (string, bool) {
 	w.stateMu.Lock()

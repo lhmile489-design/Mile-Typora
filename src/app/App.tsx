@@ -12,7 +12,15 @@ import {
   Settings,
   SquarePlus,
 } from "lucide-react";
-import type { OpenedDoc, OpenRequest, ReadyInfo, ScanFrame, Transport, TreeEntry } from "../lib/transport";
+import type {
+  OpenedDoc,
+  OpenRequest,
+  ReadyInfo,
+  RequestedOutcome,
+  ScanFrame,
+  Transport,
+  TreeEntry,
+} from "../lib/transport";
 import { failureMessage, formatBytes } from "../lib/errors";
 import { FileTree } from "../components/FileTree";
 import { renderMath } from "../render/math";
@@ -48,24 +56,82 @@ export function App({ transport }: { transport: Transport }) {
   // has nothing in it yet (PRD D-06, decisions.md D-T23).
   const [showRight, setShowRight] = useState(false);
 
+  // Start reading a folder: the tree streams in while the page draws.
+  const startScan = useCallback(
+    (root: string, name: string) => {
+      scanRef.current?.abort();
+      setFolder({ root, name });
+      setDoc(null);
+      setLoadError(null);
+      setSelected(null);
+      setTree([]);
+      setTreeNotice(null);
+      setScanning(true);
+
+      const rows: TreeEntry[] = [];
+      scanRef.current = transport.scan((frame: ScanFrame) => {
+        if (frame.failure) {
+          setScanning(false);
+          setTreeNotice(failureMessage(frame.failure.code, frame.failure.detail));
+          return;
+        }
+        if (frame.entries.length > 0) {
+          rows.push(...frame.entries);
+          setTree([...rows]);
+        }
+        if (frame.done) {
+          setScanning(false);
+          setTreeNotice(frame.truncated ? scanNotice(frame) : null);
+        }
+      });
+    },
+    [transport],
+  );
+
+  // Everything that opens something ends here: a request, the tree, or a
+  // dialog whose result a new window may take instead.
+  const applyOutcome = useCallback(
+    (result: RequestedOutcome) => {
+      switch (result.kind) {
+        case "file":
+          setDoc(result.doc);
+          setLoadError(null);
+          // The window now shows one file, not a folder.
+          scanRef.current?.abort();
+          setFolder(null);
+          setTree([]);
+          setSelected(null);
+          return;
+        case "folder":
+          startScan(result.root, result.name);
+          return;
+        case "failed":
+          setLoadError({ code: result.code, message: result.message });
+          return;
+        case "handedOff":
+          // A new window opens it; this one keeps what it shows.
+          return;
+      }
+    },
+    [startScan],
+  );
+
   // Opening what a request names: a double-clicked file, a command-line
   // argument, or another instance's request (PRD FR-02.8, docs/踩坑记录.md).
   const openRequested = useCallback(
     async (seq: number) => {
-      const result = await transport.openRequested(seq);
-      if (result.kind === "loaded") {
-        setDoc(result.doc);
-        setLoadError(null);
-        // The window is now a single-file one.
-        scanRef.current?.abort();
-        setFolder(null);
-        setTree([]);
-        setSelected(null);
-      } else if (result.kind === "failed") {
-        setLoadError({ code: result.code, message: result.message });
-      }
+      applyOutcome(await transport.openRequested(seq));
     },
-    [transport],
+    [applyOutcome, transport],
+  );
+
+  // A click in the tree opens the file here; its arrow opens it elsewhere.
+  const openTreeFile = useCallback(
+    async (entry: TreeEntry, newWindow: boolean) => {
+      setSelected(entry.path);
+      applyOutcome(await transport.openTreeFile(entry.path, newWindow));
+    },
+    [applyOutcome, transport],
   );
 
   // Requests live in the Go-side queue until acknowledged, so subscribing
@@ -121,33 +187,8 @@ export function App({ transport }: { transport: Transport }) {
       return;
     }
     if (result.kind !== "opened") return;
-
-    scanRef.current?.abort();
-    setFolder({ root: result.root, name: result.name });
-    setDoc(null);
-    setLoadError(null);
-    setSelected(null);
-    setTree([]);
-    setTreeNotice(null);
-    setScanning(true);
-
-    const rows: TreeEntry[] = [];
-    scanRef.current = transport.scan((frame: ScanFrame) => {
-      if (frame.failure) {
-        setScanning(false);
-        setTreeNotice(failureMessage(frame.failure.code, frame.failure.detail));
-        return;
-      }
-      if (frame.entries.length > 0) {
-        rows.push(...frame.entries);
-        setTree([...rows]);
-      }
-      if (frame.done) {
-        setScanning(false);
-        setTreeNotice(frame.truncated ? scanNotice(frame) : null);
-      }
-    });
-  }, [transport]);
+    startScan(result.root, result.name);
+  }, [startScan, transport]);
 
   useEffect(() => () => scanRef.current?.abort(), []);
 
@@ -211,7 +252,8 @@ export function App({ transport }: { transport: Transport }) {
                 rootName={folder.name}
                 entries={tree}
                 selected={selected}
-                onSelect={(entry) => setSelected(entry.path)}
+                onOpen={(entry) => void openTreeFile(entry, false)}
+                onOpenInNewWindow={(entry) => void openTreeFile(entry, true)}
                 busy={scanning}
                 notice={treeNotice}
               />

@@ -160,3 +160,15 @@ body {
 .ti.sel { background: var(--bg-selected); color: var(--accent); font-weight: 600; }
 .ti.sel .ico { color: var(--accent); }
 .ti.focus { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.ti .ti-open-new {
+  margin-left: auto; width: 20px; height: 20px;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0; border: 0; border-radius: var(--r-sm);
+  background: transparent; color: var(--text-muted);
+  opacity: 0; cursor: pointer;
+  transition: opacity var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
+}
+.ti:hover .ti-open-new,
+.ti.focus .ti-open-new { opacity: 1; }
+.ti .ti-open-new:hover { background: var(--bg-active); color: var(--text-strong); }
+.ti .ti-open-new svg { width: var(--icon-sm); height: var(--icon-sm); }

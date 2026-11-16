@@ -14,7 +14,8 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     ack: async () => {},
     openFile: async () => ({ kind: "cancelled" }),
     openFolder: async () => ({ kind: "cancelled" }),
-    openRequested: async () => ({ kind: "cancelled" }),
+    openRequested: async () => ({ kind: "handedOff" }),
+    openTreeFile: async () => ({ kind: "handedOff" }),
     scan: () => ({ abort: () => {}, done: Promise.resolve() }),
     ...overrides,
   };
@@ -84,7 +85,7 @@ describe("App shell", () => {
 
   it("takes the requests queued before the handshake and opens them", async () => {
     const pending = async () => ({ ok: true as const, value: [{ seq: 2, path: "b.md" }] });
-    const openRequested = vi.fn(async () => ({ kind: "cancelled" as const }));
+    const openRequested = vi.fn(async () => ({ kind: "handedOff" as const }));
     render(<App transport={fakeTransport({ pending, openRequested })} />);
     expect(await screen.findByText(/待打开：b\.md/)).toBeTruthy();
     // Go acknowledges the request once the page asked for it to be opened.
@@ -234,7 +235,7 @@ describe("opening a folder", () => {
 describe("opening a file a request names", () => {
   it("opens the requested file as soon as the request arrives", async () => {
     const pending = async () => ({ ok: true as const, value: [{ seq: 4, path: "E:\notes\a.md" }] });
-    const openRequested = vi.fn(async () => loadedDoc);
+    const openRequested = vi.fn(async () => ({ kind: "file" as const, doc: loadedDoc.doc }));
     render(<App transport={fakeTransport({ pending, openRequested })} />);
     expect(await screen.findByRole("heading", { name: "标题" })).toBeTruthy();
     expect(openRequested).toHaveBeenCalledWith(4);
@@ -251,5 +252,52 @@ describe("opening a file a request names", () => {
     render(<App transport={fakeTransport({ pending, openRequested })} />);
     expect(await screen.findByText("无法打开文件")).toBeTruthy();
     expect(screen.getByText(/文件不存在或已被移动/)).toBeTruthy();
+  });
+});
+
+describe("the window matrix", () => {
+  const entries = [
+    { path: "sub", name: "sub", isDir: true },
+    { path: "sub/b.md", name: "b.md", isDir: false },
+    { path: "a.md", name: "a.md", isDir: false },
+  ];
+
+  function withTree(overrides: Parameters<typeof fakeTransport>[0] = {}) {
+    return fakeTransport({
+      openFolder: async () => ({ kind: "opened", root: "E:\notes", name: "notes" }),
+      scan: (onFrame) => {
+        queueMicrotask(() => {
+          onFrame({ entries, done: false } as never);
+          onFrame({ entries: [], done: true, truncated: false } as never);
+        });
+        return { abort: () => {}, done: Promise.resolve() };
+      },
+      ...overrides,
+    });
+  }
+
+  it("opens a tree file in this window", async () => {
+    const openTreeFile = vi.fn(async () => ({ kind: "handedOff" as const }));
+    render(<App transport={withTree({ openTreeFile })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
+    fireEvent.mouseDown(await screen.findByText("a.md"));
+    expect(openTreeFile).toHaveBeenCalledWith("a.md", false);
+  });
+
+  it("opens a tree file in a new window from its button", async () => {
+    const openTreeFile = vi.fn(async () => ({ kind: "handedOff" as const }));
+    render(<App transport={withTree({ openTreeFile })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
+    fireEvent.mouseDown(await screen.findByRole("button", { name: "在新窗口打开 a.md" }));
+    expect(openTreeFile).toHaveBeenCalledWith("a.md", true);
+  });
+
+  it("starts browsing when a request names a folder", async () => {
+    const pending = async () => ({ ok: true as const, value: [{ seq: 3, path: "E:\notes" }] });
+    const openRequested = vi.fn(async () => ({ kind: "folder" as const, root: "E:\notes", name: "notes" }));
+    const scan = vi.fn(() => ({ abort: () => {}, done: Promise.resolve() }));
+    render(<App transport={fakeTransport({ pending, openRequested, scan })} />);
+    expect(await screen.findByRole("tree", { name: "文件树" })).toBeTruthy();
+    expect(scan).toHaveBeenCalled();
   });
 });

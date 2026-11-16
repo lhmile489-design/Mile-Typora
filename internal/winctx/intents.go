@@ -13,13 +13,21 @@ var ErrQueueFull = errors.New("open request queue is full")
 // MaxIntents is how many unacknowledged requests one window may hold.
 const MaxIntents = 32
 
-// Intent is one request to open something. Path is a command-line argument
-// now; from M1-3 it is a file or folder the page asks for.
+// Kinds of open request.
+const (
+	KindFile   = "file"
+	KindFolder = "folder"
+)
+
+// Intent is one request to open something: a file association, a command-line
+// argument, or a file or folder the page asked to open here.
 type Intent struct {
 	// Seq orders requests within a window. The page drops anything it has
 	// already handled, whatever order the transports deliver them in.
 	Seq  int64
 	Path string
+	// Kind is KindFile or KindFolder.
+	Kind string
 }
 
 // intentQueue is the source of truth for a window's open requests. A request
@@ -45,10 +53,18 @@ func (w *Window) SetNotify(fn func(Intent) error) {
 // Push adds an open request and, once the page is ready, tells it to look.
 // The request stays until acknowledged, so a failed delivery is not a loss.
 func (w *Window) Push(path string) (Intent, error) {
+	return w.PushKind(KindFile, path)
+}
+
+// PushKind adds an open request of a kind: a file, or a folder to browse.
+func (w *Window) PushKind(kind, path string) (Intent, error) {
 	w.q.mu.Lock()
 	defer w.q.mu.Unlock()
 	w.q.nextSeq++
-	it := Intent{Seq: w.q.nextSeq, Path: path}
+	if kind == "" {
+		kind = KindFile
+	}
+	it := Intent{Seq: w.q.nextSeq, Path: path, Kind: kind}
 	if len(w.q.items) >= MaxIntents {
 		return Intent{}, ErrQueueFull
 	}

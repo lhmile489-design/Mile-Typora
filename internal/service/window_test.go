@@ -443,3 +443,155 @@ func TestOpenRequestedReportsAMissingFile(t *testing.T) {
 		t.Fatal("a failed request was not acknowledged")
 	}
 }
+
+// registerOpener makes the service's opener create a window in the registry,
+// as main does.
+func registerOpener(s *WindowService, reg *winctx.Registry) *int {
+	opened := 0
+	s.open = func() (int, error) {
+		opened++
+		id := 100 + opened
+		reg.Add(id)
+		return id, nil
+	}
+	return &opened
+}
+
+func TestBlankWindowOpensInPlace(t *testing.T) {
+	dir := t.TempDir()
+	path := writeSample(t, dir, "a.md", []byte("# a\n"))
+	s, reg := newTestService(1, true)
+	opened := registerOpener(s, reg)
+	s.pick = func(context.Context) (string, error) { return path, nil }
+
+	got, err := s.OpenFileDialog(context.Background())
+	if err != nil || got.Doc == nil {
+		t.Fatalf("result = %+v, err = %v; want the document here", got, err)
+	}
+	if *opened != 0 {
+		t.Fatalf("opened %d windows, want none for a blank window", *opened)
+	}
+}
+
+func TestWindowShowingSomethingOpensAFileInANewWindow(t *testing.T) {
+	dir := t.TempDir()
+	path := writeSample(t, dir, "b.md", []byte("# b\n"))
+	s, reg := newTestService(1, true)
+	opened := registerOpener(s, reg)
+	w, _ := reg.Get(1)
+	w.SetOpenFile(filepath.Join(dir, "a.md")) // the window already shows a file
+	s.pick = func(context.Context) (string, error) { return path, nil }
+
+	got, err := s.OpenFileDialog(context.Background())
+	if err != nil {
+		t.Fatalf("OpenFileDialog: %v", err)
+	}
+	if got.Doc != nil {
+		t.Fatalf("result = %+v, want nothing opened in this window", got)
+	}
+	if *opened != 1 {
+		t.Fatalf("opened %d windows, want 1", *opened)
+	}
+	other, ok := reg.Get(101)
+	if !ok {
+		t.Fatal("the new window is not registered")
+	}
+	if other.Pending() != 1 {
+		t.Fatalf("the new window holds %d requests, want the file", other.Pending())
+	}
+	request, _ := other.PendingSince(0)[0].Path, true
+	if request != path {
+		t.Fatalf("request path = %q, want %q", request, path)
+	}
+}
+
+func TestWindowShowingSomethingOpensAFolderInANewWindow(t *testing.T) {
+	folder := t.TempDir()
+	s, reg := newTestService(1, true)
+	opened := registerOpener(s, reg)
+	w, _ := reg.Get(1)
+	w.SetRoot(t.TempDir())
+	s.pickDir = func(context.Context) (string, error) { return folder, nil }
+
+	got, err := s.OpenFolderDialog(context.Background())
+	if err != nil {
+		t.Fatalf("OpenFolderDialog: %v", err)
+	}
+	if got.Root != "" {
+		t.Fatalf("result = %+v, want the folder handed to a new window", got)
+	}
+	if *opened != 1 {
+		t.Fatalf("opened %d windows, want 1", *opened)
+	}
+	other, _ := reg.Get(101)
+	requests := other.PendingSince(0)
+	if len(requests) != 1 || requests[0].Kind != winctx.KindFolder {
+		t.Fatalf("requests = %+v, want one folder request", requests)
+	}
+}
+
+func TestOpenRequestedOpensAFolder(t *testing.T) {
+	folder := t.TempDir()
+	s, reg := newTestService(1, true)
+	w, _ := reg.Get(1)
+	request, _ := w.PushKind(winctx.KindFolder, folder)
+
+	got, err := s.OpenRequested(context.Background(), request.Seq)
+	if err != nil {
+		t.Fatalf("OpenRequested: %v", err)
+	}
+	if got.Kind != "folder" || got.Folder == nil || got.Folder.Root == "" {
+		t.Fatalf("result = %+v, want the folder", got)
+	}
+	if root, ok := w.Root(); !ok || root == "" {
+		t.Fatal("the window root was not set")
+	}
+}
+
+func TestOpenTreeFileStaysInTheFolder(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := writeSample(t, filepath.Join(root, "sub"), "c.md", []byte("# c\n"))
+	s, reg := newTestService(1, true)
+	w, _ := reg.Get(1)
+	w.SetRoot(root)
+
+	got, err := s.OpenTreeFile(context.Background(), "sub/c.md", false)
+	if err != nil {
+		t.Fatalf("OpenTreeFile: %v", err)
+	}
+	if got.Doc == nil || got.Doc.Path != path {
+		t.Fatalf("result = %+v, want the document", got)
+	}
+
+	outside := filepath.Join("..", filepath.Base(root), "..", "x.md")
+	if got, _ := s.OpenTreeFile(context.Background(), outside, false); got.Failure == nil || got.Failure.Code != "out_of_scope" {
+		t.Fatalf("result = %+v, want out_of_scope", got)
+	}
+}
+
+func TestOpenTreeFileInANewWindow(t *testing.T) {
+	root := t.TempDir()
+	writeSample(t, root, "d.md", []byte("# d\n"))
+	s, reg := newTestService(1, true)
+	opened := registerOpener(s, reg)
+	w, _ := reg.Get(1)
+	w.SetRoot(root)
+
+	got, err := s.OpenTreeFile(context.Background(), "d.md", true)
+	if err != nil {
+		t.Fatalf("OpenTreeFile: %v", err)
+	}
+	if got.Doc != nil || got.Kind != "" {
+		t.Fatalf("result = %+v, want the file handed to a new window", got)
+	}
+	if *opened != 1 {
+		t.Fatalf("opened %d windows, want 1", *opened)
+	}
+	// The original window keeps its folder.
+	if r, ok := w.Root(); !ok || r != root {
+		t.Fatalf("root = %q, %v; want %q kept", r, ok, root)
+	}
+}

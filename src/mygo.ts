@@ -44,6 +44,12 @@ export interface Failure {
   limit?: number;
 }
 
+/** FolderInfo is a folder a request opened. */
+export interface FolderInfo {
+  root: string;
+  name: string;
+}
+
 /**
  * LoadResult answers an open request. Doc is nil when Failure is set or when
  * the user cancelled the dialog, which both fields nil also mark.
@@ -77,6 +83,18 @@ export interface OpenFolderResult {
 export interface OpenRequest {
   seq: number;
   path?: string;
+}
+
+/**
+ * OpenRequestResult answers an open request. Kind says what opened: "file"
+ * carries Doc, "folder" carries Folder. Kind is empty when the request went to
+ * a new window, which opens it there.
+ */
+export interface OpenRequestResult {
+  kind: string;
+  doc?: Doc;
+  folder?: FolderInfo;
+  failure?: Failure;
 }
 
 /**
@@ -151,8 +169,15 @@ export const WindowService = {
    * command-line argument, or another instance's request (PRD FR-02.8). The
    * request is acknowledged once handled, whether it opened or not.
    */
-  openRequested(seq: number): Promise<LoadResult> {
+  openRequested(seq: number): Promise<OpenRequestResult> {
     return call("WindowService.OpenRequested", seq);
+  },
+  /**
+   * OpenTreeFile opens a file the tree names, relative to the window's folder,
+   * in this window or a new one (PRD FR-02, AC-06).
+   */
+  openTreeFile(rel: string, newWindow: boolean): Promise<OpenRequestResult> {
+    return call("WindowService.OpenTreeFile", rel, newWindow);
   },
   /**
    * Pending returns the open requests after seq that the page has not

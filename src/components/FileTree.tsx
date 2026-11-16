@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ChevronRight, FileText, Folder } from "lucide-react";
+import { ChevronRight, FileText, Folder, SquarePlus } from "lucide-react";
 import type { TreeEntry } from "../lib/transport";
 
 type Props = {
@@ -8,9 +8,12 @@ type Props = {
   rootName: string;
   /** Rows in tree order, as the scan streams them. */
   entries: TreeEntry[];
-  /** Absolute path of the selected file, or null. */
+  /** Path of the selected file, or null. */
   selected: string | null;
-  onSelect: (entry: TreeEntry) => void;
+  /** Opens a file in this window. */
+  onOpen: (entry: TreeEntry) => void;
+  /** Opens a file in a window of its own (PRD FR-02.4). */
+  onOpenInNewWindow: (entry: TreeEntry) => void;
   /** A message about the scan itself (partial results, a bound), if any. */
   notice?: string | null;
   /** True while rows are still arriving. */
@@ -45,7 +48,7 @@ export function depthOf(path: string): number {
  * The folder tree (DESIGN.md §8.2): 28 px rows, folders first, a virtual list
  * so ten thousand files stay smooth, and the arrow keys from PRD FR-09.
  */
-export function FileTree({ rootName, entries, selected, onSelect, notice, busy }: Props) {
+export function FileTree({ rootName, entries, selected, onOpen, onOpenInNewWindow, notice, busy }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [focusIndex, setFocusIndex] = useState(0);
   const rows = useMemo(() => visibleRows(entries, collapsed), [entries, collapsed]);
@@ -115,7 +118,7 @@ export function FileTree({ rootName, entries, selected, onSelect, notice, busy }
       case "Enter":
       case " ":
         e.preventDefault();
-        if (row) onSelect(row);
+        if (row && !row.isDir) onOpen(row);
         return;
     }
   };
@@ -167,7 +170,7 @@ export function FileTree({ rootName, entries, selected, onSelect, notice, busy }
                 onMouseDown={() => {
                   setFocusIndex(item.index);
                   if (row.isDir) toggle(row.path);
-                  else onSelect(row);
+                  else onOpen(row);
                 }}
               >
                 {row.isDir ? (
@@ -187,6 +190,20 @@ export function FileTree({ rootName, entries, selected, onSelect, notice, busy }
                 <span className="nm" title={row.path}>
                   {row.name}
                 </span>
+                {!row.isDir && (
+                  <button
+                    className="ti-open-new"
+                    type="button"
+                    aria-label={`在新窗口打开 ${row.name}`}
+                    title="在新窗口打开"
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      onOpenInNewWindow(row);
+                    }}
+                  >
+                    <SquarePlus strokeWidth={1.75} aria-hidden="true" />
+                  </button>
+                )}
               </div>
             );
           })}

@@ -235,6 +235,16 @@ func (s *WindowService) OpenFolderDialog(ctx context.Context) (contract.OpenFold
 			Detail: "请选择一个文件夹",
 		}}, nil
 	}
+	// A window that already shows something keeps it (PRD FR-02, D-03).
+	if !w.IsEmpty() {
+		if err := s.handOff(winctx.KindFolder, real); err != nil {
+			return contract.OpenFolderResult{Failure: &contract.Failure{
+				Code:   "window_failed",
+				Detail: "无法在新窗口打开，请关闭其他窗口后重试",
+			}}, nil
+		}
+		return contract.OpenFolderResult{}, nil
+	}
 	w.SetRoot(real)
 	return contract.OpenFolderResult{Root: real, Name: filepath.Base(real)}, nil
 }
@@ -316,34 +326,147 @@ func (s *WindowService) OpenFileDialog(ctx context.Context) (contract.LoadResult
 	if chosen == "" {
 		return contract.LoadResult{}, nil
 	}
-
+	// A window that already shows something keeps it: the file opens in a
+	// new window (PRD FR-02, D-03).
+	if !w.IsEmpty() {
+		if err := s.handOff(winctx.KindFile, chosen); err != nil {
+			return contract.LoadResult{Failure: &contract.Failure{
+				Code:   "window_failed",
+				Detail: "无法在新窗口打开，请关闭其他窗口后重试",
+			}}, nil
+		}
+		return contract.LoadResult{}, nil
+	}
 	return s.openPath(ctx, w, chosen)
+}
+
+// OpenTreeFile opens a file the tree names, relative to the window's folder,
+// in this window or a new one (PRD FR-02, AC-06).
+func (s *WindowService) OpenTreeFile(ctx context.Context, rel string, newWindow bool) (contract.OpenRequestResult, error) {
+	w, err := s.callerWindow(ctx)
+	if err != nil {
+		return contract.OpenRequestResult{}, err
+	}
+	root, ok := w.Root()
+	if !ok {
+		return contract.OpenRequestResult{Failure: &contract.Failure{
+			Code:   "no_folder",
+			Detail: "尚未打开文件夹",
+		}}, nil
+	}
+	if rel == "" {
+		return contract.OpenRequestResult{Failure: &contract.Failure{
+			Code:   "not_found",
+			Detail: "没有选择文件",
+		}}, nil
+	}
+	target := filepath.Join(root, filepath.FromSlash(rel))
+	if within, pathFailure := pathguard.Within(root, filepath.Clean(target)); !within {
+		return contract.OpenRequestResult{Failure: &contract.Failure{
+			Code:   pathFailure.Code,
+			Detail: pathFailure.Detail,
+		}}, nil
+	}
+	if newWindow {
+		if err := s.handOff(winctx.KindFile, target); err != nil {
+			return contract.OpenRequestResult{Failure: &contract.Failure{
+				Code:   "window_failed",
+				Detail: "无法在新窗口打开，请关闭其他窗口后重试",
+			}}, nil
+		}
+		return contract.OpenRequestResult{}, nil
+	}
+	return s.openKind(ctx, w, winctx.KindFile, target)
+}
+
+// handOff opens a window and gives it the request: a window that already
+// shows something never replaces it (PRD FR-02, D-03).
+func (s *WindowService) handOff(kind, path string) error {
+	id, err := s.open()
+	if err != nil {
+		return err
+	}
+	w, ok := s.windows.Get(id)
+	if !ok {
+		return ErrWindowNotOpen
+	}
+	_, err = w.PushKind(kind, path)
+	return err
 }
 
 // OpenRequested opens what a queued request names: a file association, a
 // command-line argument, or another instance's request (PRD FR-02.8). The
 // request is acknowledged once handled, whether it opened or not.
-func (s *WindowService) OpenRequested(ctx context.Context, seq int64) (contract.LoadResult, error) {
+func (s *WindowService) OpenRequested(ctx context.Context, seq int64) (contract.OpenRequestResult, error) {
 	w, err := s.callerWindow(ctx)
 	if err != nil {
-		return contract.LoadResult{}, err
+		return contract.OpenRequestResult{}, err
 	}
 	request, ok := w.Intent(seq)
 	if !ok {
 		// Already handled: a page that remounted (React StrictMode) or
-		// reloaded asks again. Give it the document the window shows, so the
-		// request is not lost to a discarded render.
-		if path, has := w.OpenFile(); has {
-			return s.openPath(ctx, w, path)
-		}
-		return contract.LoadResult{Failure: &contract.Failure{
-			Code:   "request_expired",
-			Detail: "这次打开请求已经处理过",
-		}}, nil
+		// reloaded asks again. Give it what the window shows, so the request
+		// is not lost to a discarded render.
+		return s.currentContent(ctx, w)
 	}
-	result, err := s.openPath(ctx, w, request.Path)
+	result, err := s.openKind(ctx, w, request.Kind, request.Path)
 	w.Ack(seq)
 	return result, err
+}
+
+// openKind opens a request of either kind.
+func (s *WindowService) openKind(ctx context.Context, w *winctx.Window, kind, path string) (contract.OpenRequestResult, error) {
+	if kind == winctx.KindFolder {
+		return s.openFolderPath(w, path)
+	}
+	load, err := s.openPath(ctx, w, path)
+	if err != nil {
+		return contract.OpenRequestResult{}, err
+	}
+	return contract.OpenRequestResult{Kind: "file", Doc: load.Doc, Failure: load.Failure}, nil
+}
+
+// openFolderPath makes a folder the window's root.
+func (s *WindowService) openFolderPath(w *winctx.Window, path string) (contract.OpenRequestResult, error) {
+	real, pathFailure := pathguard.Canon(path)
+	if pathFailure != nil {
+		return contract.OpenRequestResult{Failure: &contract.Failure{
+			Code: pathFailure.Code, Detail: pathFailure.Detail,
+		}}, nil
+	}
+	info, err := os.Stat(real)
+	if err != nil || !info.IsDir() {
+		return contract.OpenRequestResult{Failure: &contract.Failure{
+			Code:   "unsupported_type",
+			Detail: "请选择一个文件夹",
+		}}, nil
+	}
+	w.SetRoot(real)
+	return contract.OpenRequestResult{
+		Kind:   "folder",
+		Folder: &contract.FolderInfo{Root: real, Name: filepath.Base(real)},
+	}, nil
+}
+
+// currentContent answers a repeated request with what the window shows.
+func (s *WindowService) currentContent(ctx context.Context, w *winctx.Window) (contract.OpenRequestResult, error) {
+	if path, has := w.OpenFile(); has {
+		load, err := s.openPath(ctx, w, path)
+		if err != nil {
+			return contract.OpenRequestResult{}, err
+		}
+		return contract.OpenRequestResult{Kind: "file", Doc: load.Doc, Failure: load.Failure}, nil
+	}
+	if root, has := w.Root(); has {
+		return contract.OpenRequestResult{
+			Kind:   "folder",
+			Folder: &contract.FolderInfo{Root: root, Name: filepath.Base(root)},
+		}, nil
+	}
+	return contract.OpenRequestResult{Failure: &contract.Failure{
+		Code:   "request_expired",
+		Detail: "这次打开请求已经处理过",
+	}}, nil
 }
 
 // openPath validates a path the user chose or was handed, reads and renders
