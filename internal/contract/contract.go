@@ -126,3 +126,31 @@ type LinkTarget struct {
 	// Reason explains an "attachment" or "blocked" link to the user.
 	Reason string `json:"reason,omitempty"`
 }
+
+// RecentEntry is one row of the start page's recent list.
+type RecentEntry struct {
+	Path string `json:"path"`
+	Name string `json:"name"`
+	// IsDir tells a folder from a file.
+	IsDir bool `json:"isDir"`
+}
+
+// SettingsView is what the page shows and edits.
+type SettingsView struct {
+	Startup    string        `json:"startup"`
+	Appearance string        `json:"appearance"`
+	Recent     []RecentEntry `json:"recent"`
+}
+
+// SettingsResult answers the settings read. Corrupt is true when the file
+// could not be read and defaults are in use (PRD FR-10.11).
+type SettingsResult struct {
+	Settings SettingsView `json:"settings"`
+	Corrupt  bool         `json:"corrupt,omitempty"`
+	Failure  *Failure     `json:"failure,omitempty"`
+}
+
+// SaveOutcome answers a settings write. Failure is set when nothing was saved.
+type SaveOutcome struct {
+	Failure *Failure `json:"failure,omitempty"`
+}

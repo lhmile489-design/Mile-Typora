@@ -129,6 +129,19 @@ export interface ReadyInfo {
   version: string;
 }
 
+/** RecentEntry is one row of the start page's recent list. */
+export interface RecentEntry {
+  path: string;
+  name: string;
+  /** IsDir tells a folder from a file. */
+  isDir: boolean;
+}
+
+/** SaveOutcome answers a settings write. Failure is set when nothing was saved. */
+export interface SaveOutcome {
+  failure?: Failure;
+}
+
 /**
  * ScanFrame is one batch of a folder scan. The page appends Entries as they
  * arrive; Done marks the last frame, which carries the outcome.
@@ -140,6 +153,23 @@ export interface ScanFrame {
   bound?: string;
   skipped?: number;
   failure?: Failure;
+}
+
+/**
+ * SettingsResult answers the settings read. Corrupt is true when the file
+ * could not be read and defaults are in use (PRD FR-10.11).
+ */
+export interface SettingsResult {
+  settings: SettingsView;
+  corrupt?: boolean;
+  failure?: Failure;
+}
+
+/** SettingsView is what the page shows and edits. */
+export interface SettingsView {
+  startup: string;
+  appearance: string;
+  recent: RecentEntry[];
 }
 
 /** TreeEntry is one row of the file tree: a folder or a Markdown file. */
@@ -159,6 +189,20 @@ export const WindowService = {
    */
   ack(seq: number): Promise<void> {
     return call("WindowService.Ack", seq);
+  },
+  /**
+   * ClearRecent empties the recent list (PRD FR-10.10). The resume target goes
+   * with it once M3-2 keeps one.
+   */
+  clearRecent(): Promise<SaveOutcome> {
+    return call("WindowService.ClearRecent");
+  },
+  /**
+   * GetSettings hands the page the settings and the recent list. A damaged file
+   * is reported rather than hidden (PRD FR-10.11).
+   */
+  getSettings(): Promise<SettingsResult> {
+    return call("WindowService.GetSettings");
   },
   /**
    * NewWindow opens another window (PRD FR-02). The reuse matrix of M2-2 decides
@@ -191,6 +235,13 @@ export const WindowService = {
     return call("WindowService.OpenLink", href);
   },
   /**
+   * OpenRecent opens an entry of the recent list. The path must be one the app
+   * recorded itself, so the page cannot ask for an arbitrary file (PRD FR-08).
+   */
+  openRecent(path: string): Promise<OpenRequestResult> {
+    return call("WindowService.OpenRecent", path);
+  },
+  /**
    * OpenRequested opens what a queued request names: a file association, a
    * command-line argument, or another instance's request (PRD FR-02.8). The
    * request is acknowledged once handled, whether it opened or not.
@@ -219,6 +270,13 @@ export const WindowService = {
    */
   ready(): Promise<ReadyInfo> {
     return call("WindowService.Ready");
+  },
+  /**
+   * SaveSettings writes the settings the page edited. A failed write keeps the
+   * previous settings (PRD FR-10.2).
+   */
+  saveSettings(view: SettingsView): Promise<SaveOutcome> {
+    return call("WindowService.SaveSettings", view);
   },
   /**
    * Scan streams the tree of the window's folder in frames, ending with one

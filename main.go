@@ -8,6 +8,7 @@ import (
 
 	"github.com/egoist/mygo"
 
+	"github.com/lhmile489-design/mile-typora/internal/appstate"
 	"github.com/lhmile489-design/mile-typora/internal/contract"
 	"github.com/lhmile489-design/mile-typora/internal/resource"
 	"github.com/lhmile489-design/mile-typora/internal/service"
@@ -37,6 +38,17 @@ func main() {
 	// appearance. M3-3 reads the saved preference instead.
 	mygo.Theme.SetSource(mygo.ThemeSystem)
 
+	// Settings live in the app's own data directory, never next to the
+	// documents (CLAUDE.md §5.7). Without them the app still reads.
+	var state *appstate.Store
+	if dir, err := mygo.App.Path(mygo.PathUserData); err != nil {
+		log.Printf("settings: cannot find the data directory: %v", err)
+	} else if opened, err := appstate.Open(dir); err != nil {
+		log.Printf("settings: cannot read them, starting with defaults: %v", err)
+	} else {
+		state = opened
+	}
+
 	// Images load through the app's own protocol, registered before any
 	// window exists (decisions.md D-T01). Only registered files are served.
 	resources := resource.New()
@@ -50,6 +62,7 @@ func main() {
 		PickFolder: service.PickFolder,
 		Resources:  resources,
 		Watch:      watch.Start,
+		State:      state,
 	}))
 
 	mygo.App.WhenReady(func() {

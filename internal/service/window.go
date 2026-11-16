@@ -12,6 +12,7 @@ import (
 
 	"github.com/egoist/mygo"
 
+	"github.com/lhmile489-design/mile-typora/internal/appstate"
 	"github.com/lhmile489-design/mile-typora/internal/contract"
 	"github.com/lhmile489-design/mile-typora/internal/docread"
 	"github.com/lhmile489-design/mile-typora/internal/markdown"
@@ -52,6 +53,9 @@ type Deps struct {
 	PickFolder Picker
 	Resources  *resource.Store
 	Watch      WatchFunc
+	// State is the settings store; nil when the app data directory is not
+	// usable, in which case the app still reads documents.
+	State *appstate.Store
 	// Confirm asks the user a yes/no question with the reason spelled out.
 	Confirm func(ctx context.Context, title, message, detail string) bool
 	// External opens a URL with the system browser.
@@ -69,6 +73,7 @@ type WindowService struct {
 	render    *markdown.Renderer
 	resources *resource.Store
 	watch     WatchFunc
+	state     *appstate.Store
 	confirm   func(ctx context.Context, title, message, detail string) bool
 	external  func(url string) error
 }
@@ -104,6 +109,7 @@ func NewWindowService(d Deps) *WindowService {
 		render:    markdown.New(),
 		resources: d.Resources,
 		watch:     d.Watch,
+		state:     d.State,
 		confirm:   d.Confirm,
 		external:  d.External,
 	}
@@ -456,6 +462,7 @@ func (s *WindowService) openFolderPath(w *winctx.Window, path string) (contract.
 		}}, nil
 	}
 	w.SetRoot(real)
+	s.recordRecent(real, true)
 	return contract.OpenRequestResult{
 		Kind:   "folder",
 		Folder: &contract.FolderInfo{Root: real, Name: filepath.Base(real)},
@@ -521,6 +528,7 @@ func (s *WindowService) openPath(ctx context.Context, w *winctx.Window, chosen s
 // changes, and the page receives the document.
 func (s *WindowService) showDocument(ctx context.Context, w *winctx.Window, real string, doc *docread.Doc, rendered markdown.Result) (contract.LoadResult, error) {
 	w.SetOpenFile(real)
+	s.recordRecent(real, false)
 	// Watch the file so a change outside the app can be picked up. M3-4
 	// refreshes the document here; M1-7 records that events arrive.
 	if s.watch != nil {
@@ -630,3 +638,6 @@ func (s *WindowService) NewWindow(ctx context.Context) (contract.NewWindowResult
 func resourceURL(token string) string {
 	return "http://" + resource.Scheme + ".localhost/" + token
 }
+
+// winctxKindFile keeps the request kinds in one place for this package.
+const winctxKindFile = winctx.KindFile

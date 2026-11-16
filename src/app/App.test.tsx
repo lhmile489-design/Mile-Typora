@@ -17,6 +17,14 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     openRequested: async () => ({ kind: "handedOff" }),
     openTreeFile: async () => ({ kind: "handedOff" }),
     openLink: async () => ({ kind: "none" }),
+    getSettings: async () => ({
+      kind: "ok" as const,
+      settings: { startup: "blank", appearance: "system", recent: [] },
+      corrupt: false,
+    }),
+    saveSettings: async () => ({ ok: true as const, value: undefined }),
+    clearRecent: async () => ({ ok: true as const, value: undefined }),
+    openRecent: async () => ({ kind: "handedOff" as const }),
     scan: () => ({ abort: () => {}, done: Promise.resolve() }),
     ...overrides,
   };
@@ -121,7 +129,7 @@ const loadedDoc = {
   kind: "loaded" as const,
   doc: {
     name: "笔记.md",
-    path: "E:\notes\笔记.md",
+    path: "E:/notes\笔记.md",
     size: 2048,
     hasBom: false,
     lineEnding: "LF",
@@ -190,7 +198,7 @@ describe("opening a folder", () => {
 
   function folderTransport(frameExtra: Record<string, unknown> = {}) {
     return fakeTransport({
-      openFolder: async () => ({ kind: "opened", root: "E:\notes", name: "notes" }),
+      openFolder: async () => ({ kind: "opened", root: "E:/notes", name: "notes" }),
       scan: (onFrame) => {
         queueMicrotask(() => {
           onFrame({ entries: treeEntries, done: false } as never);
@@ -235,7 +243,7 @@ describe("opening a folder", () => {
 
 describe("opening a file a request names", () => {
   it("opens the requested file as soon as the request arrives", async () => {
-    const pending = async () => ({ ok: true as const, value: [{ seq: 4, path: "E:\notes\a.md" }] });
+    const pending = async () => ({ ok: true as const, value: [{ seq: 4, path: "E:/notes\a.md" }] });
     const openRequested = vi.fn(async () => ({ kind: "file" as const, doc: loadedDoc.doc }));
     render(<App transport={fakeTransport({ pending, openRequested })} />);
     expect(await screen.findByRole("heading", { name: "标题" })).toBeTruthy();
@@ -244,7 +252,7 @@ describe("opening a file a request names", () => {
   });
 
   it("shows the failure of a requested file and keeps the window usable", async () => {
-    const pending = async () => ({ ok: true as const, value: [{ seq: 5, path: "E:\notes\gone.md" }] });
+    const pending = async () => ({ ok: true as const, value: [{ seq: 5, path: "E:/notes\gone.md" }] });
     const openRequested = async () => ({
       kind: "failed" as const,
       code: "not_found",
@@ -265,7 +273,7 @@ describe("the window matrix", () => {
 
   function withTree(overrides: Parameters<typeof fakeTransport>[0] = {}) {
     return fakeTransport({
-      openFolder: async () => ({ kind: "opened", root: "E:\notes", name: "notes" }),
+      openFolder: async () => ({ kind: "opened", root: "E:/notes", name: "notes" }),
       scan: (onFrame) => {
         queueMicrotask(() => {
           onFrame({ entries, done: false } as never);
@@ -294,8 +302,8 @@ describe("the window matrix", () => {
   });
 
   it("starts browsing when a request names a folder", async () => {
-    const pending = async () => ({ ok: true as const, value: [{ seq: 3, path: "E:\notes" }] });
-    const openRequested = vi.fn(async () => ({ kind: "folder" as const, root: "E:\notes", name: "notes" }));
+    const pending = async () => ({ ok: true as const, value: [{ seq: 3, path: "E:/notes" }] });
+    const openRequested = vi.fn(async () => ({ kind: "folder" as const, root: "E:/notes", name: "notes" }));
     const scan = vi.fn(() => ({ abort: () => {}, done: Promise.resolve() }));
     render(<App transport={fakeTransport({ pending, openRequested, scan })} />);
     expect(await screen.findByRole("tree", { name: "文件树" })).toBeTruthy();
@@ -387,5 +395,47 @@ describe("in-document search", () => {
     fireEvent.keyDown(window, { key: "f", ctrlKey: true });
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("searchbox", { name: "在文中查找" })).toBeNull();
+  });
+});
+
+describe("the recent list", () => {
+  const settings = {
+    kind: "ok" as const,
+    settings: {
+      startup: "blank",
+      appearance: "system",
+      recent: [
+        { path: "E:/notes\a.md", name: "a.md", isDir: false },
+        { path: "E:/notes", name: "notes", isDir: true },
+      ],
+    },
+    corrupt: false,
+  };
+
+  it("shows what was opened and opens it again", async () => {
+    const openRecent = vi.fn(async () => ({ kind: "handedOff" as const }));
+    render(<App transport={fakeTransport({ getSettings: async () => settings, openRecent })} />);
+    expect(await screen.findByText("最近打开")).toBeTruthy();
+    fireEvent.click(screen.getByTitle("E:/notes\a.md"));
+    expect(openRecent).toHaveBeenCalledWith("E:/notes\a.md");
+  });
+
+  it("clears the list", async () => {
+    const clearRecent = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    render(<App transport={fakeTransport({ getSettings: async () => settings, clearRecent })} />);
+    fireEvent.click(await screen.findByRole("button", { name: "清空记录" }));
+    expect(clearRecent).toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByText("最近打开")).toBeNull());
+  });
+
+  it("says when the settings could not be read", async () => {
+    const broken = {
+      kind: "ok" as const,
+      settings: { startup: "blank", appearance: "system", recent: [] },
+      corrupt: true,
+      notice: "设置文件损坏，已按默认设置启动，原文件已保留",
+    };
+    render(<App transport={fakeTransport({ getSettings: async () => broken })} />);
+    expect(await screen.findByText(/设置文件损坏/)).toBeTruthy();
   });
 });

@@ -238,3 +238,12 @@ M1 需验证：mermaid 12 的 `securityLevel: "strict"` 与 `%%{init}%%` 指令�
 - 恶意样本固定为五份：`html.md`（脚本、事件属性、iframe、内联样式）、`protocol.md`（javascript/data/file/vbscript/自定义协议、data 图片）、`svg.md` + `icon.svg`（内联 SVG 与 SVG 图片）、`mermaid-init.md`（init 指令与 click 回调）、`math-escape.md`（`\href`、`\includegraphics`、宏递归）。测试逐份渲染并断言：无危险元素、无事件属性、无 `style`、无危险协议、图片一律被解析器拦下。
 - 样本目录每次改渲染或白名单都要重跑，已写进测试名与计划，不依赖人工点一遍。
 - 原生抽查（2026-11-16）：`protocol.md` 渲染后 `a[href]` 只剩明文 https，`script` 与 `img` 元素为 0，点击 https 链接弹出"即将访问外部站点"确认框，取消后页面不动。
+
+### D-T30 · 应用状态：一个文件、原子写、损坏留档（M3-1）
+
+- 位置：`mygo.App.Path(PathUserData)`，Windows 上是 `%APPDATA%\<应用名>\settings.json`（开发版是 `Mile Typora Dev`）。永远不写用户文档目录。
+- 写入：同目录临时文件 → `Sync` → `os.Rename` 覆盖；任何一步失败都保留旧值与旧文件，界面得到 `settings_write_failed`，阅读不中断。
+- 损坏：读取时 JSON 解析失败就把原文件改名为 `settings.corrupt-<时间戳>.json` 保留，按默认值继续；下次成功保存才写出新的 `settings.json`，损坏文件不删。
+- 最近列表：最多 20 条、新的在前、按路径去重（Windows 大小写不敏感）、只接受绝对路径；打开文件或目录成功后由 Go 记录，页面不能改这个列表。
+- `OpenRecent` 只接受列表里已有的路径，避免页面借"最近记录"读任意文件。
+- 设置枚举在读写两侧都规范化（未知值回落到 `blank` / `system`），所以旧版本写的文件不会让新版本进入奇怪状态。

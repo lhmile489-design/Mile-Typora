@@ -12,6 +12,9 @@ import {
   type LinkTarget,
   type LoadResult,
   type OpenRequestResult,
+  type RecentEntry,
+  type SettingsResult,
+  type SettingsView,
   type ScanFrame,
 } from "../mygo";
 import { failureMessage } from "./errors";
@@ -28,6 +31,13 @@ export type RequestedOutcome =
   | { kind: "folder"; root: string; name: string }
   | { kind: "handedOff" }
   | { kind: "failed"; code: string; message: string };
+
+export type { RecentEntry, SettingsView };
+
+/** What reading the settings produced. */
+export type SettingsOutcome =
+  | { kind: "ok"; settings: SettingsView; corrupt: boolean; notice?: string }
+  | { kind: "failed"; message: string };
 
 /** What a link click means once Go has looked at it. */
 export type LinkOutcome =
@@ -76,6 +86,14 @@ export interface Transport {
   openRequested(seq: number): Promise<RequestedOutcome>;
   /** Asks Go what a link means and lets it do the part the page cannot. */
   openLink(href: string): Promise<LinkOutcome>;
+  /** Reads the settings and the recent list. */
+  getSettings(): Promise<SettingsOutcome>;
+  /** Writes the settings the page edited. */
+  saveSettings(view: SettingsView): Promise<Outcome<void>>;
+  /** Empties the recent list. */
+  clearRecent(): Promise<Outcome<void>>;
+  /** Opens an entry the app recorded itself. */
+  openRecent(path: string): Promise<RequestedOutcome>;
   /**
    * Opens a file the tree names, relative to the window's folder, here or in
    * a new window (PRD FR-02, AC-06).
@@ -149,6 +167,30 @@ export const mygoTransport: Transport = {
   openFile: async () => openResult(() => WindowService.openFileDialog()),
   openRequested: async (seq) => requestedOutcome(() => WindowService.openRequested(seq)),
   openLink: async (href) => linkOutcome(() => WindowService.openLink(href)),
+  getSettings: async () => {
+    try {
+      const result = await WindowService.getSettings();
+      return {
+        kind: "ok",
+        settings: result.settings,
+        corrupt: result.corrupt ?? false,
+        notice: result.failure ? failureMessage(result.failure.code, result.failure.detail) : undefined,
+      };
+    } catch (err) {
+      return { kind: "failed", message: failureMessage("unknown", err instanceof Error ? err.message : "") };
+    }
+  },
+  saveSettings: (view) =>
+    wrap(async () => {
+      const outcome = await WindowService.saveSettings(view);
+      if (outcome.failure) throw new Error(failureMessage(outcome.failure.code, outcome.failure.detail));
+    }),
+  clearRecent: () =>
+    wrap(async () => {
+      const outcome = await WindowService.clearRecent();
+      if (outcome.failure) throw new Error(failureMessage(outcome.failure.code, outcome.failure.detail));
+    }),
+  openRecent: async (path) => requestedOutcome(() => WindowService.openRecent(path)),
   openTreeFile: async (rel, newWindow) => requestedOutcome(() => WindowService.openTreeFile(rel, newWindow)),
 };
 

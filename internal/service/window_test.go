@@ -11,6 +11,7 @@ import (
 
 	"github.com/egoist/mygo"
 
+	"github.com/lhmile489-design/mile-typora/internal/appstate"
 	"github.com/lhmile489-design/mile-typora/internal/contract"
 	"github.com/lhmile489-design/mile-typora/internal/markdown"
 	"github.com/lhmile489-design/mile-typora/internal/resource"
@@ -699,5 +700,158 @@ func TestOpenLinkOutsideTheFolderNeedsConfirmation(t *testing.T) {
 	// The path climbs out of the folder, so it is refused outright.
 	if got, _ := s.OpenLink(context.Background(), "../other.md"); got.Kind != "blocked" {
 		t.Fatalf("target = %+v, want blocked for a climbing link", got)
+	}
+}
+
+func withState(t *testing.T, s *WindowService) *appstate.Store {
+	t.Helper()
+	store, err := appstate.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("appstate.Open: %v", err)
+	}
+	s.state = store
+	return store
+}
+
+func TestSettingsWithoutAStore(t *testing.T) {
+	s, _ := newTestService(1, true)
+	got, err := s.GetSettings(context.Background())
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	if got.Failure == nil || got.Failure.Code != "settings_unavailable" {
+		t.Fatalf("result = %+v, want settings_unavailable", got)
+	}
+	if got.Settings.Startup != appstate.StartupBlank {
+		t.Fatalf("startup = %q, want the default", got.Settings.Startup)
+	}
+	if _, err := s.SaveSettings(context.Background(), got.Settings); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+}
+
+func TestSettingsRoundTrip(t *testing.T) {
+	s, _ := newTestService(1, true)
+	store := withState(t, s)
+
+	out, err := s.SaveSettings(context.Background(), contract.SettingsView{
+		Startup:    appstate.StartupResume,
+		Appearance: appstate.AppearanceDark,
+	})
+	if err != nil || out.Failure != nil {
+		t.Fatalf("SaveSettings = %+v, %v", out, err)
+	}
+	got, _ := s.GetSettings(context.Background())
+	if got.Settings.Startup != appstate.StartupResume || got.Settings.Appearance != appstate.AppearanceDark {
+		t.Fatalf("settings = %+v, want what was saved", got.Settings)
+	}
+	if stored := store.Get(); stored.Startup != appstate.StartupResume {
+		t.Fatalf("the file holds %+v", stored)
+	}
+}
+
+func TestSettingsSaveFailureKeepsTheOldValue(t *testing.T) {
+	s, _ := newTestService(1, true)
+	store := withState(t, s)
+	if _, err := s.SaveSettings(context.Background(), contract.SettingsView{
+		Startup: appstate.StartupResume, Appearance: appstate.AppearanceSystem,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A directory where the file should be makes every write fail.
+	if err := os.Remove(store.Path()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(store.Path(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := s.SaveSettings(context.Background(), contract.SettingsView{
+		Startup: appstate.StartupBlank, Appearance: appstate.AppearanceLight,
+	})
+	if err != nil {
+		t.Fatalf("SaveSettings returned an unexpected error: %v", err)
+	}
+	if out.Failure == nil || out.Failure.Code != "settings_write_failed" {
+		t.Fatalf("outcome = %+v, want settings_write_failed", out)
+	}
+	if got, _ := s.GetSettings(context.Background()); got.Settings.Startup != appstate.StartupResume {
+		t.Fatalf("settings = %+v, want the previous value kept", got.Settings)
+	}
+}
+
+func TestSettingsCorruptIsReported(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte("{ broken"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store, err := appstate.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, _ := newTestService(1, true)
+	s.state = store
+
+	got, _ := s.GetSettings(context.Background())
+	if !got.Corrupt || got.Failure == nil || got.Failure.Code != "settings_corrupt" {
+		t.Fatalf("result = %+v, want the damage reported", got)
+	}
+}
+
+func TestRecentListRecordsWhatWasOpened(t *testing.T) {
+	dir := t.TempDir()
+	path := writeSample(t, dir, "笔记.md", []byte("# 笔记\n"))
+	s, _ := newTestService(1, true)
+	withState(t, s)
+	s.pick = func(context.Context) (string, error) { return path, nil }
+	if _, err := s.OpenFileDialog(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.GetSettings(context.Background())
+	if len(got.Settings.Recent) != 1 || got.Settings.Recent[0].Name != "笔记.md" {
+		t.Fatalf("recent = %+v, want the opened file", got.Settings.Recent)
+	}
+}
+
+func TestOpenRecentRejectsAnUnknownPath(t *testing.T) {
+	s, _ := newTestService(1, true)
+	withState(t, s)
+	got, err := s.OpenRecent(context.Background(), filepath.Join(t.TempDir(), "x.md"))
+	if err != nil {
+		t.Fatalf("OpenRecent: %v", err)
+	}
+	if got.Failure == nil || got.Failure.Code != "not_found" {
+		t.Fatalf("result = %+v, want not_found", got)
+	}
+}
+
+func TestOpenRecentOpensARecordedFile(t *testing.T) {
+	dir := t.TempDir()
+	path := writeSample(t, dir, "a.md", []byte("# a\n"))
+	s, _ := newTestService(1, true)
+	store := withState(t, s)
+	if err := store.AddRecent(path, false); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.OpenRecent(context.Background(), path)
+	if err != nil {
+		t.Fatalf("OpenRecent: %v", err)
+	}
+	if got.Doc == nil || got.Doc.Name != "a.md" {
+		t.Fatalf("result = %+v, want the document", got)
+	}
+}
+
+func TestClearRecentEmptiesTheList(t *testing.T) {
+	s, _ := newTestService(1, true)
+	store := withState(t, s)
+	if err := store.AddRecent(filepath.Join(t.TempDir(), "a.md"), false); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := s.ClearRecent(context.Background()); err != nil || out.Failure != nil {
+		t.Fatalf("ClearRecent = %+v, %v", out, err)
+	}
+	if got, _ := s.GetSettings(context.Background()); len(got.Settings.Recent) != 0 {
+		t.Fatalf("recent = %+v, want none", got.Settings.Recent)
 	}
 }

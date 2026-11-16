@@ -3,6 +3,7 @@ import {
   CircleAlert,
   CircleX,
   FileText,
+  Folder,
   FolderOpen,
   Lock,
   PanelLeft,
@@ -16,6 +17,7 @@ import type {
   OpenedDoc,
   OpenRequest,
   ReadyInfo,
+  RecentEntry,
   RequestedOutcome,
   ScanFrame,
   Transport,
@@ -57,6 +59,7 @@ export function App({ transport }: { transport: Transport }) {
   const [findQuery, setFindQuery] = useState("");
   const [findIndex, setFindIndex] = useState(0);
   const [findCount, setFindCount] = useState(0);
+  const [recent, setRecent] = useState<RecentEntry[]>([]);
   const scanRef = useRef<{ abort: () => void } | null>(null);
   const readerRef = useRef<HTMLDivElement>(null);
   const findRanges = useRef<Range[]>([]);
@@ -98,6 +101,27 @@ export function App({ transport }: { transport: Transport }) {
     [transport],
   );
 
+  // The settings and the recent list (PRD FR-08, FR-10).
+  const loadSettings = useCallback(async () => {
+    const result = await transport.getSettings();
+    if (result.kind === "failed") {
+      setNotice(result.message);
+      return;
+    }
+    setRecent(result.settings.recent ?? []);
+    if (result.notice) setNotice(result.notice);
+  }, [transport]);
+
+  useEffect(() => {
+    void loadSettings();
+  }, [loadSettings]);
+
+  const clearRecent = useCallback(async () => {
+    const result = await transport.clearRecent();
+    if (result.ok) setRecent([]);
+    else setNotice(result.message);
+  }, [transport]);
+
   // Where the reader is in this file, kept before another replaces it.
   const rememberHere = useCallback(() => {
     const scroller = readerRef.current;
@@ -113,6 +137,7 @@ export function App({ transport }: { transport: Transport }) {
         case "file":
           rememberHere();
           setDoc(result.doc);
+          void loadSettings();
           setLoadError(null);
           // The window now shows one file, not a folder.
           scanRef.current?.abort();
@@ -122,6 +147,7 @@ export function App({ transport }: { transport: Transport }) {
           return;
         case "folder":
           startScan(result.root, result.name);
+          void loadSettings();
           return;
         case "failed":
           setLoadError({ code: result.code, message: result.message });
@@ -144,6 +170,13 @@ export function App({ transport }: { transport: Transport }) {
   );
 
   // A click in the tree opens the file here; its arrow opens it elsewhere.
+  const openRecent = useCallback(
+    async (entry: RecentEntry) => {
+      applyOutcome(await transport.openRecent(entry.path));
+    },
+    [applyOutcome, transport],
+  );
+
   const openTreeFile = useCallback(
     async (entry: TreeEntry, newWindow: boolean) => {
       setSelected(entry.path);
@@ -395,6 +428,46 @@ export function App({ transport }: { transport: Transport }) {
               <div className="start">
                 <h2>开始阅读</h2>
                 <p>打开一个 Markdown 文件，或打开一个目录浏览其中的文档。</p>
+                <div className="actions">
+                  <button className="btn primary" type="button" onClick={() => void openFile()}>
+                    <FileText aria-hidden="true" />
+                    打开文件
+                    <span className="kbd">Ctrl+O</span>
+                  </button>
+                  <button className="btn secondary" type="button" onClick={() => void openFolder()}>
+                    <FolderOpen aria-hidden="true" />
+                    打开目录
+                    <span className="kbd">Ctrl+Shift+O</span>
+                  </button>
+                </div>
+                {recent.length > 0 && (
+                  <>
+                    <div className="recent-head">
+                      <span>最近打开</span>
+                      <button className="btn text" type="button" onClick={() => void clearRecent()}>
+                        清空记录
+                      </button>
+                    </div>
+                    <ul className="recent">
+                      {recent.slice(0, 8).map((entry) => (
+                        <li key={entry.path}>
+                          <button
+                            type="button"
+                            className="recent-row"
+                            title={entry.path}
+                            onClick={() => void openRecent(entry)}
+                          >
+                            {entry.isDir ? <Folder aria-hidden="true" /> : <FileText aria-hidden="true" />}
+                            <span className="txt">
+                              <span className="nm">{entry.name}</span>
+                              <span className="path">{entry.path}</span>
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
               </div>
             </div>
           )}
