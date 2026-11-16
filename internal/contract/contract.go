@@ -83,7 +83,10 @@ type ScanFrame struct {
 	Truncated bool        `json:"truncated,omitempty"`
 	Bound     string      `json:"bound,omitempty"`
 	Skipped   int         `json:"skipped,omitempty"`
-	Failure   *Failure    `json:"failure,omitempty"`
+	// Unreadable counts folders the scan could not read; the page says the
+	// result is partial (PRD §7.2).
+	Unreadable int      `json:"unreadable,omitempty"`
+	Failure    *Failure `json:"failure,omitempty"`
 }
 
 // OpenFolderResult answers the folder dialog. Root is empty when cancelled.
@@ -132,6 +135,17 @@ type LinkTarget struct {
 	// Reason explains an "attachment" or "blocked" link to the user.
 	Reason string `json:"reason,omitempty"`
 }
+
+// Notice is a short message a window shows in its status bar: something the
+// app refused or could not do, said without blocking (PRD §7.3, §9.2.4).
+type Notice struct {
+	Text string `json:"text"`
+}
+
+// TreeChanged tells a window that the structure of its folder changed, so
+// the page rescans the tree (PRD FR-03.12, FR-07.1). It carries nothing:
+// the page already knows its folder.
+type TreeChanged struct{}
 
 // DocUpdate tells a window that its document changed outside the app
 // (PRD FR-07). Failure means the old content stays and is marked stale.

@@ -25,8 +25,11 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     saveSettings: async () => ({ ok: true as const, value: undefined }),
     clearRecent: async () => ({ ok: true as const, value: undefined }),
     openRecent: async () => ({ kind: "handedOff" as const }),
+    removeRecent: async () => ({ ok: true as const, value: undefined }),
     onThemeChange: () => () => {},
     onDocUpdated: () => () => {},
+    onTreeChanged: () => () => {},
+    onNotice: () => () => {},
     refresh: async () => ({ kind: "cancelled" as const }),
     closeDocument: async () => ({ ok: true as const, value: undefined }),
     closeWindow: async () => ({ ok: true as const, value: undefined }),
@@ -54,6 +57,191 @@ function installWidth(width: number): Width {
     },
   };
 }
+
+describe("exception feedback", () => {
+  it("shows the empty folder state", async () => {
+    const scan = vi.fn((onFrame: Parameters<Transport["scan"]>[0]) => {
+      onFrame({ entries: [], done: true, truncated: false } as Parameters<typeof onFrame>[0]);
+      return { abort: () => {}, done: Promise.resolve() };
+    });
+    render(
+      <App
+        transport={fakeTransport({
+          openFolder: async () => ({ kind: "opened" as const, root: "E:/empty", name: "empty" }),
+          scan,
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
+    expect(await screen.findByText("此目录下未找到 Markdown 文件")).toBeTruthy();
+  });
+
+  it("says when a scan is partial and what it skipped", async () => {
+    const scan = vi.fn((onFrame: Parameters<Transport["scan"]>[0]) => {
+      onFrame({
+        entries: [{ path: "a.md", name: "a.md", isDir: false }],
+        done: true,
+        truncated: false,
+        skipped: 1,
+        unreadable: 2,
+      } as Parameters<typeof onFrame>[0]);
+      return { abort: () => {}, done: Promise.resolve() };
+    });
+    render(
+      <App
+        transport={fakeTransport({
+          openFolder: async () => ({ kind: "opened" as const, root: "E:/notes", name: "notes" }),
+          scan,
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
+    expect(await screen.findByText(/部分目录无法访问（2 个）/)).toBeTruthy();
+    expect(screen.getByText(/已跳过 1 项/)).toBeTruthy();
+  });
+
+  it("reselects a folder with the folder dialog after a folder failure", async () => {
+    const openFolder = vi.fn(async () => ({
+      kind: "failed" as const,
+      code: "unsupported_type",
+      message: "请选择一个文件夹",
+    }));
+    render(<App transport={fakeTransport({ openFolder })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
+    expect(await screen.findByText("无法打开文件夹")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "重新选择" }));
+    await waitFor(() => expect(openFolder).toHaveBeenCalledTimes(2));
+  });
+
+  it("keeps the open document when another open fails", async () => {
+    const doc = {
+      name: "笔记.md",
+      path: "E:/notes/笔记.md",
+      size: 32,
+      hasBom: false,
+      lineEnding: "LF",
+      text: "# 标题",
+      html: "<h1>标题</h1>",
+      counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
+    };
+    let calls = 0;
+    render(
+      <App
+        transport={fakeTransport({
+          openFile: async () => {
+            calls += 1;
+            if (calls === 1) return { kind: "loaded" as const, doc };
+            return { kind: "failed" as const, code: "encoding", message: "暂不支持此文件编码" };
+          },
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    expect(await screen.findByText(/暂不支持此文件编码/)).toBeTruthy();
+    // The document that was open stays (PRD §7.1 combined states).
+    expect(screen.getByRole("heading", { name: "标题" })).toBeTruthy();
+  });
+
+  it("keeps a recent entry that is merely too large", async () => {
+    const removeRecent = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    render(
+      <App
+        transport={fakeTransport({
+          getSettings: async () => ({
+            kind: "ok" as const,
+            settings: {
+              startup: "blank",
+              appearance: "system",
+              recent: [{ path: "E:/big.md", name: "big.md", isDir: false }],
+            },
+            corrupt: false,
+          }),
+          openRecent: async () => ({
+            kind: "failed" as const,
+            code: "too_large",
+            message: "文件超过读取上限：11 MB，上限 10 MB",
+          }),
+          removeRecent,
+        })}
+      />,
+    );
+    fireEvent.click(await screen.findByTitle("E:/big.md"));
+    expect(await screen.findByText(/big\.md 不可用/)).toBeTruthy();
+    expect(screen.getByTitle("E:/big.md")).toBeTruthy();
+    expect(removeRecent).not.toHaveBeenCalled();
+  });
+
+  it("shows an app notice from the backend", async () => {
+    let sendNotice: (notice: { text: string }) => void = () => {};
+    render(
+      <App
+        transport={fakeTransport({
+          onNotice: (listener) => {
+            sendNotice = listener;
+            return () => {};
+          },
+        })}
+      />,
+    );
+    act(() => sendNotice({ text: "打开请求太多，请稍后再试" }));
+    expect(await screen.findByText("打开请求太多，请稍后再试")).toBeTruthy();
+  });
+
+  it("replaces an image that fails to load with its reason", async () => {
+    const doc = {
+      name: "图.md",
+      path: "E:/notes/图.md",
+      size: 64,
+      hasBom: false,
+      lineEnding: "LF",
+      text: "![示意图](图.png)",
+      html: '<p><img src="http://mtres.localhost/missing" alt="示意图"></p>',
+      counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
+    };
+    const { container } = render(
+      <App transport={fakeTransport({ openFile: async () => ({ kind: "loaded" as const, doc }) })} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("img", { name: "示意图" });
+    fireEvent.error(container.querySelector("img")!);
+    const box = container.querySelector(".limited[data-kind='image']");
+    expect(box).toBeTruthy();
+    expect(box?.getAttribute("data-reason")).toBe("图片无法加载");
+    expect(box?.textContent).toBe("示意图");
+  });
+
+  it("drops an unavailable recent entry and says why", async () => {
+    const removeRecent = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    render(
+      <App
+        transport={fakeTransport({
+          getSettings: async () => ({
+            kind: "ok" as const,
+            settings: {
+              startup: "blank",
+              appearance: "system",
+              recent: [{ path: "E:/gone.md", name: "gone.md", isDir: false }],
+            },
+            corrupt: false,
+          }),
+          openRecent: async () => ({
+            kind: "failed" as const,
+            code: "not_found",
+            message: "文件不存在或已被移动",
+          }),
+          removeRecent,
+        })}
+      />,
+    );
+    const row = await screen.findByTitle("E:/gone.md");
+    fireEvent.click(row);
+    expect(await screen.findByText(/gone\.md 不可用：文件不存在/)).toBeTruthy();
+    expect(screen.queryByTitle("E:/gone.md")).toBeNull();
+    await waitFor(() => expect(removeRecent).toHaveBeenCalledWith("E:/gone.md"));
+  });
+});
 
 describe("keyboard commands", () => {
   it("exposes each shortcut to assistive tech and the tooltip", () => {
@@ -151,6 +339,81 @@ describe("keyboard commands", () => {
     expect(await screen.findByRole("search")).toBeTruthy();
     fireEvent.keyDown(window, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("search")).toBeNull());
+  });
+});
+
+describe("folder changes", () => {
+  it("rescans the tree when the folder changes outside the app", async () => {
+    let sendTree: () => void = () => {};
+    const scan = vi.fn((onFrame: Parameters<Transport["scan"]>[0]) => {
+      onFrame({
+        entries: [{ path: "a.md", name: "a.md", isDir: false }],
+        done: true,
+        truncated: false,
+      } as Parameters<typeof onFrame>[0]);
+      return { abort: () => {}, done: Promise.resolve() };
+    });
+    render(
+      <App
+        transport={fakeTransport({
+          openFolder: async () => ({ kind: "opened" as const, root: "E:/notes", name: "notes" }),
+          scan,
+          onTreeChanged: (listener) => {
+            sendTree = listener;
+            return () => {};
+          },
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
+    await screen.findByText("a.md");
+    expect(scan).toHaveBeenCalledTimes(1);
+
+    act(() => sendTree());
+    await waitFor(() => expect(scan).toHaveBeenCalledTimes(2), { timeout: 1500 });
+  });
+
+  it("keeps the folder context when the root becomes unavailable", async () => {
+    let sendTree: () => void = () => {};
+    let calls = 0;
+    const scan = vi.fn((onFrame: Parameters<Transport["scan"]>[0]) => {
+      calls += 1;
+      if (calls === 1) {
+        onFrame({
+          entries: [{ path: "a.md", name: "a.md", isDir: false }],
+          done: true,
+          truncated: false,
+        } as Parameters<typeof onFrame>[0]);
+      } else {
+        onFrame({
+          done: true,
+          entries: [],
+          truncated: false,
+          failure: { code: "scan_failed", detail: "无法读取此文件夹" },
+        } as Parameters<typeof onFrame>[0]);
+      }
+      return { abort: () => {}, done: Promise.resolve() };
+    });
+    render(
+      <App
+        transport={fakeTransport({
+          openFolder: async () => ({ kind: "opened" as const, root: "E:/notes", name: "notes" }),
+          scan,
+          onTreeChanged: (listener) => {
+            sendTree = listener;
+            return () => {};
+          },
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
+    await screen.findByText("a.md");
+
+    act(() => sendTree());
+    expect(await screen.findByText(/无法读取此文件夹，显示上次结果/, undefined, { timeout: 1500 })).toBeTruthy();
+    // The folder stays the window's context and the last usable rows stay.
+    expect(screen.getByText("notes")).toBeTruthy();
+    expect(screen.getByText("a.md")).toBeTruthy();
   });
 });
 

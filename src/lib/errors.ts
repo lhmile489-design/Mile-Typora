@@ -22,6 +22,27 @@ export function failureMessage(code: string, detail?: string): string {
   return detail?.trim() || messages[code] || "操作失败";
 }
 
+/**
+ * failureText is the one message a failure gets: Go's detail, the code's
+ * fallback, and the numbers a capacity failure must show (PRD §7.2).
+ */
+export function failureText(failure: {
+  code: string;
+  detail?: string;
+  size?: number;
+  limit?: number;
+}): string {
+  const base = failureMessage(failure.code, failure.detail);
+  if (
+    failure.code === "too_large" &&
+    typeof failure.size === "number" &&
+    typeof failure.limit === "number"
+  ) {
+    return `${base}：${formatBytes(failure.size)}，上限 ${formatBytes(failure.limit)}`;
+  }
+  return base;
+}
+
 /** formatBytes shows a size the way the status bar does. */
 export function formatBytes(size: number): string {
   if (size < 1024) return `${size} B`;

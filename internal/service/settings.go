@@ -41,6 +41,13 @@ func (s *WindowService) GetSettings(ctx context.Context) (contract.SettingsResul
 			Code:   "settings_corrupt",
 			Detail: "设置文件损坏，已按默认设置启动，原文件已保留",
 		}
+	} else if s.metaFailed.Swap(false) {
+		// A recent entry or the resume target could not be written; reading
+		// continues, but the app must not pretend it was saved (FR-08.8).
+		result.Failure = &contract.Failure{
+			Code:   "settings_write_failed",
+			Detail: "最近记录或恢复位置未能保存，阅读不受影响",
+		}
 	}
 	return result, nil
 }
@@ -141,6 +148,7 @@ func (s *WindowService) recordRecent(path string, isDir bool) {
 		return
 	}
 	if err := s.state.AddRecent(path, isDir); err != nil {
+		s.metaFailed.Store(true)
 		log.Printf("settings: cannot remember the last opened target: %v", err)
 	}
 }
@@ -182,6 +190,7 @@ func (s *WindowService) recordResumeOf(w *winctx.Window) {
 		return
 	}
 	if err := s.state.SetResume(target); err != nil {
+		s.metaFailed.Store(true)
 		log.Printf("settings: cannot remember the reading position: %v", err)
 	}
 }

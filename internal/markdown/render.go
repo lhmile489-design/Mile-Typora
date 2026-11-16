@@ -303,7 +303,8 @@ func (r *Renderer) renderImage(w util.BufWriter, source []byte, node ast.Node, e
 	_, _ = w.Write(util.EscapeHTML([]byte(ref)))
 	_, _ = w.WriteString(`" alt="`)
 	_, _ = w.Write(util.EscapeHTML([]byte(alt)))
-	_, _ = w.WriteString(`">`)
+	// Far-off images wait until they are near the viewport (PRD §8.3).
+	_, _ = w.WriteString(`" loading="lazy">`)
 	return ast.WalkSkipChildren, nil
 }
 
@@ -348,7 +349,7 @@ func newPolicy() *bluemonday.Policy {
 		"details", "summary",
 	)
 	p.AllowAttrs("href").OnElements("a")
-	p.AllowAttrs("src", "alt", "title").OnElements("img")
+	p.AllowAttrs("src", "alt", "title", "loading").OnElements("img")
 	p.AllowAttrs("id").OnElements("h1", "h2", "h3", "h4", "h5", "h6")
 	p.AllowAttrs("class").Matching(classNames).OnElements("div", "pre", "code", "details")
 	// Syntax highlighting names its tokens with short classes of its own.

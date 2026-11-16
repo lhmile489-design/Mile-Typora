@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { failureMessage, formatBytes } from "./errors";
+import { failureMessage, failureText, formatBytes } from "./errors";
 
 describe("failureMessage", () => {
   it("prefers the detail Go sent", () => {
@@ -12,6 +12,23 @@ describe("failureMessage", () => {
 
   it("never leaves the user without a message", () => {
     expect(failureMessage("something_new")).toBe("操作失败");
+  });
+});
+
+describe("failureText", () => {
+  it("adds the actual size and the limit", () => {
+    expect(
+      failureText({
+        code: "too_large",
+        detail: "文件超过读取上限",
+        size: 11 * 1024 * 1024,
+        limit: 10 * 1024 * 1024,
+      }),
+    ).toBe("文件超过读取上限：11 MB，上限 10 MB");
+  });
+
+  it("leaves other failures as they are", () => {
+    expect(failureText({ code: "encoding" })).toBe("暂不支持此文件编码，请转换为 UTF-8");
   });
 });
 

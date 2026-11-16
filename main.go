@@ -76,6 +76,12 @@ var themeChange = mygo.NewEvent[contract.ThemeChange]("theme-change")
 // docUpdated tells one window its document changed outside the app.
 var docUpdated = mygo.NewEvent[contract.DocUpdate]("doc-updated")
 
+// treeChanged tells one window its folder's structure changed.
+var treeChanged = mygo.NewEvent[contract.TreeChanged]("tree-changed")
+
+// appNotice tells one window about something the app refused to do.
+var appNotice = mygo.NewEvent[contract.Notice]("app-notice")
+
 // openRequest tells one window to open something after its page is ready.
 // Only the target window receives it (CLAUDE.md §5, decisions.md D-T01).
 var openRequest = mygo.NewEvent[contract.OpenRequest]("open-request")
@@ -117,6 +123,10 @@ func main() {
 	watcher := watch.NewPool(func(path string, onEvent func(watch.Event)) (func(), error) {
 		return watch.Start(context.Background(), path, onEvent)
 	})
+	// One recursive watch per folder, shared the same way.
+	treeWatcher := watch.NewPool(func(path string, onEvent func(watch.Event)) (func(), error) {
+		return watch.StartTree(context.Background(), path, onEvent)
+	})
 	if err := mygo.Protocol.HandleFunc(resource.Scheme, resources.ServeHTTP); err != nil {
 		log.Fatal(err)
 	}
@@ -138,6 +148,15 @@ func main() {
 			for _, w := range mygo.Windows() {
 				if w.ID() == windowID {
 					_ = docUpdated.Emit(w, update)
+					return
+				}
+			}
+		},
+		TreeWatcher: treeWatcher,
+		TreeChanged: func(windowID int) {
+			for _, w := range mygo.Windows() {
+				if w.ID() == windowID {
+					_ = treeChanged.Emit(w, contract.TreeChanged{})
 					return
 				}
 			}
@@ -265,6 +284,17 @@ func routeOpenRequests(args []string) {
 	enqueue(w.ID(), args)
 }
 
+// notifyWindow shows a short notice in one window's status bar, so a refused
+// request is not lost in the log (PRD §9.2.4).
+func notifyWindow(id int, text string) {
+	for _, w := range mygo.Windows() {
+		if w.ID() == id {
+			_ = appNotice.Emit(w, contract.Notice{Text: text})
+			return
+		}
+	}
+}
+
 // focusedWindow is the window the user is working in, if any.
 func focusedWindow() *mygo.Window {
 	all := mygo.Windows()
@@ -322,6 +352,7 @@ func enqueueKind(id int, kind, path string) {
 	}
 	if _, err := w.PushKind(kind, path); err != nil {
 		log.Printf("window %d cannot take an open request: %v", id, err)
+		notifyWindow(id, "打开请求太多，请稍后再试")
 	}
 }
 
@@ -335,12 +366,20 @@ func enqueue(id int, paths []string) {
 		if path == "" {
 			continue
 		}
-		if _, err := w.Push(path); err != nil {
+		// A folder argument opens the folder, not an error: the command line
+		// and a drop on the executable ask for what the path is.
+		kind := winctx.KindFile
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
+			kind = winctx.KindFolder
+		}
+		if _, err := w.PushKind(kind, path); err != nil {
 			if errors.Is(err, winctx.ErrQueueFull) {
 				log.Printf("window %d holds %d open requests already", id, winctx.MaxIntents)
+				notifyWindow(id, "打开请求太多，请稍后再试")
 				return
 			}
 			log.Printf("window %d cannot take an open request: %v", id, err)
+			notifyWindow(id, "无法接受这次打开请求")
 			return
 		}
 		// The path is user data: log the count, never the path (CLAUDE.md §6).

@@ -227,3 +227,36 @@ func TestAByteOrderMarkIsTolerated(t *testing.T) {
 		t.Fatalf("settings = %+v, want them read", got)
 	}
 }
+
+func TestRemoveRecent(t *testing.T) {
+	dir := t.TempDir()
+	store, _ := Open(dir)
+	a := filepath.Join(dir, "a.md")
+	b := filepath.Join(dir, "b.md")
+	if err := store.AddRecent(a, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddRecent(b, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetResume(&Resume{Path: a}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Windows paths compare without case.
+	if err := store.RemoveRecent(strings.ToUpper(a)); err != nil {
+		t.Fatalf("RemoveRecent: %v", err)
+	}
+	got := store.Get()
+	if len(got.Recent) != 1 || got.Recent[0].Path != b {
+		t.Fatalf("recent = %+v, want only b", got.Recent)
+	}
+	if got.Resume != nil {
+		t.Fatalf("resume = %+v, want it cleared with its entry", got.Resume)
+	}
+
+	again, _ := Open(dir)
+	if got := again.Get(); len(got.Recent) != 1 || got.Recent[0].Path != b {
+		t.Fatalf("after reload recent = %+v", got.Recent)
+	}
+}

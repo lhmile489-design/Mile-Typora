@@ -44,9 +44,13 @@ type Result struct {
 	// Bound names the bound that stopped the walk: "entries", "markdown" or
 	// "depth".
 	Bound string
-	// Skipped counts what was left out: links, junctions, unreadable
-	// folders, and folders deeper than the depth bound.
+	// Skipped counts what was left out by design: links, junctions and
+	// folders deeper than the depth bound.
 	Skipped int
+	// Unreadable counts folders whose contents could not be read. The rest
+	// of the tree stays usable and the page says the result is partial
+	// (PRD §7.2).
+	Unreadable int
 }
 
 // Options overrides the bounds; zero means the constant above.
@@ -114,7 +118,7 @@ func Scan(ctx context.Context, root string, opts Options) (Result, error) {
 		if err != nil {
 			// A folder the user cannot read is skipped, not fatal: the rest
 			// of the tree stays usable (PRD §7.2).
-			res.Skipped++
+			res.Unreadable++
 			return true
 		}
 		sort.Slice(entries, func(i, j int) bool {

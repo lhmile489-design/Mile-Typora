@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lhmile489-design/mile-typora/internal/appstate"
 	"github.com/lhmile489-design/mile-typora/internal/contract"
 	"github.com/lhmile489-design/mile-typora/internal/markdown"
 	"github.com/lhmile489-design/mile-typora/internal/resource"
@@ -23,19 +24,25 @@ type refreshHarness struct {
 	window  *winctx.Window
 	updates chan contract.DocUpdate
 
-	mu      sync.Mutex
-	deliver func(watch.Event)
-	starts  int
-	stops   int
+	mu          sync.Mutex
+	deliver     func(watch.Event)
+	starts      int
+	stops       int
+	treeDeliver func(watch.Event)
+	treeStarts  int
+	treeStops   int
+
+	treeChanged chan struct{}
 }
 
 func newRefreshHarness(t *testing.T, id int) *refreshHarness {
 	t.Helper()
 	reg := winctx.NewRegistry()
 	h := &refreshHarness{
-		reg:     reg,
-		window:  reg.Add(id),
-		updates: make(chan contract.DocUpdate, 4),
+		reg:         reg,
+		window:      reg.Add(id),
+		updates:     make(chan contract.DocUpdate, 4),
+		treeChanged: make(chan struct{}, 4),
 	}
 	pool := watch.NewPool(func(path string, onEvent func(watch.Event)) (func(), error) {
 		h.mu.Lock()
@@ -48,18 +55,36 @@ func newRefreshHarness(t *testing.T, id int) *refreshHarness {
 			h.mu.Unlock()
 		}, nil
 	})
+	treePool := watch.NewPool(func(path string, onEvent func(watch.Event)) (func(), error) {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		h.treeDeliver = onEvent
+		h.treeStarts++
+		return func() {
+			h.mu.Lock()
+			h.treeStops++
+			h.mu.Unlock()
+		}, nil
+	})
 	h.service = &WindowService{
-		caller:    func(context.Context) (int, bool) { return id, true },
-		version:   func() string { return "0.1.0" },
-		windows:   reg,
-		open:      func() (int, error) { return 0, nil },
-		pick:      func(context.Context) (string, error) { return "", nil },
-		pickDir:   func(context.Context) (string, error) { return "", nil },
-		render:    markdown.New(),
-		resources: resource.New(),
-		watcher:   pool,
-		confirm:   func(context.Context, string, string, string) bool { return false },
-		external:  func(string) error { return nil },
+		caller:      func(context.Context) (int, bool) { return id, true },
+		version:     func() string { return "0.1.0" },
+		windows:     reg,
+		open:        func() (int, error) { return 0, nil },
+		pick:        func(context.Context) (string, error) { return "", nil },
+		pickDir:     func(context.Context) (string, error) { return "", nil },
+		render:      markdown.New(),
+		resources:   resource.New(),
+		watcher:     pool,
+		treeWatcher: treePool,
+		treeChanged: func(int) {
+			select {
+			case h.treeChanged <- struct{}{}:
+			default:
+			}
+		},
+		confirm:  func(context.Context, string, string, string) bool { return false },
+		external: func(string) error { return nil },
 		docUpdated: func(_ int, update contract.DocUpdate) {
 			h.updates <- update
 		},
@@ -82,6 +107,22 @@ func (h *refreshHarness) counts() (starts, stops int) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.starts, h.stops
+}
+
+func (h *refreshHarness) fireTree(event watch.Event) {
+	h.mu.Lock()
+	deliver := h.treeDeliver
+	h.mu.Unlock()
+	if deliver == nil {
+		panic("no folder watch was started")
+	}
+	deliver(event)
+}
+
+func (h *refreshHarness) treeCounts() (starts, stops int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.treeStarts, h.treeStops
 }
 
 func waitUpdate(t *testing.T, h *refreshHarness) contract.DocUpdate {
@@ -225,5 +266,103 @@ func TestCloseDocumentForgetsTheFileAndStopsWatching(t *testing.T) {
 	}
 	if got, _ := h.service.Refresh(context.Background()); got.Failure == nil {
 		t.Fatal("Refresh still had a document to read")
+	}
+}
+
+func TestOpeningAFolderWatchesItsStructure(t *testing.T) {
+	dir := t.TempDir()
+	other := t.TempDir()
+	h := newRefreshHarness(t, 21)
+
+	if got, err := h.service.openFolderPath(h.window, dir); err != nil || got.Failure != nil {
+		t.Fatalf("openFolderPath = %+v, %v", got, err)
+	}
+	if starts, _ := h.treeCounts(); starts != 1 {
+		t.Fatalf("tree watches started %d, want 1", starts)
+	}
+
+	h.fireTree(watch.Event{Op: watch.Write})
+	select {
+	case <-h.treeChanged:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the page was not told the folder changed")
+	}
+
+	// Another folder replaces the watch, releasing the first.
+	if got, _ := h.service.openFolderPath(h.window, other); got.Failure != nil {
+		t.Fatalf("second openFolderPath failed: %+v", got.Failure)
+	}
+	if starts, stops := h.treeCounts(); starts != 2 || stops != 1 {
+		t.Fatalf("starts/stops = %d/%d, want 2/1", starts, stops)
+	}
+
+	h.reg.Remove(h.window.ID())
+	if _, stops := h.treeCounts(); stops != 2 {
+		t.Fatalf("stops = %d, want the folder watch released with the window", stops)
+	}
+}
+
+func TestDialogOpenedFolderWatchesAndRecords(t *testing.T) {
+	dir := t.TempDir()
+	h := newRefreshHarness(t, 30)
+	store, err := appstate.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.service.state = store
+	h.service.pickDir = func(context.Context) (string, error) { return dir, nil }
+
+	got, err := h.service.OpenFolderDialog(context.Background())
+	if err != nil || got.Failure != nil || got.Root == "" {
+		t.Fatalf("OpenFolderDialog = %+v, %v", got, err)
+	}
+	if starts, _ := h.treeCounts(); starts != 1 {
+		t.Fatalf("tree watches started %d, want 1 for a dialog-opened folder", starts)
+	}
+	recent := store.Get().Recent
+	if len(recent) != 1 || recent[0].Path != dir {
+		t.Fatalf("recent = %+v, want the dialog folder", recent)
+	}
+}
+
+func TestTheWatchEndingMarksTheDocumentStale(t *testing.T) {
+	dir := t.TempDir()
+	path := writeSample(t, dir, "note.md", []byte("# one\n"))
+	h := newRefreshHarness(t, 12)
+
+	if got, _ := h.service.openPath(context.Background(), h.window, path); got.Failure != nil {
+		t.Fatalf("openPath failed: %+v", got.Failure)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	// The folder itself going away ends the watch with Gone, without a
+	// Remove for the file in between.
+	h.fire(watch.Event{Op: watch.Gone})
+
+	update := waitUpdate(t, h)
+	if update.Failure == nil || update.Failure.Code != "not_found" {
+		t.Fatalf("update = %+v, want not_found after the watch ended", update)
+	}
+}
+
+func TestTheFolderWatchEndingMarksTheDocumentStale(t *testing.T) {
+	dir := t.TempDir()
+	path := writeSample(t, dir, "note.md", []byte("# one\n"))
+	h := newRefreshHarness(t, 31)
+	if got, _ := h.service.openFolderPath(h.window, dir); got.Failure != nil {
+		t.Fatalf("openFolderPath failed: %+v", got.Failure)
+	}
+	if got, _ := h.service.openPath(context.Background(), h.window, path); got.Failure != nil {
+		t.Fatalf("openPath failed: %+v", got.Failure)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	h.fireTree(watch.Event{Op: watch.Gone})
+
+	update := waitUpdate(t, h)
+	if update.Failure == nil || update.Failure.Code != "not_found" {
+		t.Fatalf("update = %+v, want not_found after the folder ended", update)
 	}
 }

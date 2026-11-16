@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"github.com/egoist/mygo"
 
@@ -52,6 +53,10 @@ type Deps struct {
 	Watcher *watch.Pool
 	// DocUpdated tells one window its document changed.
 	DocUpdated func(windowID int, update contract.DocUpdate)
+	// TreeWatcher shares one folder watch between the windows that show it.
+	TreeWatcher *watch.Pool
+	// TreeChanged tells one window its folder's structure changed.
+	TreeChanged func(windowID int)
 	// CloseWindow closes one native window; the last one quits the app.
 	CloseWindow func(windowID int) error
 	// State is the settings store; nil when the app data directory is not
@@ -83,9 +88,14 @@ type WindowService struct {
 	startupNotice string
 	themeChanged  func(appearance string)
 	docUpdated    func(windowID int, update contract.DocUpdate)
+	treeWatcher   *watch.Pool
+	treeChanged   func(windowID int)
 	closeWindow   func(windowID int) error
-	confirm       func(ctx context.Context, title, message, detail string) bool
-	external      func(url string) error
+	// metaFailed records that an implicit settings write failed, so the next
+	// GetSettings can tell the user without blocking the reading (PRD FR-08.8).
+	metaFailed atomic.Bool
+	confirm    func(ctx context.Context, title, message, detail string) bool
+	external   func(url string) error
 }
 
 // NewWindowService returns a WindowService over the open windows. resources is
@@ -120,6 +130,8 @@ func NewWindowService(d Deps) *WindowService {
 		resources:     d.Resources,
 		watcher:       d.Watcher,
 		docUpdated:    d.DocUpdated,
+		treeWatcher:   d.TreeWatcher,
+		treeChanged:   d.TreeChanged,
 		closeWindow:   d.CloseWindow,
 		state:         d.State,
 		startupNotice: d.StartupNotice,
@@ -175,6 +187,10 @@ func (s *WindowService) imageResolver(window int, dir string) markdown.ImageReso
 		}
 		if !imageExt(real) {
 			return "", "不支持的图片格式"
+		}
+		// The bytes and the size decide, before the page asks for them.
+		if reason := resource.Check(real); reason != "" {
+			return "", reason
 		}
 		return resourceURL(s.resources.Add(window, real)), ""
 	}
@@ -279,8 +295,18 @@ func (s *WindowService) OpenFolderDialog(ctx context.Context) (contract.OpenFold
 		}
 		return contract.OpenFolderResult{}, nil
 	}
-	w.SetRoot(real)
+	s.finishFolder(w, real)
 	return contract.OpenFolderResult{Root: real, Name: filepath.Base(real)}, nil
+}
+
+// finishFolder makes real the window's folder and starts everything that
+// belongs to it: the recent entry, the resume target and the structure watch.
+// Both ways of opening a folder end here (PRD FR-03, FR-07.1).
+func (s *WindowService) finishFolder(w *winctx.Window, real string) {
+	w.SetRoot(real)
+	s.recordRecent(real, true)
+	s.recordResumeOf(w)
+	s.watchTree(w, real)
 }
 
 // Scan streams the tree of the window's folder in frames, ending with one
@@ -338,10 +364,11 @@ func scanFrames(result scan.Result) []contract.ScanFrame {
 		frames = append(frames, frame)
 	}
 	frames = append(frames, contract.ScanFrame{
-		Done:      true,
-		Truncated: result.Truncated,
-		Bound:     result.Bound,
-		Skipped:   result.Skipped,
+		Done:       true,
+		Truncated:  result.Truncated,
+		Bound:      result.Bound,
+		Skipped:    result.Skipped,
+		Unreadable: result.Unreadable,
 	})
 	return frames
 }
@@ -480,13 +507,37 @@ func (s *WindowService) openFolderPath(w *winctx.Window, path string) (contract.
 			Detail: "请选择一个文件夹",
 		}}, nil
 	}
-	w.SetRoot(real)
-	s.recordRecent(real, true)
-	s.recordResumeOf(w)
+	s.finishFolder(w, real)
 	return contract.OpenRequestResult{
 		Kind:   "folder",
 		Folder: &contract.FolderInfo{Root: real, Name: filepath.Base(real)},
 	}, nil
+}
+
+// watchTree subscribes the window to its folder's structure. The pool shares
+// one recursive watch between windows that show the same folder; the last
+// release stops it, as for a file. A folder too large to watch keeps manual
+// refresh (PRD §8.3); the failure stays in the log, not in the page.
+func (s *WindowService) watchTree(w *winctx.Window, root string) {
+	if s.treeWatcher == nil {
+		return
+	}
+	w.StopTreeWatch()
+	release, err := s.treeWatcher.Acquire(root, func(ev watch.Event) {
+		if s.treeChanged != nil {
+			s.treeChanged(w.ID())
+		}
+		if ev.Op == watch.Gone {
+			// The folder went away or was renamed: the open document cannot
+			// be read any more, so mark it stale (PRD FR-07.9, AC-12).
+			go s.reload(w)
+		}
+	})
+	if err != nil {
+		log.Printf("window %d: cannot watch its folder: %v", w.ID(), err)
+		return
+	}
+	w.SetStopTreeWatch(release)
 }
 
 // currentContent answers a repeated request with what the window shows.
@@ -591,7 +642,11 @@ func (s *WindowService) finishOpen(w *winctx.Window, real string) {
 // The path stays out of the log: it is the user's file name (CLAUDE.md §6).
 func (s *WindowService) onFileEvent(w *winctx.Window, ev watch.Event) {
 	if ev.Op == watch.Gone {
+		// The file's folder went away: read once more so the page marks the
+		// document stale instead of keeping it as if it were current
+		// (PRD FR-07.5, AC-12).
 		log.Printf("window %d: the watch on its file ended", w.ID())
+		go s.reload(w)
 		return
 	}
 	log.Printf("window %d: its file %s", w.ID(), ev.Op)
@@ -633,6 +688,23 @@ func (s *WindowService) Refresh(ctx context.Context) (contract.LoadResult, error
 	}
 	w.NextRefresh()
 	return s.readAndRender(ctx, w, path), nil
+}
+
+// RemoveRecent drops one recent entry the page found unavailable (PRD §7.2).
+// Only entries the app recorded can be removed, so the page cannot use this
+// to touch anything else.
+func (s *WindowService) RemoveRecent(ctx context.Context, path string) error {
+	if _, err := s.callerWindow(ctx); err != nil {
+		return err
+	}
+	if s.state == nil {
+		return nil
+	}
+	if err := s.state.RemoveRecent(path); err != nil {
+		log.Printf("settings: cannot remove a recent entry: %v", err)
+		return err
+	}
+	return nil
 }
 
 // CloseWindow closes the calling window (PRD FR-09, Ctrl+W). The last window

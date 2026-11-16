@@ -28,6 +28,50 @@ const (
 	reasonUnsupported   = "不支持的图片格式"
 )
 
+// Check reports why the file at path cannot be served, or "" when it can.
+// The renderer asks before it registers an image, so a damaged or oversized
+// file becomes a placeholder with a reason at once, instead of a broken image
+// the page cannot explain (PRD §7.2, AC-18).
+func Check(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return reasonNotFound
+	}
+	defer f.Close()
+
+	fi, err := f.Stat()
+	if err != nil || fi.IsDir() {
+		return reasonNotFound
+	}
+	if fi.Size() > MaxBytes {
+		return reasonTooLarge
+	}
+
+	head := make([]byte, 512)
+	n, err := io.ReadFull(f, head)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
+		return reasonNotFound
+	}
+	head = head[:n]
+	if _, ok := sniff(head); !ok {
+		return reasonUnsupported
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(head))
+	if err != nil {
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return reasonNotFound
+		}
+		cfg, _, err = image.DecodeConfig(f)
+		if err != nil {
+			return reasonUnsupported
+		}
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width*cfg.Height > MaxPixels {
+		return reasonTooManyPixels
+	}
+	return ""
+}
+
 // Handler serves the registered images. Register it before the first window
 // opens (CLAUDE.md §5, decisions.md D-T01):
 //

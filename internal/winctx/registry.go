@@ -22,6 +22,7 @@ type Window struct {
 	openFile   string
 	root       string
 	stopWatch  func()
+	stopTree   func()
 }
 
 // ID is the native window's ID, as mygo.Window.ID reports it.
@@ -101,6 +102,29 @@ func (w *Window) StopWatch() {
 	}
 }
 
+// SetStopTreeWatch records how to stop watching the folder's structure,
+// replacing any earlier watch.
+func (w *Window) SetStopTreeWatch(stop func()) {
+	w.stateMu.Lock()
+	previous := w.stopTree
+	w.stopTree = stop
+	w.stateMu.Unlock()
+	if previous != nil {
+		previous()
+	}
+}
+
+// StopTreeWatch stops watching the folder's structure, if a watch is running.
+func (w *Window) StopTreeWatch() {
+	w.stateMu.Lock()
+	stop := w.stopTree
+	w.stopTree = nil
+	w.stateMu.Unlock()
+	if stop != nil {
+		stop()
+	}
+}
+
 // OpenFile is the file the window shows, if any.
 func (w *Window) OpenFile() (string, bool) {
 	w.stateMu.Lock()
@@ -150,6 +174,7 @@ func (r *Registry) Remove(id int) bool {
 	r.mu.Unlock()
 	if ok {
 		w.StopWatch()
+		w.StopTreeWatch()
 		w.cancel()
 	}
 	return ok

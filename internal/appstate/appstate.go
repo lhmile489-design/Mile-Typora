@@ -155,6 +155,31 @@ func (s *Store) AddRecent(path string, isDir bool) error {
 	return nil
 }
 
+// RemoveRecent drops one entry, as the row of an unavailable target does
+// (PRD §7.2). A path that is not listed changes nothing.
+func (s *Store) RemoveRecent(path string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	next := copyOf(s.data)
+	kept := make([]Recent, 0, len(next.Recent))
+	for _, entry := range next.Recent {
+		if strings.EqualFold(entry.Path, path) {
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	next.Recent = kept
+	if next.Resume != nil && strings.EqualFold(next.Resume.Path, path) {
+		next.Resume = nil
+	}
+	clean := normalize(next)
+	if err := writeAtomic(s.path, clean); err != nil {
+		return err
+	}
+	s.data = clean
+	return nil
+}
+
 // SetResume records what the next resume launch restores. A nil target clears
 // it, as "clear the recent list" does (PRD FR-10.10).
 func (s *Store) SetResume(target *Resume) error {

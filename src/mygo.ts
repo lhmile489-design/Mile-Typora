@@ -100,6 +100,14 @@ export interface NewWindowResult {
   failure?: Failure;
 }
 
+/**
+ * Notice is a short message a window shows in its status bar: something the
+ * app refused or could not do, said without blocking (PRD §7.3, §9.2.4).
+ */
+export interface Notice {
+  text: string;
+}
+
 /** OpenFolderResult answers the folder dialog. Root is empty when cancelled. */
 export interface OpenFolderResult {
   root: string;
@@ -176,6 +184,11 @@ export interface ScanFrame {
   truncated?: boolean;
   bound?: string;
   skipped?: number;
+  /**
+   * Unreadable counts folders the scan could not read; the page says the
+   * result is partial (PRD §7.2).
+   */
+  unreadable?: number;
   failure?: Failure;
 }
 
@@ -204,6 +217,13 @@ export interface ThemeChange {
   /** Appearance is "system", "light" or "dark". */
   appearance: string;
 }
+
+/**
+ * TreeChanged tells a window that the structure of its folder changed, so
+ * the page rescans the tree (PRD FR-03.12, FR-07.1). It carries nothing:
+ * the page already knows its folder.
+ */
+export interface TreeChanged {}
 
 /** TreeEntry is one row of the file tree: a folder or a Markdown file. */
 export interface TreeEntry {
@@ -333,6 +353,14 @@ export const WindowService = {
     return call("WindowService.Refresh");
   },
   /**
+   * RemoveRecent drops one recent entry the page found unavailable (PRD §7.2).
+   * Only entries the app recorded can be removed, so the page cannot use this
+   * to touch anything else.
+   */
+  removeRecent(path: string): Promise<void> {
+    return call("WindowService.RemoveRecent", path);
+  },
+  /**
    * SaveSettings writes the settings the page edited. A failed write keeps the
    * previous settings (PRD FR-10.2).
    */
@@ -357,6 +385,10 @@ export const events = {
   themeChange: event<ThemeChange>("theme-change"),
   /** docUpdated tells one window its document changed outside the app. */
   docUpdated: event<DocUpdate>("doc-updated"),
+  /** treeChanged tells one window its folder's structure changed. */
+  treeChanged: event<TreeChanged>("tree-changed"),
+  /** appNotice tells one window about something the app refused to do. */
+  appNotice: event<Notice>("app-notice"),
   /**
    * openRequest tells one window to open something after its page is ready.
    * Only the target window receives it (CLAUDE.md §5, decisions.md D-T01).

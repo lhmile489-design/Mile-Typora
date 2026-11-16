@@ -161,6 +161,13 @@ body {
 }
 .tree-root .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tree-root svg { width: var(--icon-sm); height: var(--icon-sm); color: var(--text-muted); }
+.tree-empty {
+  display: flex; align-items: center; gap: 6px;
+  margin: var(--sp-2) var(--sp-3);
+  color: var(--text-muted);
+  font-size: var(--ui-sm); line-height: var(--ui-sm-lh);
+}
+.tree-empty svg { width: var(--icon-sm); height: var(--icon-sm); flex: none; }
 .tree-scroll { flex: 1; min-height: 0; overflow-y: auto; outline: none; }
 .ti {
   display: flex; align-items: center; gap: 6px;

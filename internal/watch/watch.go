@@ -89,6 +89,63 @@ func Start(ctx context.Context, path string, onEvent func(Event)) (stop func(), 
 	}, nil
 }
 
+// TreeDebounce groups a burst of directory changes; one rescan is heavier
+// than one file reload.
+const TreeDebounce = 200 * time.Millisecond
+
+// TreeMaxEntries bounds the directories one tree watch enrolls. A root with
+// more is not watched; the page still refreshes with F5.
+const TreeMaxEntries = 32768
+
+// StartTree watches the folders under root and reports a structural change:
+// a file or folder appeared, went away, or was renamed. A write to a file is
+// the file watch's business, not the tree's. The watch ends with Gone when
+// the root itself goes away.
+func StartTree(ctx context.Context, root string, onEvent func(Event)) (stop func(), err error) {
+	if ctx == nil {
+		return nil, errors.New("watch: nil context")
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	w, err := mygo.WatchFiles(ctx, root, mygo.FileWatchOptions{
+		Recursive:  true,
+		Debounce:   TreeDebounce,
+		MaxDelay:   time.Second,
+		MaxEntries: TreeMaxEntries,
+	})
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			events, err := w.Next(ctx)
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					onEvent(Event{Op: Gone})
+					return
+				}
+				return
+			}
+			for _, ev := range events {
+				switch ev.Op {
+				case mygo.FileCreate, mygo.FileRemove, mygo.FileRename:
+					// The tree only cares that the structure moved.
+					onEvent(Event{Op: Write, Path: ev.Path})
+				}
+			}
+		}
+	}()
+
+	return func() {
+		cancel()
+		_ = w.Close()
+		<-done
+	}, nil
+}
+
 // mapOp turns a platform event into the one the page will act on. A create and
 // a rename matter as a write: the file's content is what the reader shows.
 func mapOp(op mygo.FileOp) (Op, bool) {

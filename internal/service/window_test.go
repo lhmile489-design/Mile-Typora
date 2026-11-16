@@ -1,9 +1,12 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +21,16 @@ import (
 	"github.com/lhmile489-design/mile-typora/internal/scan"
 	"github.com/lhmile489-design/mile-typora/internal/winctx"
 )
+
+// tinyPNG is a real one-pixel PNG, so checks that decode it pass.
+func tinyPNG(t *testing.T) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
 
 func newTestService(callerID int, registered bool) (*WindowService, *winctx.Registry) {
 	reg := winctx.NewRegistry()
@@ -243,15 +256,15 @@ func TestImageResolverScope(t *testing.T) {
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	png := []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}
-	if err := os.WriteFile(filepath.Join(sub, "a.png"), png, 0o644); err != nil {
+	pngBytes := tinyPNG(t)
+	if err := os.WriteFile(filepath.Join(sub, "a.png"), pngBytes, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "b.svg"), []byte("<svg/>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	outside := filepath.Join(t.TempDir(), "secret.png")
-	if err := os.WriteFile(outside, png, 0o644); err != nil {
+	if err := os.WriteFile(outside, pngBytes, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -277,9 +290,21 @@ func TestImageResolverScope(t *testing.T) {
 	}
 }
 
+func TestImageResolverRejectsADamagedImage(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "bad.png"), []byte("not an image"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := newTestService(1, true)
+	url, reason := s.imageResolver(1, dir)("bad.png")
+	if url != "" || reason != "不支持的图片格式" {
+		t.Fatalf("resolve = %q, %q; want a local reason", url, reason)
+	}
+}
+
 func TestOpenFileDialogServesImagesThroughTokens(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "图.png"), []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "图.png"), tinyPNG(t), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	docPath := filepath.Join(dir, "笔记.md")
@@ -362,7 +387,7 @@ func TestScanFramesBatching(t *testing.T) {
 	for i := range entries {
 		entries[i] = scan.Entry{Path: fmt.Sprintf("%d.md", i), Name: fmt.Sprintf("%d.md", i)}
 	}
-	frames := scanFrames(scan.Result{Entries: entries, Truncated: true, Bound: "entries", Skipped: 2})
+	frames := scanFrames(scan.Result{Entries: entries, Truncated: true, Bound: "entries", Skipped: 2, Unreadable: 1})
 	if len(frames) != 4 {
 		t.Fatalf("frames = %d, want 4 (3 batches and a done frame)", len(frames))
 	}
@@ -374,7 +399,7 @@ func TestScanFramesBatching(t *testing.T) {
 		t.Fatalf("entries in frames = %d, want %d", total, len(entries))
 	}
 	last := frames[len(frames)-1]
-	if !last.Done || !last.Truncated || last.Bound != "entries" || last.Skipped != 2 {
+	if !last.Done || !last.Truncated || last.Bound != "entries" || last.Skipped != 2 || last.Unreadable != 1 {
 		t.Fatalf("last frame = %+v, want the outcome", last)
 	}
 }
@@ -886,5 +911,30 @@ func TestRecordFocusKeepsTheFolderAndDocument(t *testing.T) {
 	got := store.Get().Resume
 	if got == nil || !got.IsDir || got.Path != root || got.Selected != "a.md" {
 		t.Fatalf("resume = %+v, want the folder and the document", got)
+	}
+}
+
+func TestGetSettingsReportsAFailedImplicitWriteOnce(t *testing.T) {
+	s, _ := newTestService(1, true)
+	store, err := appstate.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.state = store
+	s.metaFailed.Store(true)
+
+	first, err := s.GetSettings(context.Background())
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	if first.Failure == nil || first.Failure.Code != "settings_write_failed" {
+		t.Fatalf("failure = %+v, want settings_write_failed", first.Failure)
+	}
+	second, err := s.GetSettings(context.Background())
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	if second.Failure != nil {
+		t.Fatalf("failure repeated: %+v", second.Failure)
 	}
 }

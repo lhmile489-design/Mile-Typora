@@ -25,7 +25,7 @@ import type {
   Transport,
   TreeEntry,
 } from "../lib/transport";
-import { failureMessage, formatBytes } from "../lib/errors";
+import { failureMessage, failureText, formatBytes } from "../lib/errors";
 import { FileTree } from "../components/FileTree";
 import { SettingsDialog } from "../components/SettingsDialog";
 import { FindBar } from "../components/FindBar";
@@ -40,7 +40,7 @@ type ReadyState =
   | { kind: "ready"; info: ReadyInfo }
   | { kind: "failed"; message: string };
 
-type LoadError = { code: string; message: string };
+type LoadError = { code: string; message: string; kind: "file" | "folder" };
 
 /**
  * The window shell, laid out after artboard 2 of the design draft
@@ -99,6 +99,8 @@ export function App({ transport }: { transport: Transport }) {
   }, []);
 
   const findRanges = useRef<Range[]>([]);
+  // The last tree rows on screen; a failed rescan keeps them (PRD §7.1).
+  const treeRows = useRef<TreeEntry[]>([]);
   const docRef = useRef<OpenedDoc | null>(null);
   const refreshingRef = useRef(false);
   // The newest document update applied; an older one arrives too late.
@@ -141,6 +143,7 @@ export function App({ transport }: { transport: Transport }) {
         setSelected(null);
         setStale(null);
         setUpdatedAt(null);
+        treeRows.current = [];
       }
       setTree([]);
       setTreeNotice(null);
@@ -150,16 +153,25 @@ export function App({ transport }: { transport: Transport }) {
       scanRef.current = transport.scan((frame: ScanFrame) => {
         if (frame.failure) {
           setScanning(false);
-          setTreeNotice(failureMessage(frame.failure.code, frame.failure.detail));
+          const message = failureMessage(frame.failure.code, frame.failure.detail);
+          if (keepDoc && treeRows.current.length > 0) {
+            // A failed rescan keeps the rows it had and says they may be old
+            // (PRD §7.1: partial state + ready document stay usable).
+            setTree([...treeRows.current]);
+            setTreeNotice(`${message}，显示上次结果`);
+          } else {
+            setTreeNotice(message);
+          }
           return;
         }
         if (frame.entries.length > 0) {
           rows.push(...frame.entries);
+          treeRows.current = [...rows];
           setTree([...rows]);
         }
         if (frame.done) {
           setScanning(false);
-          setTreeNotice(frame.truncated ? scanNotice(frame) : null);
+          setTreeNotice(scanNotice(frame));
           if (keepDoc) {
             // A selected file the rescan no longer has is unselected; the
             // reader keeps what it shows (PRD FR-07.6).
@@ -197,6 +209,10 @@ export function App({ transport }: { transport: Transport }) {
     docRef.current = doc;
   }, [doc]);
 
+  useEffect(() => {
+    return transport.onNotice((notice) => setNotice(notice.text));
+  }, [transport]);
+
   // A change outside the app replaces the document, or marks it stale when
   // the file cannot be read any more (PRD FR-07.1, FR-07.5, FR-07.11).
   useEffect(() => {
@@ -205,7 +221,7 @@ export function App({ transport }: { transport: Transport }) {
       updateSeq.current = update.seq;
       if (update.failure) {
         if (!docRef.current) return;
-        setStale(failureMessage(update.failure.code, update.failure.detail));
+        setStale(failureText(update.failure));
         return;
       }
       if (!update.doc) return;
@@ -275,7 +291,13 @@ export function App({ transport }: { transport: Transport }) {
           void loadSettings();
           return;
         case "failed":
-          setLoadError({ code: result.code, message: result.message });
+          if (docRef.current || folderRef.current) {
+            // A failed open must not hide the document or folder that is
+            // still open (PRD §7.1 combined states, FR-07.7).
+            setNotice(result.message);
+          } else {
+            setLoadError({ code: result.code, message: result.message, kind: "file" });
+          }
           return;
         case "handedOff":
           // A new window opens it; this one keeps what it shows.
@@ -297,7 +319,18 @@ export function App({ transport }: { transport: Transport }) {
   // A click in the tree opens the file here; its arrow opens it elsewhere.
   const openRecent = useCallback(
     async (entry: RecentEntry) => {
-      applyOutcome(await transport.openRecent(entry.path));
+      const result = await transport.openRecent(entry.path);
+      if (result.kind === "failed") {
+        setNotice(`${entry.name} 不可用：${result.message}`);
+        // Only a target that is gone leaves the list; a file that is merely
+        // too large or in another encoding still exists (PRD §7.2, FR-08.3).
+        if (result.code === "not_found" || result.code === "permission" || result.code === "out_of_scope") {
+          setRecent((prev) => prev.filter((item) => item.path !== entry.path));
+          void transport.removeRecent(entry.path);
+        }
+        return;
+      }
+      applyOutcome(result);
     },
     [applyOutcome, transport],
   );
@@ -382,7 +415,8 @@ export function App({ transport }: { transport: Transport }) {
       setStale(null);
       setUpdatedAt(nowHM());
     } else if (result.kind === "failed") {
-      setLoadError({ code: result.code, message: result.message });
+      if (docRef.current || folderRef.current) setNotice(result.message);
+      else setLoadError({ code: result.code, message: result.message, kind: "file" });
     }
   }, [transport]);
 
@@ -391,7 +425,8 @@ export function App({ transport }: { transport: Transport }) {
     setNotice(null);
     const result = await transport.openFolder();
     if (result.kind === "failed") {
-      setLoadError({ code: result.code, message: result.message });
+      if (docRef.current || folderRef.current) setNotice(result.message);
+      else setLoadError({ code: result.code, message: result.message, kind: "folder" });
       return;
     }
     if (result.kind !== "opened") return;
@@ -399,6 +434,24 @@ export function App({ transport }: { transport: Transport }) {
   }, [startScan, transport]);
 
   useEffect(() => () => scanRef.current?.abort(), []);
+
+  // The folder changed on disk: rescan it, keeping the open document and its
+  // position (PRD FR-03.12, FR-07.1). Bursts of changes become one rescan.
+  useEffect(() => {
+    let timer: number | null = null;
+    const off = transport.onTreeChanged(() => {
+      if (timer !== null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        timer = null;
+        const openFolder = folderRef.current;
+        if (openFolder) startScan(openFolder.root, openFolder.name, true);
+      }, 250);
+    });
+    return () => {
+      off();
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [startScan, transport]);
 
   // F5 and the toolbar refresh the reading context: the tree as well in a
   // folder window (PRD FR-07.8). A failure keeps what is on screen.
@@ -733,7 +786,10 @@ export function App({ transport }: { transport: Transport }) {
             </div>
           )}
           {loadError ? (
-            <LoadFailure error={loadError} onRetry={() => void openFile()} />
+            <LoadFailure
+              error={loadError}
+              onRetry={() => (loadError.kind === "folder" ? void openFolder() : void openFile())}
+            />
           ) : doc ? (
             <Reader doc={doc} scrollerRef={readerRef} onLink={(href) => void handleLink(href)} />
           ) : (
@@ -880,13 +936,30 @@ function Reader({
       if (href) onLink(href);
     };
     root.addEventListener("click", onClick);
+    // A registered image can still fail when it is fetched (deleted or
+    // replaced between render and load): leave a reason, not a broken icon
+    // (PRD §7.2, AC-18).
+    const onImageError = (event: Event) => {
+      const img = event.target;
+      if (!(img instanceof HTMLImageElement) || !root.contains(img)) return;
+      const box = document.createElement("div");
+      box.className = "limited";
+      box.dataset.kind = "image";
+      box.dataset.reason = "图片无法加载";
+      box.textContent = img.alt || "图片无法加载";
+      img.replaceWith(box);
+    };
+    root.addEventListener("error", onImageError, true);
     // Task list boxes show state and take no input (PRD FR-04).
     for (const box of root.querySelectorAll('input[type="checkbox"]')) {
       box.setAttribute("aria-readonly", "true");
     }
     renderMath(root);
     void renderDiagrams(root);
-    return () => root.removeEventListener("click", onClick);
+    return () => {
+      root.removeEventListener("click", onClick);
+      root.removeEventListener("error", onImageError, true);
+    };
   }, [doc.html, onLink]);
 
   if (doc.text === "") {
@@ -908,7 +981,7 @@ function LoadFailure({ error, onRetry }: { error: LoadError; onRetry: () => void
     <div className="empty error">
       <div>
         <CircleX className="ic" aria-hidden="true" />
-        <h3>无法打开文件</h3>
+        <h3>{error.kind === "folder" ? "无法打开文件夹" : "无法打开文件"}</h3>
         <p>{error.message}</p>
         <div className="row">
           <button className="btn secondary" type="button" onClick={onRetry}>
@@ -993,8 +1066,17 @@ function nowHM(): string {
 }
 
 /** scanNotice says which bound stopped the scan and what it left out. */
-function scanNotice(frame: ScanFrame): string {
-  const bound = frame.bound === "markdown" ? "文件数量" : frame.bound === "depth" ? "目录深度" : "条目数量";
-  const skipped = frame.skipped ? `，另有 ${frame.skipped} 项未包含` : "";
-  return `结果不完整：达到${bound}上限${skipped}`;
+function scanNotice(frame: ScanFrame): string | null {
+  const parts: string[] = [];
+  if (frame.truncated) {
+    const bound = frame.bound === "markdown" ? "文件数量" : frame.bound === "depth" ? "目录深度" : "条目数量";
+    const skipped = frame.skipped ? `，另有 ${frame.skipped} 项未包含` : "";
+    parts.push(`结果不完整：达到${bound}上限${skipped}`);
+  } else if (frame.skipped) {
+    parts.push(`已跳过 ${frame.skipped} 项链接、联接或超出深度的目录`);
+  }
+  if (frame.unreadable) {
+    parts.push(`部分目录无法访问（${frame.unreadable} 个），可重试`);
+  }
+  return parts.length > 0 ? parts.join("；") : null;
 }

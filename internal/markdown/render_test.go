@@ -332,7 +332,7 @@ func TestImagesUseTheResolver(t *testing.T) {
 	if failure != nil {
 		t.Fatalf("Render: %+v", failure)
 	}
-	if !strings.Contains(res.HTML, `<img src="http://mtres.localhost/tok123" alt="图">`) {
+	if !strings.Contains(res.HTML, `<img src="http://mtres.localhost/tok123" alt="图" loading="lazy">`) {
 		t.Fatalf("the local image was not rewritten\n%s", res.HTML)
 	}
 	if !strings.Contains(res.HTML, `data-kind="image" data-reason="远程图片未加载"`) {
@@ -346,7 +346,7 @@ func TestImagesUseTheResolver(t *testing.T) {
 
 func TestImagesWithoutResolverKeepTheirSource(t *testing.T) {
 	res := renderResult(t, "![图](images/a.png)\n")
-	if !strings.Contains(res.HTML, `<img src="images/a.png" alt="图">`) {
+	if !strings.Contains(res.HTML, `<img src="images/a.png" alt="图" loading="lazy">`) {
 		t.Fatalf("output = %s, want the source untouched", res.HTML)
 	}
 }

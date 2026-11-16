@@ -12,6 +12,7 @@ import {
   type ReadyInfo,
   type LinkTarget,
   type LoadResult,
+  type Notice,
   type OpenRequestResult,
   type RecentEntry,
   type SettingsResult,
@@ -19,7 +20,7 @@ import {
   type ScanFrame,
   type ThemeChange,
 } from "../mygo";
-import { failureMessage } from "./errors";
+import { failureMessage, failureText } from "./errors";
 
 export type { Doc as OpenedDoc, DocUpdate, OpenRequest, ReadyInfo, ScanFrame };
 
@@ -95,6 +96,10 @@ export interface Transport {
    * failure leaves the old document on screen, marked stale (PRD FR-07).
    */
   onDocUpdated(listener: (update: DocUpdate) => void): () => void;
+  /** Subscribes to structural changes of the window's folder (PRD FR-03.12). */
+  onTreeChanged(listener: () => void): () => void;
+  /** Subscribes to short notices about a request the app refused (PRD §9.2.4). */
+  onNotice(listener: (notice: Notice) => void): () => void;
   /** Reads the window's document again (F5, or the stale banner's retry). */
   refresh(): Promise<OpenFileResult>;
   /** Drops the window's document, leaving its folder open (PRD FR-07.5). */
@@ -109,6 +114,8 @@ export interface Transport {
   clearRecent(): Promise<Outcome<void>>;
   /** Opens an entry the app recorded itself. */
   openRecent(path: string): Promise<RequestedOutcome>;
+  /** Drops one recent entry that turned out to be unavailable (PRD §7.2). */
+  removeRecent(path: string): Promise<Outcome<void>>;
   /**
    * Opens a file the tree names, relative to the window's folder, here or in
    * a new window (PRD FR-02, AC-06).
@@ -168,7 +175,7 @@ export const mygoTransport: Transport = {
         return {
           kind: "failed",
           code: result.failure.code,
-          message: failureMessage(result.failure.code, result.failure.detail),
+          message: failureText(result.failure),
         };
       }
       if (!result.root) {
@@ -197,6 +204,8 @@ export const mygoTransport: Transport = {
   openLink: async (href) => linkOutcome(() => WindowService.openLink(href)),
   onThemeChange: (listener) => subscribe(() => events.themeChange.on(listener)),
   onDocUpdated: (listener) => subscribe(() => events.docUpdated.on(listener)),
+  onTreeChanged: (listener) => subscribe(() => events.treeChanged.on(() => listener())),
+  onNotice: (listener) => subscribe(() => events.appNotice.on(listener)),
   refresh: async () => openResult(() => WindowService.refresh()),
   closeDocument: () =>
     wrap(async () => {
@@ -230,6 +239,10 @@ export const mygoTransport: Transport = {
       if (outcome.failure) throw new Error(failureMessage(outcome.failure.code, outcome.failure.detail));
     }),
   openRecent: async (path) => requestedOutcome(() => WindowService.openRecent(path)),
+  removeRecent: (path) =>
+    wrap(async () => {
+      await WindowService.removeRecent(path);
+    }),
   openTreeFile: async (rel, newWindow) => requestedOutcome(() => WindowService.openTreeFile(rel, newWindow)),
 };
 
@@ -241,7 +254,7 @@ async function openResult(call: () => Promise<LoadResult>): Promise<OpenFileResu
       return {
         kind: "failed",
         code: result.failure.code,
-        message: failureMessage(result.failure.code, result.failure.detail),
+        message: failureText(result.failure),
       };
     }
     if (!result.doc) return { kind: "cancelled" };
@@ -264,7 +277,7 @@ async function requestedOutcome(call: () => Promise<OpenRequestResult>): Promise
       return {
         kind: "failed",
         code: result.failure.code,
-        message: failureMessage(result.failure.code, result.failure.detail),
+        message: failureText(result.failure),
       };
     }
     if (result.kind === "folder" && result.folder) {

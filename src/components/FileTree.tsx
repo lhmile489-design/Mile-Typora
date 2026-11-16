@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ChevronRight, FileText, Folder, SquarePlus } from "lucide-react";
+import { ChevronRight, FileSearch, FileText, Folder, SquarePlus } from "lucide-react";
 import type { TreeEntry } from "../lib/transport";
 
 type Props = {
@@ -131,6 +131,12 @@ export function FileTree({ rootName, entries, selected, onOpen, onOpenInNewWindo
         <Folder aria-hidden="true" />
         <span className="nm">{rootName}</span>
       </div>
+      {!busy && !notice && entries.length === 0 && (
+        <div className="tree-empty">
+          <FileSearch aria-hidden="true" />
+          此目录下未找到 Markdown 文件
+        </div>
+      )}
       <div
         ref={scrollRef}
         className="tree-scroll"

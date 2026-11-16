@@ -192,3 +192,34 @@ func TestForgetWindowDropsItsTokens(t *testing.T) {
 		t.Fatalf("status = %d after ForgetWindow, want 404", rec.Code)
 	}
 }
+
+func TestCheckReportsWhyAnImageCannotBeShown(t *testing.T) {
+	dir := t.TempDir()
+	if got := Check(writePNG(t, dir, "good.png")); got != "" {
+		t.Fatalf("good image check = %q, want none", got)
+	}
+
+	bad := filepath.Join(dir, "bad.png")
+	if err := os.WriteFile(bad, []byte("not an image"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := Check(bad); got != reasonUnsupported {
+		t.Fatalf("damaged image check = %q, want %q", got, reasonUnsupported)
+	}
+
+	var buf bytes.Buffer
+	buf.Write([]byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A})
+	ihdr := make([]byte, 13)
+	binary.BigEndian.PutUint32(ihdr[0:4], 100000)
+	binary.BigEndian.PutUint32(ihdr[4:8], 100000)
+	ihdr[8] = 8
+	ihdr[9] = 6
+	buf.Write(crcChunk("IHDR", ihdr))
+	huge := filepath.Join(dir, "huge.png")
+	if err := os.WriteFile(huge, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := Check(huge); got != reasonTooManyPixels {
+		t.Fatalf("huge image check = %q, want %q", got, reasonTooManyPixels)
+	}
+}
