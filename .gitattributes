@@ -1,0 +1,11 @@
+# 仓库与工作区统一用 LF：本机 core.autocrlf=true 会把工作区改成 CRLF，
+# 而读取层测试要断言原始换行（docs/踩坑记录 与 docread 用例）。
+* text=auto eol=lf
+
+# PowerShell 脚本用 CRLF，Windows 上的编辑器与签名工具都习惯它
+*.ps1 text eol=crlf
+
+# 读取层样本必须保留原始字节：CRLF 样本、BOM 样本、非 UTF-8 样本
+testdata/docs/crlf.md text eol=crlf
+testdata/docs/bom.md -text
+testdata/docs/invalid-utf8.md -text
