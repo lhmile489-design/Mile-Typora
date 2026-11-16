@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/egoist/mygo"
 
@@ -59,6 +60,9 @@ type Deps struct {
 	TreeChanged func(windowID int)
 	// CloseWindow closes one native window; the last one quits the app.
 	CloseWindow func(windowID int) error
+	// StartedAt is when the process started, for the startup measurement
+	// (docs/develop/性能基线.md).
+	StartedAt time.Time
 	// State is the settings store; nil when the app data directory is not
 	// usable, in which case the app still reads documents.
 	State *appstate.Store
@@ -91,6 +95,7 @@ type WindowService struct {
 	treeWatcher   *watch.Pool
 	treeChanged   func(windowID int)
 	closeWindow   func(windowID int) error
+	startedAt     time.Time
 	// metaFailed records that an implicit settings write failed, so the next
 	// GetSettings can tell the user without blocking the reading (PRD FR-08.8).
 	metaFailed atomic.Bool
@@ -133,6 +138,7 @@ func NewWindowService(d Deps) *WindowService {
 		treeWatcher:   d.TreeWatcher,
 		treeChanged:   d.TreeChanged,
 		closeWindow:   d.CloseWindow,
+		startedAt:     d.StartedAt,
 		state:         d.State,
 		startupNotice: d.StartupNotice,
 		themeChanged:  d.ThemeChanged,
@@ -325,6 +331,7 @@ func (s *WindowService) Scan(ctx context.Context, frames *mygo.Channel[contract.
 		}})
 		return nil
 	}
+	started := time.Now()
 	result, err := scan.Scan(ctx, root, scan.Options{})
 	if err != nil {
 		_ = frames.Send(contract.ScanFrame{Done: true, Failure: &contract.Failure{
@@ -334,12 +341,20 @@ func (s *WindowService) Scan(ctx context.Context, frames *mygo.Channel[contract.
 		return nil
 	}
 
+	firstSent := false
 	for _, frame := range scanFrames(result) {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		if err := frames.Send(frame); err != nil {
 			return nil // the page is done with this tree
+		}
+		if !firstSent {
+			firstSent = true
+			log.Printf("perf: scan first ms=%d", time.Since(started).Milliseconds())
+		}
+		if frame.Done {
+			log.Printf("perf: scan done ms=%d entries=%d", time.Since(started).Milliseconds(), len(result.Entries))
 		}
 	}
 	return nil
@@ -564,7 +579,9 @@ func (s *WindowService) currentContent(ctx context.Context, w *winctx.Window) (c
 // openPath validates a path the user chose or was handed, reads and renders
 // it, and makes it the window's document.
 func (s *WindowService) openPath(ctx context.Context, w *winctx.Window, chosen string) (contract.LoadResult, error) {
+	started := time.Now()
 	result := s.readAndRender(ctx, w, chosen)
+	log.Printf("perf: open ms=%d ok=%t", time.Since(started).Milliseconds(), result.Failure == nil)
 	if result.Failure != nil || result.Doc == nil {
 		return result, nil
 	}
@@ -764,6 +781,11 @@ func (s *WindowService) Ready(ctx context.Context) (contract.ReadyInfo, error) {
 		return contract.ReadyInfo{}, err
 	}
 	w.MarkReady()
+	if !s.startedAt.IsZero() {
+		// A machine-readable line for the cold-start measurement; it carries
+		// no path or content (CLAUDE.md §6).
+		log.Printf("perf: ready window=%d ms=%d", w.ID(), time.Since(s.startedAt).Milliseconds())
+	}
 	info := contract.ReadyInfo{WindowID: w.ID(), Version: s.version()}
 	// The reason a restore fell back to a blank page belongs to this launch,
 	// so every handshake of it reports the reason: a page that remounts

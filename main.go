@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"log"
 	"net/url"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/egoist/mygo"
 
@@ -21,6 +23,9 @@ import (
 
 // appState is the settings store, for the window-time helpers.
 var appState *appstate.Store
+
+// startedAt is when the process began, for the startup measurement.
+var startedAt = time.Now()
 
 // windowsService is the service the window hooks talk to; main sets it once.
 var windowsService *service.WindowService
@@ -96,6 +101,15 @@ func main() {
 		routeOpenRequests(args)
 	})
 
+	// A packaged app has no console, so measurement runs ask for a log file
+	// (docs/develop/性能基线.md). It carries no path or content.
+	if path := os.Getenv("MILE_PERF"); path != "" {
+		if f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+			log.SetOutput(io.MultiWriter(os.Stderr, f))
+			defer f.Close()
+		}
+	}
+
 	// Settings live in the app's own data directory, never next to the
 	// documents (CLAUDE.md §5.7). Without them the app still reads.
 	var state *appstate.Store
@@ -161,6 +175,7 @@ func main() {
 				}
 			}
 		},
+		StartedAt: startedAt,
 		CloseWindow: func(windowID int) error {
 			for _, w := range mygo.Windows() {
 				if w.ID() == windowID {
