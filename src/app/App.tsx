@@ -10,7 +10,7 @@ import {
   Settings,
   SquarePlus,
 } from "lucide-react";
-import type { ReadyInfo, Transport } from "../lib/transport";
+import type { OpenRequest, ReadyInfo, Transport } from "../lib/transport";
 
 type ReadyState =
   | { kind: "waiting" }
@@ -25,18 +25,40 @@ type ReadyState =
  */
 export function App({ transport }: { transport: Transport }) {
   const [ready, setReady] = useState<ReadyState>({ kind: "waiting" });
+  const [requests, setRequests] = useState<OpenRequest[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [showLeft, setShowLeft] = useState(true);
   const [showRight, setShowRight] = useState(true);
 
+  // Requests live in the Go-side queue until acknowledged, so subscribing
+  // before the handshake and fetching what is pending loses nothing: a
+  // remount gets the same requests again. Seq keeps order and drops repeats.
   useEffect(() => {
+    const seen = new Set<number>();
+    const add = (request: OpenRequest) => {
+      if (seen.has(request.seq)) return;
+      seen.add(request.seq);
+      setRequests((prev) => [...prev, request]);
+      // The queue frees itself as soon as everything up to this request is
+      // handled, and Go never replays those to this page again.
+      void transport.ack(request.seq).catch(() => {});
+    };
+    const off = transport.onOpenRequest(add);
     let alive = true;
-    void transport.ready().then((r) => {
+    void transport.ready().then(async (r) => {
       if (!alive) return;
-      setReady(r.ok ? { kind: "ready", info: r.value } : { kind: "failed", message: r.message });
+      if (!r.ok) {
+        setReady({ kind: "failed", message: r.message });
+        return;
+      }
+      setReady({ kind: "ready", info: r.value });
+      const pending = await transport.pending(0);
+      if (!alive || !pending.ok) return;
+      pending.value.forEach(add);
     });
     return () => {
       alive = false;
+      off();
     };
   }, [transport]);
 
@@ -109,7 +131,8 @@ export function App({ transport }: { transport: Transport }) {
         )}
       </div>
       <footer className="statusbar" role="status">
-        <span className="item grow">未打开文档</span>
+        <PendingRequest requests={requests} />
+        <span className="grow" />
         {notice && (
           <span className="item st-danger">
             <CircleAlert aria-hidden="true" />
@@ -119,6 +142,20 @@ export function App({ transport }: { transport: Transport }) {
         <ReadyBadge state={ready} />
       </footer>
     </div>
+  );
+}
+
+/**
+ * M1-2 shows the queued open requests here so the plumbing is visible; M1-3
+ * replaces this with actually opening the file (docs/开发计划.md M1-2).
+ */
+function PendingRequest({ requests }: { requests: OpenRequest[] }) {
+  const last = requests.at(-1);
+  if (!last) return <span className="item">未打开文档</span>;
+  return (
+    <span className="item" title={last.path}>
+      待打开{requests.length > 1 ? `（${requests.length}）` : ""}：{last.path}
+    </span>
   );
 }
 

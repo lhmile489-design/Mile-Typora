@@ -13,6 +13,8 @@ type Window struct {
 	id     int
 	ctx    context.Context
 	cancel context.CancelFunc
+	// q holds the open requests that arrive before the page is ready.
+	q intentQueue
 }
 
 // ID is the native window's ID, as mygo.Window.ID reports it.

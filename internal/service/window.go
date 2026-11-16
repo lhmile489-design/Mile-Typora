@@ -62,14 +62,46 @@ func (s *WindowService) callerWindow(ctx context.Context) (*winctx.Window, error
 	return w, nil
 }
 
-// Ready is the page's handshake: it identifies the calling window. M1-2 adds
-// the open requests queued before the page was ready.
+// Ready is the page's handshake: it identifies the calling window. The page
+// then asks for its open requests with Pending, and acknowledges each one.
 func (s *WindowService) Ready(ctx context.Context) (contract.ReadyInfo, error) {
 	w, err := s.callerWindow(ctx)
 	if err != nil {
 		return contract.ReadyInfo{}, err
 	}
+	w.MarkReady()
 	return contract.ReadyInfo{WindowID: w.ID(), Version: s.version()}, nil
+}
+
+// Pending returns the open requests after seq that the page has not
+// acknowledged. A page that remounts or reloads asks again and loses nothing
+// (PRD §9.2.3: no request is dropped silently).
+func (s *WindowService) Pending(ctx context.Context, after int64) (contract.PendingResult, error) {
+	w, err := s.callerWindow(ctx)
+	if err != nil {
+		return contract.PendingResult{}, err
+	}
+	return contract.PendingResult{Requests: openRequests(w.PendingSince(after))}, nil
+}
+
+// Ack confirms that the page handled every request up to seq, which frees the
+// window's queue.
+func (s *WindowService) Ack(ctx context.Context, seq int64) error {
+	w, err := s.callerWindow(ctx)
+	if err != nil {
+		return err
+	}
+	w.Ack(seq)
+	return nil
+}
+
+// openRequests converts queued requests to the page's contract type.
+func openRequests(intents []winctx.Intent) []contract.OpenRequest {
+	out := make([]contract.OpenRequest, len(intents))
+	for i, it := range intents {
+		out[i] = contract.OpenRequest{Seq: it.Seq, Path: it.Path}
+	}
+	return out
 }
 
 // NewWindow opens another window (PRD FR-02). The reuse matrix of M2-2 decides

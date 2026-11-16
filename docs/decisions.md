@@ -121,3 +121,17 @@ M1 需验证：mermaid 12 的 `securityLevel: "strict"` 与 `%%{init}%%` 指令�
   - `PostMessage WM_CLOSE` 关一个窗口 → 另一个存活，进程仍在
   - 关最后一个窗口 → 进程退出，`mygo dev` 以 0 退出
 - 新增 `@types/node@22.20.5`（开发依赖）与 `tsconfig.json` 的 `types` 加 `"node"`，因为 `src/styles/tokens.test.ts` 用 `node:fs` 读取设计稿做令牌比对。
+
+### D-T15 · 打开请求：队列是真相，事件只是提示（M1-2）
+
+- 原计划让 `Ready()` 一次性返回排队的打开请求。原生实测发现会丢：React StrictMode 在开发模式下会挂载、卸载、再挂载，第一次挂载拿到的响应被丢弃，而队列已经被取空，请求就消失了。
+- 改为：请求留在 Go 侧有界队列（每窗口 32 条）直到页面 `Ack(seq)`；`Pending(after)` 可重复取；就绪后新请求入队并发一次 `open-request` 事件，仅作提示。页面按 `seq` 去重。握手响应被丢弃、事件丢失、页面重载都不会丢请求（PRD §9.2.3）。
+- 队列满返回 `queue_full`，不挤掉未确认的请求；`Ack` 之后容量释放。
+
+### D-T16 · 原生窗口的自动验证手段
+
+- 工具截不到原生窗口，于是用两个小脚本让每个阶段的原生验收都能拿到证据：
+  - `scripts/native-windows.ps1`：`EnumWindows` 按进程列出可见顶层窗口，`WM_CLOSE` 关窗（与用户点关闭等价）。用来验多窗口、关一窗、最后一窗退出。
+  - `scripts/native-eval.mjs`：通过 WebView2 的调试端口在真实窗口里执行表达式并打印结果，用来读状态栏文字、主题、计算样式。
+- 调试端口只在手动启动时开，需要三个环境变量（`MYGO_DEV=1`、`MYGO_DEV_URL=http://localhost:5273`、`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`）。`mygo dev` 启动的应用不带调试端口，生产构建更不会。
+- 两者只用于开发期验收，不进入构建产物。

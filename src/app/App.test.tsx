@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { App } from "./App";
 import type { Transport } from "../lib/transport";
 
@@ -9,6 +9,9 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
   return {
     ready: async () => ({ ok: true, value: { windowId: 3, version: "0.1.0" } }),
     newWindow: async () => ({ ok: true, value: undefined }),
+    onOpenRequest: () => () => {},
+    pending: async () => ({ ok: true, value: [] }),
+    ack: async () => {},
     ...overrides,
   };
 }
@@ -70,6 +73,30 @@ describe("App shell", () => {
     // Without Shift it is not the window shortcut.
     fireEvent.keyDown(window, { key: "N", ctrlKey: true });
     expect(newWindow).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the open requests queued before the handshake", async () => {
+    const pending = async () => ({ ok: true as const, value: [{ seq: 2, path: "b.md" }] });
+    const ack = vi.fn(async () => {});
+    render(<App transport={fakeTransport({ pending, ack })} />);
+    expect(await screen.findByText(/待打开：b\.md/)).toBeTruthy();
+    expect(ack).toHaveBeenCalledWith(2);
+  });
+
+  it("takes open requests after the handshake and ignores repeats", async () => {
+    let deliver: (r: { seq: number; path: string }) => void = () => {};
+    const onOpenRequest = (listener: (r: { seq: number; path: string }) => void) => {
+      deliver = listener;
+      return () => {};
+    };
+    render(<App transport={fakeTransport({ onOpenRequest })} />);
+    await screen.findByText("窗口 3 · v0.1.0");
+    act(() => deliver({ seq: 1, path: "a.md" }));
+    expect(screen.getByText(/待打开：a\.md/)).toBeTruthy();
+    act(() => deliver({ seq: 1, path: "a.md" }));
+    expect(screen.queryByText(/（2）/)).toBeNull();
+    act(() => deliver({ seq: 2, path: "c.md" }));
+    expect(screen.getByText(/待打开（2）：c\.md/)).toBeTruthy();
   });
 
   it("shows a new-window failure in the window that asked", async () => {

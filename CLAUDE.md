@@ -170,6 +170,11 @@ bun run build          # mygo build，产物在 build/
 - 只读保证用文件哈希对比证明（AC-21）。取消、迟到结果、订阅释放用日志计数证明。
 - 性能数值（PRD 8.2）尚未实测，不能写成"已达到"。
 
+原生验收（工具看不到原生窗口时）：
+- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/native-windows.ps1 -Action count` 列出进程的可见窗口；`-Action close -Count N` 关窗
+- 要读窗口里的页面，先手动启动带调试端口的应用：`MYGO_DEV=1 MYGO_DEV_URL=http://localhost:5273 WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222 ".mygo/dev/windows-amd64/Mile Typora Dev.exe"`，再用 `node scripts/native-eval.mjs "表达式"`（此时需先 `bun run dev:web` 提供 5273 的前端）
+- 两者只用于开发期验收，不进入构建产物（decisions.md D-T16）
+
 设计稿预览：`.claude/launch.json` 的 `design-draft` 配置（端口 8765），打开 `/mile-typora-design.html`。`web-shell` 配置在浏览器里打开前端外壳（端口 5274）。浏览器里没有 mygo 运行时，状态栏会显示连接失败，这是预期结果，只用来看布局和主题。
 
 ## 9. 界面约束

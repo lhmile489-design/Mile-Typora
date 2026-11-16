@@ -83,6 +83,44 @@ func TestNewWindowReportsExpectedFailure(t *testing.T) {
 	}
 }
 
+func TestPendingReturnsQueuedRequestsInOrder(t *testing.T) {
+	s, reg := newTestService(1, true)
+	w, _ := reg.Get(1)
+	for _, p := range []string{"a.md", "b.md"} {
+		if _, err := w.Push(p); err != nil {
+			t.Fatalf("Push(%q): %v", p, err)
+		}
+	}
+	if _, err := s.Ready(context.Background()); err != nil {
+		t.Fatalf("Ready: %v", err)
+	}
+	got, err := s.Pending(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("Pending: %v", err)
+	}
+	if len(got.Requests) != 2 || got.Requests[0].Path != "a.md" || got.Requests[1].Path != "b.md" {
+		t.Fatalf("Pending requests = %+v, want a.md then b.md", got.Requests)
+	}
+	// Asking again, as a remounted page does, still returns them.
+	again, err := s.Pending(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("second Pending: %v", err)
+	}
+	if len(again.Requests) != 2 {
+		t.Fatalf("second Pending returned %d requests, want both again", len(again.Requests))
+	}
+	if err := s.Ack(context.Background(), 2); err != nil {
+		t.Fatalf("Ack: %v", err)
+	}
+	after, err := s.Pending(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("Pending after Ack: %v", err)
+	}
+	if len(after.Requests) != 0 {
+		t.Fatalf("Pending after Ack = %+v, want none", after.Requests)
+	}
+}
+
 func TestNewWindowRequiresCaller(t *testing.T) {
 	s, _ := newTestService(1, true)
 	s.caller = func(context.Context) (int, bool) { return 0, false }
