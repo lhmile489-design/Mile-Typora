@@ -239,3 +239,41 @@ body {
 .recent-row .txt { display: flex; flex-direction: column; min-width: 0; line-height: 18px; }
 .recent-row .nm { font-size: var(--ui-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .recent-row .path { font-size: var(--ui-xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 对话框（DESIGN.md §8.12、§8.13）：遮罩 + 560 面板，无页面级阴影 */
+.dialog-overlay {
+  position: fixed; inset: 0; z-index: var(--z-overlay);
+  display: grid; place-items: center;
+  background: var(--bg-overlay);
+}
+.dialog {
+  width: 560px; max-width: calc(100vw - var(--sp-8));
+  max-height: calc(100vh - var(--sp-12));
+  overflow: auto;
+  padding: var(--sp-6);
+  background: var(--bg-raised);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+}
+.dialog h2 { margin: 0 0 var(--sp-4); font: 600 var(--ui-lg)/var(--ui-lg-lh) var(--font-heading); color: var(--text-strong); }
+.settings-body { display: flex; gap: var(--sp-6); min-height: 180px; }
+.settings-nav { width: 120px; flex: none; font-size: var(--ui-sm); }
+.settings-nav .current { display: block; padding: var(--sp-1) var(--sp-2); border-radius: var(--r-sm); background: var(--bg-active); color: var(--text-strong); font-weight: 600; }
+.settings-content { flex: 1; min-width: 0; }
+.settings-group { margin: 0; padding: 0; border: 0; }
+.settings-group legend { margin-bottom: var(--sp-2); font-size: var(--ui-sm); font-weight: 600; color: var(--text-soft); }
+.radio-row { display: flex; gap: var(--sp-2); padding: var(--sp-2); border-radius: var(--r-sm); cursor: pointer; }
+.radio-row:hover { background: var(--bg-hover); }
+.radio-row input { margin-top: 3px; accent-color: var(--accent); }
+.radio-row .txt { display: flex; flex-direction: column; }
+.radio-row .label { font-size: var(--ui-base); color: var(--text); }
+.radio-row .hint { font-size: var(--ui-xs); color: var(--text-muted); line-height: var(--ui-xs-lh); }
+.dialog-error {
+  margin-top: var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-md);
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: var(--ui-sm);
+}
+.dialog-actions { display: flex; justify-content: flex-end; gap: var(--sp-3); margin-top: var(--sp-6); }

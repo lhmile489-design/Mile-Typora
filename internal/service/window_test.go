@@ -855,3 +855,36 @@ func TestClearRecentEmptiesTheList(t *testing.T) {
 		t.Fatalf("recent = %+v, want none", got.Settings.Recent)
 	}
 }
+
+func TestSavingSettingsKeepsTheResumeTarget(t *testing.T) {
+	s, _ := newTestService(1, true)
+	store := withState(t, s)
+	target := &appstate.Resume{Path: filepath.Join(t.TempDir(), "a.md")}
+	if err := store.SetResume(target); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SaveSettings(context.Background(), contract.SettingsView{
+		Startup: appstate.StartupResume, Appearance: appstate.AppearanceSystem,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.Get().Resume; got == nil || got.Path != target.Path {
+		t.Fatalf("resume = %+v, want it kept across a settings save", got)
+	}
+}
+
+func TestRecordFocusKeepsTheFolderAndDocument(t *testing.T) {
+	root := t.TempDir()
+	path := writeSample(t, root, "a.md", []byte("# a\n"))
+	s, reg := newTestService(1, true)
+	store := withState(t, s)
+	w, _ := reg.Get(1)
+	w.SetRoot(root)
+	w.SetOpenFile(path)
+
+	s.RecordFocus(1)
+	got := store.Get().Resume
+	if got == nil || !got.IsDir || got.Path != root || got.Selected != "a.md" {
+		t.Fatalf("resume = %+v, want the folder and the document", got)
+	}
+}

@@ -5,6 +5,7 @@
 package appstate
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,6 +40,17 @@ type Recent struct {
 	IsDir bool `json:"isDir"`
 }
 
+// Resume is what the next launch restores (PRD FR-10.4, FR-10.5).
+type Resume struct {
+	// Path is the file, or the folder, that was last read in front.
+	Path string `json:"path"`
+	// IsDir tells a folder from a file.
+	IsDir bool `json:"isDir"`
+	// Selected is the document shown inside the folder, as a path relative
+	// to it; empty for a single file.
+	Selected string `json:"selected,omitempty"`
+}
+
 // Settings is everything the app remembers between runs.
 type Settings struct {
 	// Startup is StartupBlank or StartupResume.
@@ -47,6 +59,8 @@ type Settings struct {
 	Appearance string `json:"appearance"`
 	// Recent is newest first.
 	Recent []Recent `json:"recent"`
+	// Resume is the target of the next "resume" launch, if there is one.
+	Resume *Resume `json:"resume,omitempty"`
 }
 
 // Defaults are what a fresh install uses.
@@ -76,6 +90,8 @@ func Open(dir string) (*Store, error) {
 	case err != nil:
 		return nil, err
 	}
+	// An editor may add a byte order mark; it is not part of the JSON.
+	raw = bytes.TrimPrefix(raw, []byte{0xEF, 0xBB, 0xBF})
 	var loaded Settings
 	if err := json.Unmarshal(raw, &loaded); err != nil {
 		preserved, renameErr := preserve(store.path)
@@ -139,12 +155,28 @@ func (s *Store) AddRecent(path string, isDir bool) error {
 	return nil
 }
 
-// ClearRecent empties the list and saves (PRD FR-10.10).
+// SetResume records what the next resume launch restores. A nil target clears
+// it, as "clear the recent list" does (PRD FR-10.10).
+func (s *Store) SetResume(target *Resume) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	next := copyOf(s.data)
+	next.Resume = target
+	clean := normalize(next)
+	if err := writeAtomic(s.path, clean); err != nil {
+		return err
+	}
+	s.data = clean
+	return nil
+}
+
+// ClearRecent empties the list and the resume target, and saves (PRD FR-10.10).
 func (s *Store) ClearRecent() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	next := copyOf(s.data)
 	next.Recent = nil
+	next.Resume = nil
 	if err := writeAtomic(s.path, next); err != nil {
 		return err
 	}
@@ -196,12 +228,35 @@ func normalize(s Settings) Settings {
 		}
 	}
 	s.Recent = recent
+
+	if s.Resume != nil {
+		target := Resume{
+			Path:     strings.TrimSpace(s.Resume.Path),
+			IsDir:    s.Resume.IsDir,
+			Selected: strings.TrimSpace(s.Resume.Selected),
+		}
+		if target.Path == "" || !filepath.IsAbs(target.Path) ||
+			strings.HasPrefix(target.Selected, "..") || filepath.IsAbs(target.Selected) {
+			s.Resume = nil
+		} else {
+			target.Path = filepath.Clean(target.Path)
+			target.Selected = filepath.ToSlash(filepath.Clean(filepath.FromSlash(target.Selected)))
+			if target.Selected == "." {
+				target.Selected = ""
+			}
+			s.Resume = &target
+		}
+	}
 	return s
 }
 
 func copyOf(s Settings) Settings {
 	out := s
 	out.Recent = append([]Recent(nil), s.Recent...)
+	if s.Resume != nil {
+		resume := *s.Resume
+		out.Resume = &resume
+	}
 	return out
 }
 

@@ -27,7 +27,7 @@ export type TreeEntry = ScanFrame["entries"][number];
 /** What an open request produced. Nothing opened means it went to a new
  * window, which opens it there. */
 export type RequestedOutcome =
-  | { kind: "file"; doc: Doc }
+  | { kind: "file"; doc: Doc; rel?: string }
   | { kind: "folder"; root: string; name: string }
   | { kind: "handedOff" }
   | { kind: "failed"; code: string; message: string };
@@ -232,7 +232,7 @@ async function requestedOutcome(call: () => Promise<OpenRequestResult>): Promise
       return { kind: "folder", root: result.folder.root, name: result.folder.name };
     }
     if (result.kind === "file" && result.doc) {
-      return { kind: "file", doc: result.doc };
+      return { kind: "file", doc: result.doc, rel: result.rel };
     }
     return { kind: "handedOff" };
   } catch (err) {

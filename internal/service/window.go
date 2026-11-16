@@ -56,6 +56,8 @@ type Deps struct {
 	// State is the settings store; nil when the app data directory is not
 	// usable, in which case the app still reads documents.
 	State *appstate.Store
+	// StartupNotice tells the first page why no document was restored.
+	StartupNotice string
 	// Confirm asks the user a yes/no question with the reason spelled out.
 	Confirm func(ctx context.Context, title, message, detail string) bool
 	// External opens a URL with the system browser.
@@ -74,8 +76,10 @@ type WindowService struct {
 	resources *resource.Store
 	watch     WatchFunc
 	state     *appstate.Store
-	confirm   func(ctx context.Context, title, message, detail string) bool
-	external  func(url string) error
+	// startupNotice is handed to the first page once.
+	startupNotice string
+	confirm       func(ctx context.Context, title, message, detail string) bool
+	external      func(url string) error
 }
 
 // NewWindowService returns a WindowService over the open windows. resources is
@@ -101,17 +105,18 @@ func NewWindowService(d Deps) *WindowService {
 			}
 			return w.ID(), true
 		},
-		version:   mygo.App.Version,
-		windows:   d.Windows,
-		open:      d.Open,
-		pick:      d.PickFile,
-		pickDir:   d.PickFolder,
-		render:    markdown.New(),
-		resources: d.Resources,
-		watch:     d.Watch,
-		state:     d.State,
-		confirm:   d.Confirm,
-		external:  d.External,
+		version:       mygo.App.Version,
+		windows:       d.Windows,
+		open:          d.Open,
+		pick:          d.PickFile,
+		pickDir:       d.PickFolder,
+		render:        markdown.New(),
+		resources:     d.Resources,
+		watch:         d.Watch,
+		state:         d.State,
+		startupNotice: d.StartupNotice,
+		confirm:       d.Confirm,
+		external:      d.External,
 	}
 }
 
@@ -443,7 +448,12 @@ func (s *WindowService) openKind(ctx context.Context, w *winctx.Window, kind, pa
 	if err != nil {
 		return contract.OpenRequestResult{}, err
 	}
-	return contract.OpenRequestResult{Kind: "file", Doc: load.Doc, Failure: load.Failure}, nil
+	return contract.OpenRequestResult{
+		Kind:    "file",
+		Doc:     load.Doc,
+		Rel:     s.relToRoot(w, load.Doc),
+		Failure: load.Failure,
+	}, nil
 }
 
 // openFolderPath makes a folder the window's root.
@@ -463,6 +473,7 @@ func (s *WindowService) openFolderPath(w *winctx.Window, path string) (contract.
 	}
 	w.SetRoot(real)
 	s.recordRecent(real, true)
+	s.recordResumeOf(w)
 	return contract.OpenRequestResult{
 		Kind:   "folder",
 		Folder: &contract.FolderInfo{Root: real, Name: filepath.Base(real)},
@@ -529,6 +540,7 @@ func (s *WindowService) openPath(ctx context.Context, w *winctx.Window, chosen s
 func (s *WindowService) showDocument(ctx context.Context, w *winctx.Window, real string, doc *docread.Doc, rendered markdown.Result) (contract.LoadResult, error) {
 	w.SetOpenFile(real)
 	s.recordRecent(real, false)
+	s.recordResumeOf(w)
 	// Watch the file so a change outside the app can be picked up. M3-4
 	// refreshes the document here; M1-7 records that events arrive.
 	if s.watch != nil {
@@ -581,7 +593,12 @@ func (s *WindowService) Ready(ctx context.Context) (contract.ReadyInfo, error) {
 		return contract.ReadyInfo{}, err
 	}
 	w.MarkReady()
-	return contract.ReadyInfo{WindowID: w.ID(), Version: s.version()}, nil
+	info := contract.ReadyInfo{WindowID: w.ID(), Version: s.version()}
+	// The reason a restore fell back to a blank page belongs to this launch,
+	// so every handshake of it reports the reason: a page that remounts
+	// (React StrictMode in development) must not lose it.
+	info.StartupNotice = s.startupNotice
+	return info, nil
 }
 
 // Pending returns the open requests after seq that the page has not

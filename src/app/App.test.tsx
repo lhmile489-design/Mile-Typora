@@ -43,12 +43,12 @@ describe("App shell", () => {
 
   it("keeps unwired toolbar commands visible but disabled", () => {
     render(<App transport={fakeTransport()} />);
-    for (const name of ["刷新", "设置"]) {
+    for (const name of ["刷新"]) {
       const b = screen.getByRole("button", { name });
       expect(b.getAttribute("aria-disabled")).toBe("true");
     }
     // Wired commands work, so they are not disabled.
-    for (const name of ["打开文件", "打开目录", "新建窗口", "查找", "左侧栏", "预留侧栏"]) {
+    for (const name of ["打开文件", "打开目录", "新建窗口", "查找", "设置", "左侧栏", "预留侧栏"]) {
       expect(screen.getByRole("button", { name }).getAttribute("aria-disabled")).toBeNull();
     }
   });
@@ -285,12 +285,21 @@ describe("the window matrix", () => {
     });
   }
 
-  it("opens a tree file in this window", async () => {
-    const openTreeFile = vi.fn(async () => ({ kind: "handedOff" as const }));
+  it("opens a tree file in this window and keeps the tree", async () => {
+    const openTreeFile = vi.fn(async () => ({
+      kind: "file" as const,
+      doc: loadedDoc.doc,
+      rel: "a.md",
+    }));
     render(<App transport={withTree({ openTreeFile })} />);
     fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
     fireEvent.mouseDown(await screen.findByText("a.md"));
     expect(openTreeFile).toHaveBeenCalledWith("a.md", false);
+    // The folder stays, and the row shows as selected (AC-06).
+    expect(await screen.findByRole("tree", { name: "文件树" })).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByRole("treeitem", { name: /a\.md/, selected: true })).toBeTruthy(),
+    );
   });
 
   it("opens a tree file in a new window from its button", async () => {
@@ -437,5 +446,49 @@ describe("the recent list", () => {
     };
     render(<App transport={fakeTransport({ getSettings: async () => broken })} />);
     expect(await screen.findByText(/设置文件损坏/)).toBeTruthy();
+  });
+});
+
+describe("the settings dialog", () => {
+  it("opens with Ctrl+comma and saves the startup choice", async () => {
+    const saveSettings = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    render(<App transport={fakeTransport({ saveSettings })} />);
+    fireEvent.keyDown(window, { key: ",", ctrlKey: true });
+    const dialog = await screen.findByRole("dialog", { name: "设置" });
+    expect(dialog).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: /恢复上一份文档/ }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    expect(saveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ startup: "resume" }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "设置" })).toBeNull());
+  });
+
+  it("keeps the dialog open and says so when saving fails", async () => {
+    const saveSettings = async () => ({ ok: false as const, message: "本次设置未保存" });
+    render(<App transport={fakeTransport({ saveSettings })} />);
+    fireEvent.keyDown(window, { key: ",", ctrlKey: true });
+    fireEvent.click(await screen.findByRole("button", { name: "保存" }));
+    expect(await screen.findByText("本次设置未保存")).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "设置" })).toBeTruthy();
+  });
+
+  it("closes without saving on Escape", async () => {
+    const saveSettings = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    render(<App transport={fakeTransport({ saveSettings })} />);
+    fireEvent.keyDown(window, { key: ",", ctrlKey: true });
+    const dialog = await screen.findByRole("dialog", { name: "设置" });
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "设置" })).toBeNull());
+    expect(saveSettings).not.toHaveBeenCalled();
+  });
+
+  it("shows why a restore fell back to a blank page", async () => {
+    const ready = async () => ({
+      ok: true as const,
+      value: { windowId: 1, version: "0.1.0", startupNotice: "上次阅读的内容已不存在，已打开空白页" },
+    });
+    render(<App transport={fakeTransport({ ready })} />);
+    expect(await screen.findByText(/上次阅读的内容已不存在/)).toBeTruthy();
   });
 });

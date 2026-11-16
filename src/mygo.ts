@@ -112,6 +112,11 @@ export interface OpenRequestResult {
   kind: string;
   doc?: Doc;
   folder?: FolderInfo;
+  /**
+   * Rel is the document's path relative to the window's folder, when the
+   * document is inside it: the page then keeps the tree.
+   */
+  rel?: string;
   failure?: Failure;
 }
 
@@ -127,6 +132,11 @@ export interface PendingResult {
 export interface ReadyInfo {
   windowId: number;
   version: string;
+  /**
+   * StartupNotice explains why the launch opened a blank page instead of
+   * the document it meant to restore (PRD FR-10.6).
+   */
+  startupNotice?: string;
 }
 
 /** RecentEntry is one row of the start page's recent list. */
@@ -270,6 +280,13 @@ export const WindowService = {
    */
   ready(): Promise<ReadyInfo> {
     return call("WindowService.Ready");
+  },
+  /**
+   * RecordFocus notes what a window shows when it comes to the front, so the
+   * next resume launch opens what the reader was looking at (PRD FR-10.4).
+   */
+  recordFocus(id: number): Promise<void> {
+    return call("WindowService.RecordFocus", id);
   },
   /**
    * SaveSettings writes the settings the page edited. A failed write keeps the

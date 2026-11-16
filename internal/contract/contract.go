@@ -24,6 +24,9 @@ type OpenRequest struct {
 type ReadyInfo struct {
 	WindowID int    `json:"windowId"`
 	Version  string `json:"version"`
+	// StartupNotice explains why the launch opened a blank page instead of
+	// the document it meant to restore (PRD FR-10.6).
+	StartupNotice string `json:"startupNotice,omitempty"`
 }
 
 // PendingResult lists the open requests the page has not acknowledged yet, in
@@ -107,10 +110,13 @@ type FolderInfo struct {
 // carries Doc, "folder" carries Folder. Kind is empty when the request went to
 // a new window, which opens it there.
 type OpenRequestResult struct {
-	Kind    string      `json:"kind"`
-	Doc     *Doc        `json:"doc,omitempty"`
-	Folder  *FolderInfo `json:"folder,omitempty"`
-	Failure *Failure    `json:"failure,omitempty"`
+	Kind   string      `json:"kind"`
+	Doc    *Doc        `json:"doc,omitempty"`
+	Folder *FolderInfo `json:"folder,omitempty"`
+	// Rel is the document's path relative to the window's folder, when the
+	// document is inside it: the page then keeps the tree.
+	Rel     string   `json:"rel,omitempty"`
+	Failure *Failure `json:"failure,omitempty"`
 }
 
 // LinkTarget says what a link click means. The page scrolls an anchor, opens

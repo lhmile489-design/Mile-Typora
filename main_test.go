@@ -1,7 +1,11 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/lhmile489-design/mile-typora/internal/appstate"
 )
 
 func TestIsAppURL(t *testing.T) {
@@ -37,5 +41,53 @@ func TestIsAppURLAllowsTheDevServerWhileDeveloping(t *testing.T) {
 	// Another port is not the app's page.
 	if isAppURL("http://localhost:5173/") {
 		t.Error("isAppURL allowed a different dev port")
+	}
+}
+
+func TestStartupTarget(t *testing.T) {
+	dir := t.TempDir()
+	doc := filepath.Join(dir, "a.md")
+	if err := os.WriteFile(doc, []byte("# a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name       string
+		settings   appstate.Settings
+		wantReqs   int
+		wantNotice bool
+	}{
+		{"blank mode", appstate.Settings{Startup: appstate.StartupBlank}, 0, false},
+		{"resume without a target", appstate.Settings{Startup: appstate.StartupResume}, 0, false},
+		{"resume a file", appstate.Settings{Startup: appstate.StartupResume, Resume: &appstate.Resume{Path: doc}}, 1, false},
+		{"resume a missing file", appstate.Settings{Startup: appstate.StartupResume, Resume: &appstate.Resume{Path: filepath.Join(dir, "gone.md")}}, 0, true},
+		{"resume a folder", appstate.Settings{Startup: appstate.StartupResume, Resume: &appstate.Resume{Path: dir, IsDir: true}}, 1, false},
+		{"resume a folder and its document", appstate.Settings{Startup: appstate.StartupResume, Resume: &appstate.Resume{Path: dir, IsDir: true, Selected: "a.md"}}, 2, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			store, err := appstate.Open(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := store.Save(c.settings); err != nil {
+				t.Fatal(err)
+			}
+			requests, notice := startupTarget(store)
+			if len(requests) != c.wantReqs {
+				t.Fatalf("requests = %+v, want %d", requests, c.wantReqs)
+			}
+			if (notice != "") != c.wantNotice {
+				t.Fatalf("notice = %q, want one: %v", notice, c.wantNotice)
+			}
+		})
+	}
+}
+
+func TestStartupTargetPrefersNothingForAnExplicitCommandLine(t *testing.T) {
+	// The explicit argument path is decided in main before this runs; here it
+	// is enough that a programme state is not required.
+	if requests, notice := startupTarget(nil); len(requests) != 0 || notice != "" {
+		t.Fatalf("startupTarget(nil) = %+v, %q; want nothing", requests, notice)
 	}
 }

@@ -25,6 +25,7 @@ import type {
 } from "../lib/transport";
 import { failureMessage, formatBytes } from "../lib/errors";
 import { FileTree } from "../components/FileTree";
+import { SettingsDialog } from "../components/SettingsDialog";
 import { FindBar } from "../components/FindBar";
 import { advance, clearHighlights, collectRanges, paint, scrollToRange } from "../render/find";
 import { capture, metricsOf, restore, type Position } from "../render/position";
@@ -60,8 +61,26 @@ export function App({ transport }: { transport: Transport }) {
   const [findIndex, setFindIndex] = useState(0);
   const [findCount, setFindCount] = useState(0);
   const [recent, setRecent] = useState<RecentEntry[]>([]);
+  const [settings, setSettings] = useState<{ startup: string; appearance: string }>({
+    startup: "blank",
+    appearance: "system",
+  });
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [settingsSaving, setSettingsSaving] = useState(false);
   const scanRef = useRef<{ abort: () => void } | null>(null);
   const readerRef = useRef<HTMLDivElement>(null);
+  // Requests are opened one after another: a folder must be in place before
+  // the document inside it opens (PRD §9.2.3, ordered).
+  const requestQueue = useRef(Promise.resolve());
+  // The folder is read from a ref as well: the request queue hands a stale
+  // closure to a later request, and a file inside the folder must still see
+  // the folder that was just opened.
+  const folderRef = useRef<{ root: string; name: string } | null>(null);
+  const applyFolder = useCallback((next: { root: string; name: string } | null) => {
+    folderRef.current = next;
+    setFolder(next);
+  }, []);
   const findRanges = useRef<Range[]>([]);
   const positions = useRef(new Map<string, Position>());
   const [showLeft, setShowLeft] = useState(true);
@@ -73,7 +92,7 @@ export function App({ transport }: { transport: Transport }) {
   const startScan = useCallback(
     (root: string, name: string) => {
       scanRef.current?.abort();
-      setFolder({ root, name });
+      applyFolder({ root, name });
       setDoc(null);
       setLoadError(null);
       setSelected(null);
@@ -98,7 +117,7 @@ export function App({ transport }: { transport: Transport }) {
         }
       });
     },
-    [transport],
+    [applyFolder, transport],
   );
 
   // The settings and the recent list (PRD FR-08, FR-10).
@@ -109,6 +128,7 @@ export function App({ transport }: { transport: Transport }) {
       return;
     }
     setRecent(result.settings.recent ?? []);
+    setSettings({ startup: result.settings.startup, appearance: result.settings.appearance });
     if (result.notice) setNotice(result.notice);
   }, [transport]);
 
@@ -139,11 +159,17 @@ export function App({ transport }: { transport: Transport }) {
           setDoc(result.doc);
           void loadSettings();
           setLoadError(null);
-          // The window now shows one file, not a folder.
-          scanRef.current?.abort();
-          setFolder(null);
-          setTree([]);
-          setSelected(null);
+          // A file inside the folder being browsed keeps the tree and
+          // becomes its selection (PRD FR-10.5, AC-06); another one makes
+          // this a single-file window.
+          if (result.rel && folderRef.current) {
+            setSelected(result.rel);
+          } else {
+            scanRef.current?.abort();
+            applyFolder(null);
+            setTree([]);
+            setSelected(null);
+          }
           return;
         case "folder":
           startScan(result.root, result.name);
@@ -157,7 +183,7 @@ export function App({ transport }: { transport: Transport }) {
           return;
       }
     },
-    [rememberHere, startScan],
+    [applyFolder, rememberHere, startScan],
   );
 
   // Opening what a request names: a double-clicked file, a command-line
@@ -223,7 +249,9 @@ export function App({ transport }: { transport: Transport }) {
       setRequests((prev) => [...prev, request]);
       // Go acknowledges the request once it has tried to open it, and gives
       // the same document back to a page that asks again after a remount.
-      void openRequested(request.seq);
+      requestQueue.current = requestQueue.current
+        .then(() => openRequested(request.seq))
+        .catch(() => {});
     };
     const off = transport.onOpenRequest(add);
     let alive = true;
@@ -233,6 +261,7 @@ export function App({ transport }: { transport: Transport }) {
         setReady({ kind: "failed", message: r.message });
         return;
       }
+      if (r.value.startupNotice) setNotice(r.value.startupNotice);
       setReady({ kind: "ready", info: r.value });
       const pending = await transport.pending(0);
       if (!alive || !pending.ok) return;
@@ -269,6 +298,24 @@ export function App({ transport }: { transport: Transport }) {
   }, [startScan, transport]);
 
   useEffect(() => () => scanRef.current?.abort(), []);
+
+  const saveSettings = useCallback(async () => {
+    setSettingsSaving(true);
+    setSettingsError(null);
+    // The page edits the startup choice; the appearance follows until M3-3
+    // gives it a control of its own.
+    const result = await transport.saveSettings({
+      startup: settings.startup,
+      appearance: settings.appearance,
+      recent: [],
+    });
+    setSettingsSaving(false);
+    if (result.ok) {
+      setSettingsOpen(false);
+      return;
+    }
+    setSettingsError(result.message);
+  }, [settings, transport]);
 
   const newWindow = useCallback(async () => {
     setNotice(null);
@@ -335,6 +382,12 @@ export function App({ transport }: { transport: Transport }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key === ",") {
+        e.preventDefault();
+        setSettingsError(null);
+        setSettingsOpen(true);
+        return;
+      }
       if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "f" || e.key === "F")) {
         e.preventDefault();
         setFindOpen(true);
@@ -386,7 +439,14 @@ export function App({ transport }: { transport: Transport }) {
           pressed={showRight}
           onClick={() => setShowRight((v) => !v)}
         />
-        <ToolButton label="设置" icon={<Settings />} disabled />
+        <ToolButton
+          label="设置"
+          icon={<Settings />}
+          onClick={() => {
+            setSettingsError(null);
+            setSettingsOpen(true);
+          }}
+        />
       </div>
       <div className="body">
         {showLeft && (
@@ -509,6 +569,16 @@ export function App({ transport }: { transport: Transport }) {
         )}
         <ReadyBadge state={ready} />
       </footer>
+      {settingsOpen && (
+        <SettingsDialog
+          startup={settings.startup}
+          onChangeStartup={(startup) => setSettings({ ...settings, startup })}
+          onCancel={() => setSettingsOpen(false)}
+          onSave={() => void saveSettings()}
+          saving={settingsSaving}
+          error={settingsError}
+        />
+      )}
     </div>
   );
 }

@@ -5,16 +5,62 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"path/filepath"
 
 	"github.com/egoist/mygo"
 
 	"github.com/lhmile489-design/mile-typora/internal/appstate"
 	"github.com/lhmile489-design/mile-typora/internal/contract"
+	"github.com/lhmile489-design/mile-typora/internal/pathguard"
 	"github.com/lhmile489-design/mile-typora/internal/resource"
 	"github.com/lhmile489-design/mile-typora/internal/service"
 	"github.com/lhmile489-design/mile-typora/internal/watch"
 	"github.com/lhmile489-design/mile-typora/internal/winctx"
 )
+
+// windowsService is the service the window hooks talk to; main sets it once.
+var windowsService *service.WindowService
+
+// startupRequest is one thing a resume launch opens, in order.
+type startupRequest struct {
+	Kind string
+	Path string
+}
+
+// startupTarget decides what a resume launch restores, and why it cannot when
+// the target is gone (PRD FR-10.6). An empty list with no notice means the
+// launch opens a blank page by design.
+func startupTarget(state *appstate.Store) ([]startupRequest, string) {
+	if state == nil {
+		return nil, ""
+	}
+	settings := state.Get()
+	if settings.Startup != appstate.StartupResume || settings.Resume == nil {
+		return nil, ""
+	}
+	target := settings.Resume
+	info, err := os.Stat(target.Path)
+	if err != nil {
+		return nil, "上次阅读的内容已不存在，已打开空白页"
+	}
+	if target.IsDir {
+		if !info.IsDir() {
+			return nil, "上次阅读的文件夹已改变，已打开空白页"
+		}
+		requests := []startupRequest{{Kind: winctx.KindFolder, Path: target.Path}}
+		if target.Selected != "" {
+			inside := filepath.Join(target.Path, filepath.FromSlash(target.Selected))
+			if fi, err := os.Stat(inside); err == nil && !fi.IsDir() {
+				requests = append(requests, startupRequest{Kind: winctx.KindFile, Path: inside})
+			}
+		}
+		return requests, ""
+	}
+	if info.IsDir() || !pathguard.MarkdownExt(target.Path) {
+		return nil, "上次阅读的文件已改变，已打开空白页"
+	}
+	return []startupRequest{{Kind: winctx.KindFile, Path: target.Path}}, ""
+}
 
 // windows holds every open window's context (CLAUDE.md §5.2). A window is
 // registered as it is created and forgotten when it closes.
@@ -55,20 +101,33 @@ func main() {
 	if err := mygo.Protocol.HandleFunc(resource.Scheme, resources.ServeHTTP); err != nil {
 		log.Fatal(err)
 	}
-	mygo.Bind(service.NewWindowService(service.Deps{
-		Windows:    windows,
-		Open:       openWindow,
-		PickFile:   service.PickMarkdown,
-		PickFolder: service.PickFolder,
-		Resources:  resources,
-		Watch:      watch.Start,
-		State:      state,
-	}))
+	// The resume target decides what the first window shows; an explicit
+	// command line (a file association) wins over it (PRD FR-10.8).
+	startup := []startupRequest(nil)
+	notice := ""
+	if len(os.Args) <= 1 {
+		startup, notice = startupTarget(state)
+	}
+	windowsSvc := service.NewWindowService(service.Deps{
+		Windows:       windows,
+		Open:          openWindow,
+		PickFile:      service.PickMarkdown,
+		PickFolder:    service.PickFolder,
+		Resources:     resources,
+		Watch:         watch.Start,
+		State:         state,
+		StartupNotice: notice,
+	})
+	windowsService = windowsSvc
+	mygo.Bind(windowsSvc)
 
 	mygo.App.WhenReady(func() {
 		// The window opened for this launch: its page loads next, so these
 		// requests wait in its queue and arrive with the handshake.
 		w := newWindow()
+		for _, request := range startup {
+			enqueueKind(w.ID(), request.Kind, request.Path)
+		}
 		enqueue(w.ID(), os.Args[1:])
 	})
 	// The app quits when its last window closes (PRD FR-02), so there is no
@@ -120,6 +179,13 @@ func newWindow() *mygo.Window {
 	// Reload and Back, which would reload the document on a right-click.
 	page.OnContextMenu(func(e *mygo.ContextMenuEvent) {
 		e.Menu = nil
+	})
+	// Coming to the front makes what this window shows the resume target
+	// (PRD FR-10.4).
+	w.OnFocus(func() {
+		if windowsService != nil {
+			windowsService.RecordFocus(id)
+		}
 	})
 	// Closing the window cancels its context, so work started for it stops.
 	w.OnClosed(func() {
@@ -177,6 +243,17 @@ func focusedWindow() *mygo.Window {
 
 // enqueue adds open requests to a window's queue. A full queue is reported to
 // the user rather than dropping the request silently (PRD §9.2.3).
+// enqueueKind adds one open request of a kind to a window.
+func enqueueKind(id int, kind, path string) {
+	w, ok := windows.Get(id)
+	if !ok {
+		return
+	}
+	if _, err := w.PushKind(kind, path); err != nil {
+		log.Printf("window %d cannot take an open request: %v", id, err)
+	}
+}
+
 func enqueue(id int, paths []string) {
 	w, ok := windows.Get(id)
 	if !ok {

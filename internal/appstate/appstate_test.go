@@ -208,3 +208,22 @@ func TestNormalizeDropsWhatItCannotUse(t *testing.T) {
 		t.Fatalf("recent = %+v, want one entry", got.Recent)
 	}
 }
+
+func TestAByteOrderMarkIsTolerated(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	body := []byte(`{"startup":"resume","appearance":"dark","recent":[]}`)
+	if err := os.WriteFile(path, append([]byte{0xEF, 0xBB, 0xBF}, body...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, corrupt := store.Corrupt(); corrupt {
+		t.Fatal("a file with a byte order mark was treated as damaged")
+	}
+	if got := store.Get(); got.Startup != StartupResume || got.Appearance != AppearanceDark {
+		t.Fatalf("settings = %+v, want them read", got)
+	}
+}

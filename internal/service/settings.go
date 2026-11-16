@@ -8,6 +8,7 @@ import (
 
 	"github.com/lhmile489-design/mile-typora/internal/appstate"
 	"github.com/lhmile489-design/mile-typora/internal/contract"
+	"github.com/lhmile489-design/mile-typora/internal/winctx"
 )
 
 // GetSettings hands the page the settings and the recent list. A damaged file
@@ -61,6 +62,7 @@ func (s *WindowService) SaveSettings(ctx context.Context, view contract.Settings
 		Startup:    view.Startup,
 		Appearance: view.Appearance,
 		Recent:     current.Recent, // the page never replaces the list
+		Resume:     current.Resume, // nor the resume target
 	}
 	if err := s.state.Save(next); err != nil {
 		log.Printf("settings: cannot save: %v", err)
@@ -153,4 +155,65 @@ func recentView(entries []appstate.Recent) []contract.RecentEntry {
 		})
 	}
 	return out
+}
+
+// RecordFocus notes what a window shows when it comes to the front, so the
+// next resume launch opens what the reader was looking at (PRD FR-10.4).
+func (s *WindowService) RecordFocus(id int) {
+	w, ok := s.windows.Get(id)
+	if !ok {
+		return
+	}
+	s.recordResumeOf(w)
+}
+
+// recordResumeOf stores the window's document, or its folder and the document
+// inside it, as the resume target. A failed save never blocks reading.
+func (s *WindowService) recordResumeOf(w *winctx.Window) {
+	if s.state == nil {
+		return
+	}
+	target := resumeOf(w)
+	if target == nil {
+		return
+	}
+	if err := s.state.SetResume(target); err != nil {
+		log.Printf("settings: cannot remember the reading position: %v", err)
+	}
+}
+
+// resumeOf builds the target for a window, or nil when it shows nothing.
+func resumeOf(w *winctx.Window) *appstate.Resume {
+	root, hasRoot := w.Root()
+	file, hasFile := w.OpenFile()
+	switch {
+	case hasRoot && hasFile:
+		rel, err := filepath.Rel(root, file)
+		if err != nil {
+			return &appstate.Resume{Path: file}
+		}
+		return &appstate.Resume{Path: root, IsDir: true, Selected: filepath.ToSlash(rel)}
+	case hasRoot:
+		return &appstate.Resume{Path: root, IsDir: true}
+	case hasFile:
+		return &appstate.Resume{Path: file}
+	}
+	return nil
+}
+
+// relToRoot is the document's path inside the window's folder, or "" when it
+// is not inside it.
+func (s *WindowService) relToRoot(w *winctx.Window, doc *contract.Doc) string {
+	if doc == nil {
+		return ""
+	}
+	root, ok := w.Root()
+	if !ok {
+		return ""
+	}
+	rel, err := filepath.Rel(root, doc.Path)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return ""
+	}
+	return filepath.ToSlash(rel)
 }
