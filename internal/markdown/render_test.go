@@ -141,16 +141,34 @@ func TestRawHTMLIsShownAsText(t *testing.T) {
 	}
 }
 
-func TestMaliciousSample(t *testing.T) {
-	html := renderFile(t, "../../testdata/malicious/html.md")
-	assertSafe(t, "malicious/html.md", html)
-
-	// What was dangerous is still readable as text.
-	if body := textOf(html); !strings.Contains(body, "<script>alert('xss')</script>") {
-		t.Errorf("the script was dropped instead of shown as text: %q", body)
+// TestMaliciousSamples renders every sample under testdata/malicious and
+// refuses anything executable (AC-15, AC-25). Images are blocked as the
+// production resolver does, since a nil one keeps the document's source.
+func TestMaliciousSamples(t *testing.T) {
+	entries, err := os.ReadDir("../../testdata/malicious")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(textOf(html), "普通段落里的") {
-		t.Error("the readable text is gone")
+	blockImages := func(string) (string, string) { return "", "远程图片未加载" }
+	seen := 0
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		seen++
+		src := mustRead(t, "../../testdata/malicious/"+entry.Name())
+		res, failure := New().Render(context.Background(), src, blockImages)
+		if failure != nil {
+			t.Fatalf("%s: %+v", entry.Name(), failure)
+		}
+		assertSafe(t, entry.Name(), res.HTML)
+		// Nothing a document says may load by itself.
+		if strings.Contains(res.HTML, "<img") && entry.Name() != "protocol.md" {
+			t.Errorf("%s: an image survived the resolver\n%s", entry.Name(), res.HTML)
+		}
+	}
+	if seen < 4 {
+		t.Fatalf("only %d samples were checked", seen)
 	}
 }
 

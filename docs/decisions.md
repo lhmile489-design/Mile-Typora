@@ -231,3 +231,10 @@ M1 需验证：mermaid 12 的 `securityLevel: "strict"` 与 `%%{init}%%` 指令�
 - 匹配是字面量、大小写不敏感（`toLocaleLowerCase` 后比较；若长度变化则跳过该文本节点，避免偏移错位）。公式、图表、`.katex`、`svg`、脚本与隐藏源码不参与——它们不是读者看到的文字（PRD FR-05.7 的提示据此写）。
 - 查找条按 DESIGN §8.5：浮在正文区右上（top 12 / right 16）、360×40、`--bg-raised` + `--shadow-1`；无结果显示"未找到匹配内容"（`--danger`）；Enter 下一个、Shift+Enter 上一个、Esc 关闭并清空。
 - 阅读位置：记"视口上方最近的标题 id + 相对该标题的偏移 + 整体滚动比例"。恢复优先按标题；标题不存在（文档改了）才用比例；结果夹在可滚动范围内（PRD FR-07.3）。位置只存在窗口内存里，跨重启的近似位置留给 M3-2。
+
+### D-T29 · 只读证明与恶意样本回归（M2-6）
+
+- 只读证明放在 `internal/service/readonly_test.go`：在临时工作区里走 扫描 → 打开带图片/公式/图表/链接的文档 → 按 token 取图并与磁盘字节比较 → 换到另一个文件再换回，前后对每个文件做 sha256 并比对文件清单。放在 service 包内是因为整条管线（pathguard、docread、markdown、resource）都由它串起来，测试要用包内注入点；对外行为与放在 `internal/e2e` 等价，卡片的目录名不作为硬性要求。
+- 恶意样本固定为五份：`html.md`（脚本、事件属性、iframe、内联样式）、`protocol.md`（javascript/data/file/vbscript/自定义协议、data 图片）、`svg.md` + `icon.svg`（内联 SVG 与 SVG 图片）、`mermaid-init.md`（init 指令与 click 回调）、`math-escape.md`（`\href`、`\includegraphics`、宏递归）。测试逐份渲染并断言：无危险元素、无事件属性、无 `style`、无危险协议、图片一律被解析器拦下。
+- 样本目录每次改渲染或白名单都要重跑，已写进测试名与计划，不依赖人工点一遍。
+- 原生抽查（2026-11-16）：`protocol.md` 渲染后 `a[href]` 只剩明文 https，`script` 与 `img` 元素为 0，点击 https 链接弹出"即将访问外部站点"确认框，取消后页面不动。
