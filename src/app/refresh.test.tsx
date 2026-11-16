@@ -47,6 +47,7 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     onDocUpdated: () => () => {},
     refresh: async () => ({ kind: "loaded" as const, doc: changedDoc }),
     closeDocument: async () => ({ ok: true as const, value: undefined }),
+    closeWindow: async () => ({ ok: true as const, value: undefined }),
     scan: () => ({ abort: () => {}, done: Promise.resolve() }),
     ...overrides,
   };

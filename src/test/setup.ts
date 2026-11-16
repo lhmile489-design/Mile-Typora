@@ -15,6 +15,11 @@ beforeAll(() => {
     (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = ResizeObserverStub;
   }
 
+  // The shell reads the window width for the sidebar rule; jsdom opens at
+  // 1024, while the app opens at 1280 (PRD §5.2).
+  Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1280 });
+  Object.defineProperty(window, "innerHeight", { configurable: true, writable: true, value: 800 });
+
   // jsdom has no scrolling; the page scrolls anchors, so give it a no-op
   // that tests can replace.
   Object.defineProperty(Element.prototype, "scrollIntoView", {

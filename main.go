@@ -142,6 +142,15 @@ func main() {
 				}
 			}
 		},
+		CloseWindow: func(windowID int) error {
+			for _, w := range mygo.Windows() {
+				if w.ID() == windowID {
+					w.Close()
+					return nil
+				}
+			}
+			return nil
+		},
 		State:         state,
 		StartupNotice: notice,
 		ThemeChanged:  applyAppearance,

@@ -99,6 +99,8 @@ export interface Transport {
   refresh(): Promise<OpenFileResult>;
   /** Drops the window's document, leaving its folder open (PRD FR-07.5). */
   closeDocument(): Promise<Outcome<void>>;
+  /** Closes this window; the last window quits the app (PRD FR-09, Ctrl+W). */
+  closeWindow(): Promise<Outcome<void>>;
   /** Reads the settings and the recent list. */
   getSettings(): Promise<SettingsOutcome>;
   /** Writes the settings the page edited. */
@@ -121,6 +123,19 @@ export interface Transport {
   scan(onFrame: (frame: ScanFrame) => void): { abort: () => void; done: Promise<void> };
 }
 
+/**
+ * subscribe keeps the page usable outside a mygo window: the browser preview
+ * (web-shell) has no runtime, so events do not exist. Inside the app this is
+ * the same subscription; the page still reports the failed handshake.
+ */
+function subscribe(open: () => () => void): () => void {
+  try {
+    return open();
+  } catch {
+    return () => {};
+  }
+}
+
 /** wrap turns a rejected call into an Outcome, so callers never see a throw. */
 export async function wrap<T>(call: () => Promise<T>): Promise<Outcome<T>> {
   try {
@@ -139,7 +154,7 @@ export const mygoTransport: Transport = {
       // Expected failures arrive in the result, not as a CallError (§1).
       if (result.failure) throw new Error(result.failure.detail);
     }),
-  onOpenRequest: (listener) => events.openRequest.on(listener),
+  onOpenRequest: (listener) => subscribe(() => events.openRequest.on(listener)),
   pending: () =>
     wrap(async () => {
       const result = await WindowService.pending(0);
@@ -180,12 +195,16 @@ export const mygoTransport: Transport = {
   openFile: async () => openResult(() => WindowService.openFileDialog()),
   openRequested: async (seq) => requestedOutcome(() => WindowService.openRequested(seq)),
   openLink: async (href) => linkOutcome(() => WindowService.openLink(href)),
-  onThemeChange: (listener) => events.themeChange.on(listener),
-  onDocUpdated: (listener) => events.docUpdated.on(listener),
+  onThemeChange: (listener) => subscribe(() => events.themeChange.on(listener)),
+  onDocUpdated: (listener) => subscribe(() => events.docUpdated.on(listener)),
   refresh: async () => openResult(() => WindowService.refresh()),
   closeDocument: () =>
     wrap(async () => {
       await WindowService.closeDocument();
+    }),
+  closeWindow: () =>
+    wrap(async () => {
+      await WindowService.closeWindow();
     }),
   getSettings: async () => {
     try {

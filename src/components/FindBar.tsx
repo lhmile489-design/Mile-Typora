@@ -26,6 +26,9 @@ export function FindBar({ query, count, index, onChange, onStep, onClose }: Prop
   }, []);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
+    // A candidate window owns Enter and Escape while an input method
+    // composes; the bar must not close or jump under it (PRD FR-09).
+    if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
     if (e.key === "Enter") {
       e.preventDefault();
       onStep(e.shiftKey);

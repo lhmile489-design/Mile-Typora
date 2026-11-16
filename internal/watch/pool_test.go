@@ -91,3 +91,30 @@ func TestAcquireReportsAStartFailure(t *testing.T) {
 	}
 	_ = time.Second
 }
+
+func TestReleaseDoesNotStopUnderThePoolLock(t *testing.T) {
+	var pool *Pool
+	pool = NewPool(func(string, func(Event)) (func(), error) {
+		return func() {
+			// Taking the lock here is what a delivery does; holding it during
+			// the stop would make a close and a change deadlock.
+			pool.Refs(`C:
+otes.md`)
+		}, nil
+	})
+	release, err := pool.Acquire(`C:
+otes.md`, func(Event) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		release()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("release blocked while stopping the watch")
+	}
+}

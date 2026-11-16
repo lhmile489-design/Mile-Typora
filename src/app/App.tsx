@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   CircleAlert,
+  CircleCheck,
   CircleX,
   FileText,
   Folder,
@@ -32,6 +33,7 @@ import { advance, clearHighlights, collectRanges, paint, scrollToRange } from ".
 import { capture, metricsOf, restore, type Position } from "../render/position";
 import { renderMath } from "../render/math";
 import { renderDiagrams, rerenderDiagrams } from "../render/mermaid";
+import { commandFor, SHORTCUT_HINT } from "../lib/shortcuts";
 
 type ReadyState =
   | { kind: "waiting" }
@@ -104,8 +106,28 @@ export function App({ transport }: { transport: Transport }) {
   const positions = useRef(new Map<string, Position>());
   const [showLeft, setShowLeft] = useState(true);
   // The reserved pane starts collapsed: reading comes first, and the pane
-  // has nothing in it yet (PRD D-06, decisions.md D-T23).
-  const [showRight, setShowRight] = useState(false);
+  // has nothing in it yet (PRD D-06, decisions.md D-T23). What the user
+  // wants is kept apart from what the width allows: below 1200 it collapses,
+  // and widening shows it again only if the user did not hide it (PRD §5.2).
+  const [rightWanted, setRightWanted] = useState(false);
+  const [wideEnough, setWideEnough] = useState(true);
+  const showRight = rightWanted && wideEnough;
+
+  useEffect(() => {
+    // The rule is about the window's width (PRD §5.2). Both signals are
+    // followed: a resize, which the window manager and the embedded view
+    // send, and the media query, which catches the same change where one of
+    // the two is missed.
+    const update = () => setWideEnough(window.innerWidth >= 1200);
+    update();
+    window.addEventListener("resize", update);
+    const query = typeof window.matchMedia === "function" ? window.matchMedia("(min-width: 1200px)") : null;
+    query?.addEventListener("change", update);
+    return () => {
+      window.removeEventListener("resize", update);
+      query?.removeEventListener("change", update);
+    };
+  }, []);
 
   // Start reading a folder: the tree streams in while the page draws. A
   // refresh keeps the open document until its own reload answers.
@@ -450,6 +472,29 @@ export function App({ transport }: { transport: Transport }) {
     if (!r.ok) setNotice(r.message);
   }, [transport]);
 
+  // Ctrl+W closes this window; the app quits with its last window (PRD FR-09).
+  const closeWindow = useCallback(async () => {
+    const result = await transport.closeWindow();
+    if (!result.ok) setNotice(result.message);
+  }, [transport]);
+
+  // The reserved pane's switch has three states in effect: shown, hidden by
+  // the user, and hidden because the window is narrow. Pressing it while
+  // narrow records the wish and says when it will show.
+  const toggleRight = useCallback(() => {
+    if (!wideEnough) {
+      const next = !rightWanted;
+      setRightWanted(next);
+      setNotice(
+        next
+          ? "窗口较窄，预留侧栏将在加宽到 1200 像素后显示"
+          : "已取消显示预留侧栏，加宽窗口后也不会自动展开",
+      );
+      return;
+    }
+    setRightWanted((value) => !value);
+  }, [rightWanted, wideEnough]);
+
   // Search the rendered document without touching its DOM (PRD FR-05).
   useEffect(() => {
     if (!findOpen) {
@@ -506,78 +551,138 @@ export function App({ transport }: { transport: Transport }) {
     setFindIndex(0);
   }, []);
 
+  // One key listener runs the table in src/lib/shortcuts.ts. The find bar
+  // and the settings dialog handle their own keys first, so a handled press
+  // arrives here already prevented.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "F5") {
-        e.preventDefault();
-        void refresh();
-        return;
-      }
-      if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key === ",") {
-        e.preventDefault();
-        setSettingsError(null);
-        setSettingsOpen(true);
-        return;
-      }
-      if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "f" || e.key === "F")) {
-        e.preventDefault();
-        setFindOpen(true);
-        return;
-      }
-      if (e.key === "Escape" && findOpen) {
-        e.preventDefault();
-        closeFind();
-        return;
-      }
-      if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "o" || e.key === "O")) {
-        e.preventDefault();
-        void openFile();
-        return;
-      }
-      if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === "O" || e.key === "o")) {
-        e.preventDefault();
-        void openFolder();
-        return;
-      }
-      if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === "N" || e.key === "n")) {
-        e.preventDefault();
-        void newWindow();
+      if (e.defaultPrevented) return;
+      const command = commandFor(e);
+      if (!command) return;
+      if (settingsOpen && command !== "dismiss") return;
+      switch (command) {
+        case "dismiss":
+          if (findOpen) {
+            e.preventDefault();
+            closeFind();
+          } else if (notice) {
+            e.preventDefault();
+            setNotice(null);
+          }
+          return;
+        case "open-file":
+          e.preventDefault();
+          void openFile();
+          return;
+        case "open-folder":
+          e.preventDefault();
+          void openFolder();
+          return;
+        case "new-window":
+          e.preventDefault();
+          void newWindow();
+          return;
+        case "find":
+          e.preventDefault();
+          setFindOpen(true);
+          // Ctrl+F again returns to the open bar; opening it already focuses
+          // the input through the bar's own mount effect.
+          document.querySelector<HTMLInputElement>(".find-bar input")?.focus();
+          return;
+        case "refresh":
+          e.preventDefault();
+          void refresh();
+          return;
+        case "close-window":
+          e.preventDefault();
+          void closeWindow();
+          return;
+        case "settings":
+          e.preventDefault();
+          setSettingsError(null);
+          setSettingsOpen(true);
+          return;
+        case "toggle-left":
+          e.preventDefault();
+          setShowLeft((value) => !value);
+          return;
+        case "save-blocked":
+          // P0 reads; the web view would otherwise offer to save the page.
+          e.preventDefault();
+          setNotice("当前版本仅支持阅读，不会保存文件");
+          return;
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [closeFind, findOpen, newWindow, openFile, openFolder, refresh]);
+  }, [
+    closeFind,
+    closeWindow,
+    findOpen,
+    newWindow,
+    notice,
+    openFile,
+    openFolder,
+    refresh,
+    settingsOpen,
+  ]);
 
   return (
     <div className="win">
       <div className="toolbar" role="toolbar" aria-label="工具栏">
-        <ToolButton label="打开文件" icon={<FileText />} labeled onClick={() => void openFile()} />
-        <ToolButton label="打开目录" icon={<FolderOpen />} labeled onClick={() => void openFolder()} />
-        <ToolButton label="新建窗口" icon={<SquarePlus />} onClick={() => void newWindow()} />
+        <ToolButton
+          label="打开文件"
+          icon={<FileText />}
+          labeled
+          shortcut={SHORTCUT_HINT["open-file"]}
+          onClick={() => void openFile()}
+        />
+        <ToolButton
+          label="打开目录"
+          icon={<FolderOpen />}
+          labeled
+          shortcut={SHORTCUT_HINT["open-folder"]}
+          onClick={() => void openFolder()}
+        />
+        <ToolButton
+          label="新建窗口"
+          icon={<SquarePlus />}
+          shortcut={SHORTCUT_HINT["new-window"]}
+          onClick={() => void newWindow()}
+        />
         <span className="sep" aria-hidden="true" />
         <ToolButton
           label="刷新"
           icon={<RefreshCw />}
+          shortcut={SHORTCUT_HINT.refresh}
           disabled={(!doc && !folder) || refreshing}
           onClick={() => void refresh()}
         />
-        <ToolButton label="查找" icon={<Search />} onClick={() => setFindOpen(true)} />
+        <ToolButton
+          label="查找"
+          icon={<Search />}
+          shortcut={SHORTCUT_HINT.find}
+          onClick={() => setFindOpen(true)}
+        />
         <span className="spacer" />
         <ToolButton
           label="左侧栏"
           icon={<PanelLeft />}
+          shortcut={SHORTCUT_HINT["toggle-left"]}
           pressed={showLeft}
           onClick={() => setShowLeft((v) => !v)}
         />
         <ToolButton
           label="预留侧栏"
           icon={<PanelRight />}
+          hint={wideEnough ? undefined : "窗口较窄，预留侧栏已自动收起"}
           pressed={showRight}
-          onClick={() => setShowRight((v) => !v)}
+          onClick={toggleRight}
         />
         <ToolButton
           label="设置"
           icon={<Settings />}
+          shortcut={SHORTCUT_HINT.settings}
           onClick={() => {
             setSettingsError(null);
             setSettingsOpen(true);
@@ -700,9 +805,15 @@ export function App({ transport }: { transport: Transport }) {
             </span>
             <span className="grow" />
             {refreshing ? (
-              <span className="item">刷新中</span>
+              <span className="item">
+                <RefreshCw aria-hidden="true" />
+                刷新中
+              </span>
             ) : updatedAt ? (
-              <span className="item">已更新 {updatedAt}</span>
+              <span className="item">
+                <CircleCheck aria-hidden="true" />
+                已更新 {updatedAt}
+              </span>
             ) : null}
             <span className="item">{formatBytes(doc.size)}</span>
             <span className="item">{doc.hasBom ? "UTF-8 BOM" : "UTF-8"}</span>
@@ -828,19 +939,25 @@ type ToolButtonProps = {
   icon: ReactNode;
   /** Shows the label beside the icon (DESIGN.md §8.1). */
   labeled?: boolean;
+  /** The keyboard shortcut, shown on hover and exposed to assistive tech. */
+  shortcut?: string;
+  /** Extra explanation for the tooltip when there is no shortcut. */
+  hint?: string;
   pressed?: boolean;
   disabled?: boolean;
   onClick?: () => void;
 };
 
-function ToolButton({ label, icon, labeled, pressed, disabled, onClick }: ToolButtonProps) {
+function ToolButton({ label, icon, labeled, shortcut, hint, pressed, disabled, onClick }: ToolButtonProps) {
   return (
     <button
       className={labeled ? "tb labeled" : "tb"}
       type="button"
       aria-label={label}
+      aria-keyshortcuts={shortcut?.replaceAll("Ctrl+", "Control+")}
       aria-pressed={pressed}
       aria-disabled={disabled || undefined}
+      title={shortcut ? `${label}（${shortcut}）` : hint}
       onClick={disabled ? undefined : onClick}
     >
       {icon}

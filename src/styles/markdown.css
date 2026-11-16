@@ -13,6 +13,11 @@
   overflow-wrap: break-word;
 }
 
+/* 中间区窄于 720 时左右留白降为 24（DESIGN.md §4.2）。 */
+@container (max-width: 719.98px) {
+  .markdown { padding-left: var(--sp-6); padding-right: var(--sp-6); }
+}
+
 .markdown > :first-child { margin-top: 0; }
 
 .markdown p { margin: 0 0 1em; }

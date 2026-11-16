@@ -65,13 +65,14 @@ func (p *Pool) Acquire(path string, onEvent func(Event)) (release func(), err er
 	released := false
 	return func() {
 		p.mu.Lock()
-		defer p.mu.Unlock()
 		if released {
+			p.mu.Unlock()
 			return
 		}
 		released = true
 		current, ok := p.entries[key]
 		if !ok {
+			p.mu.Unlock()
 			return
 		}
 		kept := current.listeners[:0]
@@ -81,9 +82,17 @@ func (p *Pool) Acquire(path string, onEvent func(Event)) (release func(), err er
 			}
 		}
 		current.listeners = kept
+		var stop func()
 		if len(current.listeners) == 0 {
-			current.stop()
+			stop = current.stop
 			delete(p.entries, key)
+		}
+		p.mu.Unlock()
+		// Stopping waits for the watch's goroutine to return, and that
+		// goroutine fans events out through this same lock: stopping under
+		// the lock deadlocks a close while a change arrives.
+		if stop != nil {
+			stop()
 		}
 	}, nil
 }

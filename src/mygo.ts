@@ -238,6 +238,13 @@ export const WindowService = {
     return call("WindowService.CloseDocument");
   },
   /**
+   * CloseWindow closes the calling window (PRD FR-09, Ctrl+W). The last window
+   * closes the app, as the window manager would.
+   */
+  closeWindow(): Promise<void> {
+    return call("WindowService.CloseWindow");
+  },
+  /**
    * GetSettings hands the page the settings and the recent list. A damaged file
    * is reported rather than hidden (PRD FR-10.11).
    */

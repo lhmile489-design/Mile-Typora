@@ -52,7 +52,11 @@ export function SettingsDialog({
   const first = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    // Focus enters the dialog and returns to whatever opened it
+    // (DESIGN.md §8.12).
+    const previous = document.activeElement as HTMLElement | null;
     first.current?.focus();
+    return () => previous?.focus?.();
   }, []);
 
   const onKeyDown = (e: React.KeyboardEvent) => {

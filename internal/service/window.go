@@ -52,6 +52,8 @@ type Deps struct {
 	Watcher *watch.Pool
 	// DocUpdated tells one window its document changed.
 	DocUpdated func(windowID int, update contract.DocUpdate)
+	// CloseWindow closes one native window; the last one quits the app.
+	CloseWindow func(windowID int) error
 	// State is the settings store; nil when the app data directory is not
 	// usable, in which case the app still reads documents.
 	State *appstate.Store
@@ -81,6 +83,7 @@ type WindowService struct {
 	startupNotice string
 	themeChanged  func(appearance string)
 	docUpdated    func(windowID int, update contract.DocUpdate)
+	closeWindow   func(windowID int) error
 	confirm       func(ctx context.Context, title, message, detail string) bool
 	external      func(url string) error
 }
@@ -117,6 +120,7 @@ func NewWindowService(d Deps) *WindowService {
 		resources:     d.Resources,
 		watcher:       d.Watcher,
 		docUpdated:    d.DocUpdated,
+		closeWindow:   d.CloseWindow,
 		state:         d.State,
 		startupNotice: d.StartupNotice,
 		themeChanged:  d.ThemeChanged,
@@ -629,6 +633,22 @@ func (s *WindowService) Refresh(ctx context.Context) (contract.LoadResult, error
 	}
 	w.NextRefresh()
 	return s.readAndRender(ctx, w, path), nil
+}
+
+// CloseWindow closes the calling window (PRD FR-09, Ctrl+W). The last window
+// closes the app, as the window manager would.
+func (s *WindowService) CloseWindow(ctx context.Context) error {
+	id, ok := s.caller(ctx)
+	if !ok {
+		return ErrNoCallerWindow
+	}
+	if _, exists := s.windows.Get(id); !exists {
+		return ErrWindowNotOpen
+	}
+	if s.closeWindow == nil {
+		return nil
+	}
+	return s.closeWindow(id)
 }
 
 // CloseDocument drops the window's document: the page returns to its start
