@@ -1,0 +1,13 @@
+// Sets data-theme before React mounts, so the first frame has the right
+// colors (DESIGN.md §1). A separate file because the production CSP forbids
+// inline scripts. M3-3 resolves the saved preference; until then the theme
+// follows Windows.
+(function () {
+  var root = document.documentElement;
+  var media = window.matchMedia("(prefers-color-scheme: dark)");
+  function apply() {
+    root.setAttribute("data-theme", media.matches ? "dark" : "light");
+  }
+  apply();
+  media.addEventListener("change", apply);
+})();

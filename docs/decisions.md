@@ -91,3 +91,24 @@ M1 需验证：mermaid 12 的 `securityLevel: "strict"` 与 `%%{init}%%` 指令�
   2. 3 秒超时能否真正中断渲染。若病态图会卡住主线程，改为 Worker 预检或更严的输入上限。
   3. KaTeX 与 mermaid 的打包体积，以及按需加载后的首屏体积。
 - 实测前，`markdown-render-pipeline` §4.3 里的做法只是方案，不能写成已验证。
+
+### D-T12 · M1 脚手架参数
+
+- 用户 2026-11-16 授权开始写代码，项目进入 M1。开发顺序见 `docs/开发计划.md`。
+- 用 `go run github.com/egoist/mygo/cmd/mygo@v0.9.0 init` 在临时目录生成模板再复制进仓库（`mygo init` 拒绝非空目录），没有升级本机全局的 mygo CLI（仍是 0.8.3）。
+- `mygo init` 写入的是最新版：`go.mod` 为 mygo v0.9.1，npm 包为 `^0.9.0`（实际装上 0.9.1）。已钉回锁定版本：`go get github.com/egoist/mygo@v0.9.0`，`mygo-runtime`、`mygo-cli` 改为精确版本 `0.9.0`。v0.9.1 改动了 app.go、clipboard、cmd/mygo 等，未核对，不使用。
+- Go 模块路径：`github.com/lhmile489-design/mile-typora`。identifier：`dev.mile.typora`，决定应用数据目录与单实例锁，定稿不改。
+- 开发端口 5273（不用模板的 5173，避开本机另一个 mygo 项目 `E:\mygo\my-app`）。
+- 前端依赖按 D-T04 的精确版本安装；`@types/react`、`@types/react-dom` 为 19.3.0。Go 侧第三方库（goldmark 等）等到用到的阶段再 `go get`，避免 `go mod tidy` 把未使用的依赖删掉。
+- `mygo init` 附带的 `.agents/skills/`（mygo-maintenance、mygo-native-modules）原样保留，属上游文件，不在 CLAUDE.md 的项目 skill 表里。
+- `resources/icon.png` 是模板默认图标，M3-8 发版前替换。
+
+### D-T13 · 应用图标
+
+- 设计原图 `docs/images/深色背景上的橙角MT文档图标.png`（1254×1254，深色底、无透明通道）。用户确认它就是应用图标。
+- 原图字母是黑色，与深色底接近，按颜色差抠图会在字母里留下透明噪点。改用「从边框洪水填充背景 + 反预乘」的方式取轮廓，脚本为 `scripts/make-icons.py`（需要 Pillow 与 NumPy），产物：
+  - `resources/icon.png`（1024 透明）：构建产物图标
+  - `resources/icon-dev.png`（带 DEV 徽标）：`mygo dev` 的图标，mygo 会自动优先取它
+  - `public/icon.png`（256）：页面 favicon
+- 依据 mygo v0.9.0 `cmd/mygo/config.go`：`icon` 默认取 `resources/icon.png`，同名的 `icon-dev.png` 给开发版。没有在 `mygo.config.ts` 里写 `icon` 字段，用默认值。
+- 托盘：P0 没有托盘功能（PRD 未列），暂不需要托盘图标；以后加入托盘时复用 `resources/icon.png`。

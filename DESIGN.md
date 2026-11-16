@@ -274,6 +274,21 @@
 | 警告 / 错误 / 成功 / 信息 | `triangle-alert` / `circle-x` / `circle-check` / `info` |
 | 图片受限 / 外链 / 复制 | `image-off` / `external-link` / `copy` |
 
+### 7.1 应用图标
+
+- 来源：`docs/images/深色背景上的橙角MT文档图标.png`（设计原图，深色底、白色纸面、右上橙色折角、衬线 MT）。不要手改生成的 PNG，改图后重新生成。
+- 生成：`python -I scripts/make-icons.py "docs/images/深色背景上的橙角MT文档图标.png"`。脚本用洪水填充取轮廓（字母黑色与深色底同色，不能按颜色差抠图），去底、反预乘、居中到 86% 画布。
+- 产物与用途：
+
+| 文件 | 尺寸 | 用途 |
+| --- | --- | --- |
+| `resources/icon.png` | 1024×1024 透明 | 构建产物（`mygo build`）的应用图标：任务栏、窗口标题栏、开始菜单、安装包 |
+| `resources/icon-dev.png` | 1024×1024 透明，右下角橙色 DEV 徽标 | `mygo dev` 开发窗口的图标，与正式版区分 |
+| `public/icon.png` | 256×256 透明 | 页面图标（`index.html` 的 `link[rel=icon]`），浏览器面板与 WebView 标签用 |
+
+- 图标内容占画布的 86%，四周留白交给系统；不自带阴影（系统会画）。
+- 页面内不重复摆放大号应用图标；空白页以文字为主（§8.9）。P0 没有托盘，若以后加入托盘，用 `resources/icon.png`，不另做一套。
+
 ## 8. 组件规范
 
 ### 8.1 工具栏

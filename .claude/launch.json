@@ -6,6 +6,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "8765", "--bind", "127.0.0.1", "--directory", "docs/design"],
       "port": 8765
+    },
+    {
+      "name": "web-shell",
+      "runtimeExecutable": "bunx",
+      "runtimeArgs": ["vite", "--port", "5274", "--strictPort"],
+      "port": 5274
     }
   ]
 }

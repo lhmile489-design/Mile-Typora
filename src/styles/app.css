@@ -1,0 +1,89 @@
+/* 应用外壳：结构与数值取自设计稿 docs/design/mile-typora-design.html，只引用令牌。 */
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; margin: 0; }
+
+body {
+  overflow: hidden; /* 整窗不出现纵向滚动条，各区独立滚动（PRD §5.2） */
+  background: var(--bg-app);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--ui-base);
+  line-height: var(--ui-base-lh);
+}
+
+:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+.win { height: 100%; display: flex; flex-direction: column; background: var(--bg-app); }
+
+/* 工具栏 */
+.toolbar {
+  flex: none; height: var(--toolbar-h);
+  display: flex; align-items: center; gap: var(--sp-1);
+  padding: 0 var(--sp-2);
+  background: var(--bg-chrome);
+  border-bottom: 1px solid var(--line);
+}
+.toolbar .sep {
+  width: 1px; height: 20px;
+  background: var(--line);
+  margin: 0 var(--sp-1);
+}
+.toolbar .spacer { flex: 1; }
+.tb {
+  height: var(--control-h); min-width: var(--control-h);
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 0 var(--sp-2); border: 0; border-radius: var(--r-sm);
+  background: transparent; color: var(--text-soft);
+  font: inherit; font-size: var(--ui-sm); cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.tb:hover { background: var(--bg-hover); }
+.tb:active { background: var(--bg-active); }
+.tb[aria-pressed="true"] { background: var(--bg-active); color: var(--text-strong); }
+.tb[aria-disabled="true"] {
+  color: var(--text-faint);
+  background: transparent;
+  cursor: default;
+}
+.tb svg { width: var(--icon-md); height: var(--icon-md); }
+.tb.labeled svg { width: var(--icon-sm); height: var(--icon-sm); }
+
+/* 三栏 */
+.body { flex: 1; min-height: 0; display: flex; }
+.side { flex: none; min-height: 0; overflow-y: auto; background: var(--bg-chrome); }
+.side.left { width: var(--sidebar-left-w); border-right: 1px solid var(--line-strong); padding: var(--sp-2) 0; }
+.side.right { width: var(--sidebar-right-w); border-left: 1px solid var(--line-strong); }
+.center { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+
+/* 空状态与开始页 */
+.empty {
+  height: 100%; display: grid; place-items: center; text-align: center;
+  color: var(--text-muted); padding: var(--sp-8);
+}
+.empty p { margin: 0; }
+.start-wrap { flex: 1; min-height: 0; overflow-y: auto; display: grid; place-items: center; padding: var(--sp-8); }
+.start { width: 100%; max-width: 480px; }
+.start h2 { margin: 0 0 var(--sp-2); font: 600 var(--ui-xl)/var(--ui-xl-lh) var(--font-heading); color: var(--text-strong); }
+.start p { margin: 0; color: var(--text-muted); }
+
+/* 右侧预留栏：不放聊天框、模型选择或假数据（PRD C-07） */
+.reserve-head {
+  height: 36px; display: flex; align-items: center;
+  padding: 0 var(--sp-2) 0 var(--sp-3);
+  font-size: var(--ui-xs); color: var(--text-muted);
+}
+
+/* 状态栏 */
+.statusbar {
+  flex: none; height: var(--statusbar-h);
+  display: flex; align-items: center; gap: var(--sp-4);
+  padding: 0 var(--sp-3);
+  background: var(--bg-chrome); border-top: 1px solid var(--line);
+  font-size: var(--ui-xs); line-height: var(--ui-xs-lh); color: var(--text-muted);
+  white-space: nowrap;
+}
+.statusbar .grow { flex: 1; }
+.statusbar .item { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.statusbar svg { width: 12px; height: 12px; }
+.st-danger { color: var(--danger); }

@@ -1,0 +1,140 @@
+/*
+ * 设计令牌：唯一来源是根目录 DESIGN.md §2–§6，数值与设计稿
+ * docs/design/mile-typora-design.html 一致。改令牌先改 DESIGN.md
+ * 并重算对比度（design-tokens skill §2），再同步本文件与设计稿。
+ * :root 是浅色，:root[data-theme="dark"] 同名覆盖为深色。
+ */
+:root {
+  color-scheme: light;
+  /* 表面与线条 */
+  --bg-app: #FFFFFF;
+  --bg-chrome: #F6F6F7;
+  --bg-sunken: #F6F7F8;
+  --bg-inline-code: #F0F1F3;
+  --bg-raised: #FFFFFF;
+  --bg-hover: #EBECEE;
+  --bg-active: #E1E3E6;
+  --bg-selected: #E5EDFA;
+  --bg-overlay: rgba(17, 17, 17, 0.32);
+  --line: #E3E4E7;
+  --line-strong: #D0D2D6;
+  --line-input: #8C9099;
+  --quote-bar: #D0D2D6;
+  /* 文字 */
+  --text: #262626;
+  --text-strong: #111111;
+  --text-soft: #4F555D;
+  --text-muted: #636973;
+  --text-faint: #9A9EA6;
+  --text-on-accent: #FFFFFF;
+  /* 强调色 */
+  --accent: #1F64C8;
+  --accent-hover: #1A55AA;
+  --accent-soft: #E5EDFA;
+  --focus-ring: #1F64C8;
+  /* 状态色 */
+  --warn: #8A5300;     --warn-bg: #FFF5DC;
+  --danger: #B3261E;   --danger-bg: #FDEDEB;
+  --ok: #18742F;       --ok-bg: #E6F4EA;
+  --info: #1F64C8;     --info-bg: #E5EDFA;
+  /* 正文专用 */
+  --mark: #FFE48A;
+  --mark-current: #FFC266;
+  --syn-keyword: #CF222E;
+  --syn-string: #0A3069;
+  --syn-comment: #5C636C;
+  --syn-function: #8250DF;
+  --syn-number: #0550AE;
+  --syn-type: #953800;
+  --diagram-node: #F6F7F8;
+  --diagram-stroke: #8C9099;
+  --diagram-text: #262626;
+  --diagram-accent: #E5EDFA;
+  /* 字体 */
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --font-reading: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --font-heading: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --font-mono: "Cascadia Mono", "Cascadia Code", Consolas, "Microsoft YaHei UI", monospace;
+  /* 界面字阶 */
+  --ui-xs: 12px;  --ui-xs-lh: 16px;
+  --ui-sm: 13px;  --ui-sm-lh: 20px;
+  --ui-base: 14px; --ui-base-lh: 20px;
+  --ui-lg: 16px;  --ui-lg-lh: 24px;
+  --ui-xl: 20px;  --ui-xl-lh: 28px;
+  --read-size: 16px;
+  /* 间距 */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-12: 48px;
+  /* 布局 */
+  --toolbar-h: 44px;
+  --statusbar-h: 26px;
+  --sidebar-left-w: 240px;
+  --sidebar-right-w: 260px;
+  --content-max: 860px;
+  --content-pad-x: 48px;
+  --content-pad-top: 40px;
+  --tree-row-h: 28px;
+  --tree-indent: 16px;
+  --control-h: 32px;
+  --icon-sm: 16px;
+  --icon-md: 20px;
+  /* 圆角 */
+  --r-xs: 3px; --r-sm: 4px; --r-md: 6px; --r-lg: 8px; --r-pill: 999px;
+  /* 阴影（只给浮层） */
+  --shadow-1: 0 2px 8px rgba(0, 0, 0, 0.08), 0 0 0 1px var(--line-strong);
+  --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.14), 0 0 0 1px var(--line-strong);
+  /* 层级 */
+  --z-sticky: 10; --z-popover: 20; --z-overlay: 30; --z-dialog: 31; --z-toast: 40;
+  /* 动效 */
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-app: #1C1D20;
+  --bg-chrome: #222327;
+  --bg-sunken: #26282C;
+  --bg-inline-code: #2C2E33;
+  --bg-raised: #2A2C31;
+  --bg-hover: #2E3035;
+  --bg-active: #36383E;
+  --bg-selected: #253447;
+  --bg-overlay: rgba(0, 0, 0, 0.5);
+  --line: #33363B;
+  --line-strong: #43464D;
+  --line-input: #6A6F79;
+  --quote-bar: #4A4E56;
+  --text: #D5D7DB;
+  --text-strong: #EEEFF1;
+  --text-soft: #AEB3BA;
+  --text-muted: #959AA3;
+  --text-faint: #6C717A;
+  --text-on-accent: #111418;
+  --accent: #78AEF5;
+  --accent-hover: #9AC3F8;
+  --accent-soft: #253447;
+  --focus-ring: #78AEF5;
+  --warn: #E8B84A;     --warn-bg: #3A2F14;
+  --danger: #FF8C82;   --danger-bg: #3F2120;
+  --ok: #5CC27A;       --ok-bg: #1C3324;
+  --info: #78AEF5;     --info-bg: #253447;
+  --mark: #6E5A12;
+  --mark-current: #7A4F0A;
+  --syn-keyword: #FF7B72;
+  --syn-string: #A5D6FF;
+  --syn-comment: #8B949E;
+  --syn-function: #D2A8FF;
+  --syn-number: #79C0FF;
+  --syn-type: #FFA657;
+  --diagram-node: #26282C;
+  --diagram-stroke: #6A6F79;
+  --diagram-text: #D5D7DB;
+  --diagram-accent: #253447;
+  --shadow-1: 0 2px 8px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--line-strong);
+  --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--line-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-fast: 0ms; --dur-base: 0ms; }
+}

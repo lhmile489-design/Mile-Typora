@@ -20,20 +20,22 @@ description: 在 Windows 11 上为 Mile Typora 创建并跑通 egoist/mygo v0.9.
 | Go ≥ 1.27 | `go version` | go1.27.3 windows/amd64 |
 | Bun | `bun --version` | 1.3.13 |
 | WebView2 | Windows 11 自带 | — |
-| mygo CLI v0.9.0 | `go install github.com/egoist/mygo/cmd/mygo@v0.9.0`，然后 `mygo doctor` | GOPATH 下已有 v0.8.3 与 v0.9.0 源码；CLI 版本未确认，执行前先 `mygo --version` |
+| mygo CLI v0.9.0 | 初始化用 `go run github.com/egoist/mygo/cmd/mygo@v0.9.0 init`；项目建好后用 `bun run dev/build/generate` 调 npm `mygo-cli`，体检用 `bunx mygo doctor` | 全局 `mygo` 是 0.8.3，没有升级；`bunx mygo doctor` 必需项全绿 |
 
-npm 上 `mygo-runtime` 与 `mygo-cli` 当前为 0.9.1（2026-11-16 `npm view`）。以 `mygo init` 写入的版本为准，不手动升到别的版本。
+**`mygo init` 默认取最新版**（2026-11-16 实测：`go.mod` 写成 v0.9.1，npm 写成 `^0.9.0` 并装上 0.9.1）。初始化后要钉回锁定版本：`go get github.com/egoist/mygo@v0.9.0`，`package.json` 的 `mygo-runtime`、`mygo-cli` 写精确版本 `0.9.0`，再 `bun install`（decisions.md D-T12）。
 
 ## 2. 创建项目
 
 仓库根目录已有 `docs/`、`.claude/`、`CLAUDE.md` 等文件，`mygo init` 可能拒绝非空目录。做法：
 
-1. 在临时目录 `mygo init mile-typora`，确认生成的文件清单。
+1. 在临时目录 `go run github.com/egoist/mygo/cmd/mygo@v0.9.0 init -name "Mile Typora" -module github.com/lhmile489-design/mile-typora mile-typora`，确认生成的文件清单（会附带 `.agents/skills/`、`resources/icon.png`、`src/mygo.ts`）。
 2. 逐个复制到仓库根（不覆盖已有文件；`.gitignore` 合并，不替换）。
 3. 模板 v0.9.0 web 的文件：`gitignore.tmpl`、`index.html.tmpl`、`main.go.tmpl`、`mygo.config.ts.tmpl`、`package.json.tmpl`、`tsconfig.json`、`vite.config.ts`、`src/main.ts`、`src/style.css`。
 4. 之后：`go mod tidy` → `bun install` → `mygo generate` → `mygo dev`。
 
-`identifier` 建议 `dev.mile.typora`，定稿后不再改（决定应用数据目录与单实例锁）。
+`identifier` 已定为 `dev.mile.typora`（init 没有对应参数，生成后在 `mygo.config.ts` 里改），定稿后不再改（决定应用数据目录与单实例锁）。开发端口已定为 5273。
+
+本项目已于 2026-11-16 完成上述步骤（M1-0）。本 skill 之后用于排查 `mygo dev/generate/build/doctor` 报错和依赖问题。
 
 ## 3. 叠加 React 与本项目依赖
 
