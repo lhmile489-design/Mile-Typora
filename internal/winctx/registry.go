@@ -17,7 +17,10 @@ type Window struct {
 	q intentQueue
 	// state is what the window is showing. M1-3 tracks the open file, M1-7
 	// the watch on it.
-	stateMu    sync.Mutex
+	stateMu sync.Mutex
+	// saveMu makes the conflict check, disk write and baseline update one
+	// critical section, so two saves of the same window cannot interleave.
+	saveMu     sync.Mutex
 	refreshSeq int64
 	openFile   string
 	root       string
@@ -115,6 +118,12 @@ func (w *Window) EditState() (dirty bool, hash string, hasBOM bool, lineEnding s
 	defer w.stateMu.Unlock()
 	return w.dirty, w.baseHash, w.hasBOM, w.lineEnding
 }
+
+// LockSave serializes a window's save against another save of the same buffer.
+func (w *Window) LockSave() { w.saveMu.Lock() }
+
+// UnlockSave releases LockSave.
+func (w *Window) UnlockSave() { w.saveMu.Unlock() }
 
 // SetStartUntitled asks the next page handshake to start an unsaved document.
 func (w *Window) SetStartUntitled(start bool) {

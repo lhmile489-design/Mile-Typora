@@ -134,6 +134,8 @@ func canonicalSavePath(chosen string) (string, *contract.Failure) {
 
 // saveText validates, checks the disk baseline and replaces the file.
 func (s *WindowService) saveText(w *winctx.Window, path, text string, force, as bool) contract.SaveResult {
+	w.LockSave()
+	defer w.UnlockSave()
 	if !utf8.ValidString(text) {
 		return contract.SaveResult{Failure: &contract.Failure{
 			Code:   "encoding",

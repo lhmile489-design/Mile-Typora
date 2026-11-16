@@ -21,10 +21,12 @@ import {
   type SettingsView,
   type ScanFrame,
   type ThemeChange,
+  type SaveAllSummary,
+  type SaveAllResult,
 } from "../mygo";
 import { failureMessage, failureText } from "./errors";
 
-export type { Doc as OpenedDoc, DocUpdate, OpenRequest, ReadyInfo, ScanFrame };
+export type { Doc as OpenedDoc, DocUpdate, OpenRequest, ReadyInfo, ScanFrame, SaveAllSummary, SaveAllResult };
 
 /** One row of the file tree, as Go sends it. */
 export type TreeEntry = ScanFrame["entries"][number];
@@ -134,6 +136,14 @@ export interface Transport {
   saveDocument(text: string, force: boolean): Promise<SaveOutcome>;
   /** Asks for a path and writes the buffer there. */
   saveDocumentAs(text: string): Promise<SaveOutcome>;
+  /** Starts a save-all run over every window (P1 FILE-10). */
+  saveAll(): Promise<Outcome<number>>;
+  /** Reports this window's save-all outcome back to Go. */
+  reportSaveAll(requestId: number, name: string, status: string, message: string): Promise<Outcome<void>>;
+  /** Subscribes to the save-all request for this window. */
+  onSaveAllRequest(listener: (requestId: number) => void): () => void;
+  /** Subscribes to the save-all aggregate. */
+  onSaveAllDone(listener: (summary: SaveAllSummary) => void): () => void;
   /** Reads the system clipboard's plain text (P1 EDIT-06/11). */
   readClipboardText(): Promise<Outcome<string>>;
   /** Writes plain text to the system clipboard. */
@@ -240,6 +250,17 @@ export const mygoTransport: Transport = {
   onDocUpdated: (listener) => subscribe(() => events.docUpdated.on(listener)),
   onTreeChanged: (listener) => subscribe(() => events.treeChanged.on(() => listener())),
   onNotice: (listener) => subscribe(() => events.appNotice.on(listener)),
+  saveAll: () =>
+    wrap(async () => {
+      const result = await WindowService.saveAll();
+      return result.requestId;
+    }),
+  reportSaveAll: (requestId, name, status, message) =>
+    wrap(async () => {
+      await WindowService.reportSaveAll(requestId, name, status, message);
+    }),
+  onSaveAllRequest: (listener) => subscribe(() => events.saveAllRequest.on((request) => listener(request.requestId))),
+  onSaveAllDone: (listener) => subscribe(() => events.saveAllDone.on(listener)),
   refresh: async () => openResult(() => WindowService.refresh()),
   renderSource: async (text) => {
     try {

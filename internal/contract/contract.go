@@ -218,3 +218,30 @@ type SettingsResult struct {
 type SaveOutcome struct {
 	Failure *Failure `json:"failure,omitempty"`
 }
+
+// SaveAllStart is the request id of a save-all run.
+type SaveAllStart struct {
+	RequestID int `json:"requestId"`
+}
+
+// SaveAllRequest asks one page to save its dirty buffer.
+type SaveAllRequest struct {
+	RequestID int `json:"requestId"`
+}
+
+// SaveAllResult is one window's outcome in a save-all run.
+type SaveAllResult struct {
+	WindowID int    `json:"windowId"`
+	Name     string `json:"name"`
+	Status   string `json:"status"`
+	Message  string `json:"message,omitempty"`
+}
+
+// SaveAllSummary is sent to the window that started the run.
+type SaveAllSummary struct {
+	RequestID int             `json:"requestId"`
+	Results   []SaveAllResult `json:"results"`
+	Saved     int             `json:"saved"`
+	Failed    int             `json:"failed"`
+	Unhandled int             `json:"unhandled"`
+}

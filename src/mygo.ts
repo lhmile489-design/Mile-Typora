@@ -189,6 +189,33 @@ export interface RenderSourceResult {
   failure?: Failure;
 }
 
+/** SaveAllRequest asks one page to save its dirty buffer. */
+export interface SaveAllRequest {
+  requestId: number;
+}
+
+/** SaveAllResult is one window's outcome in a save-all run. */
+export interface SaveAllResult {
+  windowId: number;
+  name: string;
+  status: string;
+  message?: string;
+}
+
+/** SaveAllStart is the request id of a save-all run. */
+export interface SaveAllStart {
+  requestId: number;
+}
+
+/** SaveAllSummary is sent to the window that started the run. */
+export interface SaveAllSummary {
+  requestId: number;
+  results: SaveAllResult[];
+  saved: number;
+  failed: number;
+  unhandled: number;
+}
+
 /** SaveOutcome answers a settings write. Failure is set when nothing was saved. */
 export interface SaveOutcome {
   failure?: Failure;
@@ -421,6 +448,18 @@ export const WindowService = {
   renderSource(text: string): Promise<RenderSourceResult> {
     return call("WindowService.RenderSource", text);
   },
+  /** ReportSaveAll records one window's result and moves to the next window. */
+  reportSaveAll(requestID: number, name: string, status: string, message: string): Promise<void> {
+    return call("WindowService.ReportSaveAll", requestID, name, status, message);
+  },
+  /** SaveAll starts a run over every open window and asks the first one to save. */
+  saveAll(): Promise<SaveAllStart> {
+    return call("WindowService.SaveAll");
+  },
+  /** SaveAllWindowClosed drops a closed window from the current run. */
+  saveAllWindowClosed(windowID: number): Promise<void> {
+    return call("WindowService.SaveAllWindowClosed", windowID);
+  },
   /**
    * SaveDocument writes the window's buffer to its file (PRD 10.2). force skips
    * the conflict check after the user confirmed an overwrite or recreate.
@@ -472,6 +511,10 @@ export const events = {
   treeChanged: event<TreeChanged>("tree-changed"),
   /** appNotice tells one window about something the app refused to do. */
   appNotice: event<Notice>("app-notice"),
+  /** saveAllRequest asks one window to save its dirty buffer. */
+  saveAllRequest: event<SaveAllRequest>("save-all-request"),
+  /** saveAllDone gives the aggregate back to the window that started the run. */
+  saveAllDone: event<SaveAllSummary>("save-all-done"),
   /**
    * closeRequested asks a page to run its unsaved-changes prompt before the
    * native close goes through.

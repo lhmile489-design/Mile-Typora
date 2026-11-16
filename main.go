@@ -88,6 +88,12 @@ var treeChanged = mygo.NewEvent[contract.TreeChanged]("tree-changed")
 // appNotice tells one window about something the app refused to do.
 var appNotice = mygo.NewEvent[contract.Notice]("app-notice")
 
+// saveAllRequest asks one window to save its dirty buffer.
+var saveAllRequest = mygo.NewEvent[contract.SaveAllRequest]("save-all-request")
+
+// saveAllDone gives the aggregate back to the window that started the run.
+var saveAllDone = mygo.NewEvent[contract.SaveAllSummary]("save-all-done")
+
 // closeRequested asks a page to run its unsaved-changes prompt before the
 // native close goes through.
 var closeRequested = mygo.NewEvent[contract.CloseRequested]("close-requested")
@@ -200,6 +206,22 @@ func main() {
 		State:         state,
 		StartupNotice: notice,
 		ThemeChanged:  applyAppearance,
+		SaveAllRequest: func(windowID, requestID int) bool {
+			for _, w := range mygo.Windows() {
+				if w.ID() == windowID {
+					return saveAllRequest.Emit(w, contract.SaveAllRequest{RequestID: requestID}) == nil
+				}
+			}
+			return false
+		},
+		SaveAllDone: func(windowID int, summary contract.SaveAllSummary) {
+			for _, w := range mygo.Windows() {
+				if w.ID() == windowID {
+					_ = saveAllDone.Emit(w, summary)
+					return
+				}
+			}
+		},
 	})
 	windowsService = windowsSvc
 	mygo.Bind(windowsSvc)
@@ -284,6 +306,9 @@ func newWindow() *mygo.Window {
 	})
 	// Closing the window cancels its context, so work started for it stops.
 	w.OnClosed(func() {
+		if windowsService != nil {
+			windowsService.SaveAllWindowClosed(id)
+		}
 		windows.Remove(id)
 	})
 	return w

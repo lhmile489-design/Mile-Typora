@@ -26,6 +26,10 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     clearRecent: async () => ({ ok: true as const, value: undefined }),
     newDocument: async () => ({ ok: true as const, value: 3 }),
     clearStartUntitled: async () => {},
+    saveAll: async () => ({ ok: true as const, value: 1 }),
+    reportSaveAll: async () => ({ ok: true as const, value: undefined }),
+    onSaveAllRequest: () => () => {},
+    onSaveAllDone: () => () => {},
     readClipboardText: async () => ({ ok: true as const, value: "" }),
     writeClipboardText: async () => ({ ok: true as const, value: undefined }),
     openRecent: async () => ({ kind: "handedOff" as const }),
@@ -632,6 +636,96 @@ describe("keyboard commands", () => {
     await waitFor(() => expect(lineTexts()).toEqual(["foo bar", "bar"]));
   });
 
+
+  it("runs editor commands from the menu bar", async () => {
+    const doc = {
+      name: "笔记.md",
+      path: "E:/notes/笔记.md",
+      size: 6,
+      hasBom: false,
+      lineEnding: "LF",
+      hash: "",
+      text: "正文",
+      html: "<h1>正文</h1>",
+      counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
+    };
+    render(<App transport={fakeTransport({ openFile: async () => ({ kind: "loaded" as const, doc }) })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "正文" });
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    content.focus();
+    fireEvent.keyDown(content, { key: "a", ctrlKey: true });
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "格式" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /加粗/ }));
+    await waitFor(() => expect(content.textContent).toContain("**正文**"));
+  });
+
+  it("starts save-all from the file menu and reports the current window", async () => {
+    let requestListener: ((requestId: number) => void) | null = null;
+    let doneListener: ((summary: import("../lib/transport").SaveAllSummary) => void) | null = null;
+    const saveAll = vi.fn(async () => ({ ok: true as const, value: 7 }));
+    const reportSaveAll = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    const doc = {
+      name: "笔记.md",
+      path: "E:/notes/笔记.md",
+      size: 6,
+      hasBom: false,
+      lineEnding: "LF",
+      hash: "",
+      text: "正文",
+      html: "<h1>正文</h1>",
+      counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
+    };
+    render(
+      <App
+        transport={fakeTransport({
+          openFile: async () => ({ kind: "loaded" as const, doc }),
+          saveAll,
+          reportSaveAll,
+          onSaveAllRequest: (listener) => {
+            requestListener = listener;
+            return () => {};
+          },
+          onSaveAllDone: (listener) => {
+            doneListener = listener;
+            return () => {};
+          },
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "正文" });
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    content.focus();
+    fireEvent.keyDown(content, { key: "1", ctrlKey: true });
+    await waitFor(() => expect(content.textContent).toContain("# 正文"));
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "文件" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "保存全部…" }));
+    expect(saveAll).toHaveBeenCalled();
+
+    await act(async () => {
+      requestListener?.(7);
+    });
+    await waitFor(() =>
+      expect(reportSaveAll).toHaveBeenCalledWith(7, "笔记.md", "saved", ""),
+    );
+
+    await act(async () => {
+      doneListener?.({
+        requestId: 7,
+        saved: 1,
+        failed: 0,
+        unhandled: 0,
+        results: [{ windowId: 3, name: "笔记.md", status: "saved" }],
+      });
+    });
+    expect(await screen.findByRole("dialog", { name: "保存全部" })).toBeTruthy();
+    expect(screen.getByText("已保存 1 个，失败 0 个，未处理 0 个。")).toBeTruthy();
+  });
 
   it("closes the find bar with Escape before anything else", async () => {
     const doc = {

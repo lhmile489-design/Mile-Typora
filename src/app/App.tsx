@@ -23,6 +23,7 @@ import type {
   ReadyInfo,
   RecentEntry,
   RequestedOutcome,
+  SaveAllSummary,
   SaveOutcome,
   ScanFrame,
   Transport,
@@ -31,6 +32,10 @@ import type {
 import { failureMessage, failureText, formatBytes } from "../lib/errors";
 import { FileTree } from "../components/FileTree";
 import { SaveConflictDialog } from "../components/SaveConflictDialog";
+import { SaveAllDialog } from "../components/SaveAllDialog";
+import { MenuBar, type MenuGroup } from "../components/MenuBar";
+import { RecentDialog } from "../components/RecentDialog";
+import { HelpDialog } from "../components/HelpDialog";
 import { SettingsDialog } from "../components/SettingsDialog";
 import { UnsavedDialog } from "../components/UnsavedDialog";
 import { FindBar } from "../components/FindBar";
@@ -55,6 +60,130 @@ type ViewMode = "reading" | "editing" | "preview";
  * wires them; until then they are disabled rather than absent, so the
  * toolbar matches the design and nothing looks clickable that is not.
  */
+type MenuState = {
+  editing: boolean;
+  canSave: boolean;
+  hasDoc: boolean;
+  saveAllRunning: boolean;
+  saving: boolean;
+  promptOpen: boolean;
+  recentCount: number;
+};
+
+function buildMenus(state: MenuState): MenuGroup[] {
+  const reason = "源码编辑模式下可用";
+  const editing = (id: string, label: string, shortcut?: string, disabled = !state.editing, why = reason) => ({
+    id,
+    label,
+    shortcut,
+    disabled,
+    reason: disabled ? why : undefined,
+  });
+  const item = (id: string, label: string, shortcut?: string) => ({ id, label, shortcut });
+  const sep = { kind: "separator" as const };
+  return [
+    {
+      id: "file",
+      label: "文件",
+      items: [
+        editing("new-document", "新建", "Ctrl+N", false),
+        item("new-window", "新建窗口", "Ctrl+Shift+N"),
+        item("open-file", "打开…", "Ctrl+O"),
+        item("open-folder", "打开文件夹…", "Ctrl+Shift+O"),
+        sep,
+        editing("recent", "最近打开…", undefined, state.recentCount === 0, "还没有最近记录"),
+        sep,
+        editing("save", "保存", "Ctrl+S", !state.canSave || state.saving || state.promptOpen, state.saving ? "正在保存" : state.promptOpen ? "先处理当前保存提示" : "打开文档后可保存"),
+        editing("save-as", "另存为…", "Ctrl+Shift+S", !state.canSave || state.saving || state.promptOpen, state.saving ? "正在保存" : state.promptOpen ? "先处理当前保存提示" : "打开文档后可另存为"),
+        editing("save-all", "保存全部…", undefined, state.saveAllRunning || state.promptOpen || state.saving, state.saving ? "正在保存" : state.promptOpen ? "先处理当前保存提示" : "保存全部正在进行"),
+        sep,
+        item("settings", "偏好设置…", "Ctrl+,"),
+        item("close", "关闭", "Ctrl+W"),
+      ],
+    },
+    {
+      id: "edit",
+      label: "编辑",
+      items: [
+        editing("undo", "撤销", "Ctrl+Z"),
+        editing("redo", "重做", "Ctrl+Y"),
+        sep,
+        editing("cut", "剪切", "Ctrl+X"),
+        item("copy", "复制", "Ctrl+C"),
+        editing("paste", "粘贴", "Ctrl+V"),
+        editing("paste-plain", "粘贴为纯文本", "Ctrl+Shift+V"),
+        editing("copy-markdown", "复制为 Markdown", "Ctrl+Shift+C"),
+        sep,
+        editing("select-all", "全选", "Ctrl+A"),
+        editing("select-line", "选择当前行"),
+        editing("select-paragraph", "选择当前段落"),
+        sep,
+        editing("move-line-up", "上移该行", "Alt+↑"),
+        editing("move-line-down", "下移该行", "Alt+↓"),
+        editing("delete", "删除"),
+        sep,
+        item("find", "查找和替换…", "Ctrl+F"),
+      ],
+    },
+    {
+      id: "paragraph",
+      label: "段落",
+      items: [
+        editing("heading-1", "一级标题", "Ctrl+1"),
+        editing("heading-2", "二级标题", "Ctrl+2"),
+        editing("heading-3", "三级标题", "Ctrl+3"),
+        editing("heading-4", "四级标题", "Ctrl+4"),
+        editing("heading-5", "五级标题", "Ctrl+5"),
+        editing("heading-6", "六级标题", "Ctrl+6"),
+        editing("paragraph", "普通段落", "Ctrl+0"),
+        sep,
+        editing("heading-promote", "提升标题级别", "Ctrl+="),
+        editing("heading-demote", "降低标题级别", "Ctrl+-"),
+        sep,
+        editing("quote", "引用", "Ctrl+Shift+Q"),
+        editing("formula-block", "公式块", "Ctrl+Shift+M"),
+        editing("code-block", "代码块", "Ctrl+Shift+K"),
+        sep,
+        editing("ordered-list", "有序列表", "Ctrl+Shift+["),
+        editing("unordered-list", "无序列表", "Ctrl+Shift+]"),
+        editing("task-list", "任务列表", "Ctrl+Shift+X"),
+        editing("task-done", "任务状态：已完成"),
+        editing("task-todo", "任务状态：未完成"),
+        editing("indent-in", "增加列表缩进"),
+        editing("indent-out", "减少列表缩进"),
+        sep,
+        editing("paragraph-above", "在上方插入段落"),
+        editing("paragraph-below", "在下方插入段落"),
+        editing("horizontal-rule", "水平分割线"),
+      ],
+    },
+    {
+      id: "format",
+      label: "格式",
+      items: [
+        editing("bold", "加粗", "Ctrl+B"),
+        editing("italic", "斜体", "Ctrl+I"),
+        editing("inline-code", "代码", "Ctrl+Shift+反引号"),
+        editing("strikethrough", "删除线", "Alt+Shift+5"),
+        editing("link", "超链接", "Ctrl+K"),
+        editing("clear-format", "清除样式", "Ctrl+\\"),
+      ],
+    },
+    {
+      id: "view",
+      label: "视图",
+      items: [
+        editing("toggle-source", "源码 / 预览模式", "Ctrl+/", !state.hasDoc, "尚未打开文档"),
+      ],
+    },
+    {
+      id: "help",
+      label: "帮助",
+      items: [item("help-shortcuts", "快捷键说明"), item("help-about", "关于 Mile Typora")],
+    },
+  ];
+}
+
 /** Editor commands that only run while the source editor has focus (PRD 15.1). */
 const EDITOR_ACTIONS: Partial<Record<Command, (editor: SourceCommands) => boolean>> = {
   "heading-1": (editor) => editor.setHeading(1),
@@ -98,6 +227,17 @@ export function App({ transport }: { transport: Transport }) {
   const [unsavedError, setUnsavedError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<{ kind: "conflict" | "missing"; message: string } | null>(null);
+  const [saveAllSummary, setSaveAllSummary] = useState<SaveAllSummary | null>(null);
+  const [saveAllRunning, setSaveAllRunning] = useState(false);
+  const saveAllTimer = useRef<number | null>(null);
+  const savingRef = useRef(false);
+  const unsavedOpenRef = useRef(false);
+  unsavedOpenRef.current = unsavedOpen;
+  const conflictOpenRef = useRef(false);
+  conflictOpenRef.current = conflict !== null;
+  const [recentOpen, setRecentOpen] = useState(false);
+  const [helpKind, setHelpKind] = useState<"shortcuts" | "about" | null>(null);
+  const saveAllConflict = useRef<number | null>(null);
   const pendingAction = useRef<(() => void) | null>(null);
   const editorRef = useRef<SourceCommands | null>(null);
   const dirty = mode !== "reading" && buffer !== savedText;
@@ -734,10 +874,12 @@ export function App({ transport }: { transport: Transport }) {
   }, []);
 
   const saveBufferAs = useCallback(async (): Promise<boolean> => {
-    if (!docRef.current) return false;
+    if (!docRef.current || savingRef.current) return false;
+    savingRef.current = true;
     setSaving(true);
     setSaveError(null);
     const result = await transport.saveDocumentAs(bufferRef.current);
+    savingRef.current = false;
     setSaving(false);
     if (result.kind === "saved") {
       applySaved(result);
@@ -752,10 +894,12 @@ export function App({ transport }: { transport: Transport }) {
 
   const saveBuffer = useCallback(
     async (force = false): Promise<boolean> => {
-      if (!docRef.current) return false;
+      if (!docRef.current || savingRef.current) return false;
+      savingRef.current = true;
       setSaving(true);
       setSaveError(null);
       const result = await transport.saveDocument(bufferRef.current, force);
+      savingRef.current = false;
       setSaving(false);
       if (result.kind === "saved") {
         applySaved(result);
@@ -775,6 +919,148 @@ export function App({ transport }: { transport: Transport }) {
     },
     [applySaved, saveBufferAs, transport],
   );
+
+  const reportSaveAll = useCallback(
+    async (requestId: number, status: string, message = "", reportName?: string) => {
+      const name = reportName || docRef.current?.name || "未命名";
+      const result = await transport.reportSaveAll(requestId, name, status, message);
+      if (!result.ok) setNotice(result.message);
+    },
+    [transport],
+  );
+
+  const saveAllAsStep = useCallback(
+    async (requestId: number) => {
+      if (savingRef.current) {
+        await reportSaveAll(requestId, "unhandled", "窗口正在保存");
+        return;
+      }
+      savingRef.current = true;
+      setSaving(true);
+      setSaveError(null);
+      const result = await transport.saveDocumentAs(bufferRef.current);
+      savingRef.current = false;
+      setSaving(false);
+      if (result.kind === "saved") {
+        applySaved(result);
+        await reportSaveAll(requestId, "saved", "", result.name);
+        return;
+      }
+      if (result.kind === "cancelled") {
+        await reportSaveAll(requestId, "unhandled", "已取消另存为");
+        return;
+      }
+      await reportSaveAll(requestId, "failed", result.message);
+    },
+    [applySaved, reportSaveAll, transport],
+  );
+
+  const saveAllForceStep = useCallback(
+    async (requestId: number) => {
+      if (savingRef.current) {
+        await reportSaveAll(requestId, "unhandled", "窗口正在保存");
+        return;
+      }
+      savingRef.current = true;
+      setSaving(true);
+      setSaveError(null);
+      const result = await transport.saveDocument(bufferRef.current, true);
+      savingRef.current = false;
+      setSaving(false);
+      if (result.kind === "saved") {
+        applySaved(result);
+        await reportSaveAll(requestId, "saved", "", result.name);
+        return;
+      }
+      await reportSaveAll(requestId, "failed", result.kind === "cancelled" ? "已取消" : result.message);
+    },
+    [applySaved, reportSaveAll, transport],
+  );
+
+  const saveAllStep = useCallback(
+    async (requestId: number) => {
+      if (unsavedOpenRef.current || conflictOpenRef.current) {
+        await reportSaveAll(requestId, "unhandled", "窗口有未处理的保存提示");
+        return;
+      }
+      if (savingRef.current) {
+        await reportSaveAll(requestId, "unhandled", "窗口正在保存");
+        return;
+      }
+      if (!docRef.current || !dirtyRef.current) {
+        await reportSaveAll(requestId, "clean");
+        return;
+      }
+      savingRef.current = true;
+      setSaving(true);
+      setSaveError(null);
+      const result = await transport.saveDocument(bufferRef.current, false);
+      savingRef.current = false;
+      setSaving(false);
+      if (result.kind === "saved") {
+        applySaved(result);
+        await reportSaveAll(requestId, "saved", "", result.name);
+        return;
+      }
+      if (result.kind === "cancelled") {
+        await reportSaveAll(requestId, "unhandled", "已取消保存");
+        return;
+      }
+      if (result.code === "no_path") {
+        await saveAllAsStep(requestId);
+        return;
+      }
+      if (result.code === "conflict" || result.code === "missing") {
+        saveAllConflict.current = requestId;
+        setUnsavedOpen(false);
+        setConflict({ kind: result.code, message: result.message });
+        return;
+      }
+      await reportSaveAll(requestId, "failed", result.message);
+    },
+    [applySaved, reportSaveAll, saveAllAsStep, transport],
+  );
+
+  const startSaveAll = useCallback(async () => {
+    if (saveAllRunning || savingRef.current || unsavedOpenRef.current || conflictOpenRef.current) return;
+    setSaveAllRunning(true);
+    setNotice("正在保存全部…");
+    if (saveAllTimer.current !== null) window.clearTimeout(saveAllTimer.current);
+    saveAllTimer.current = window.setTimeout(() => {
+      setSaveAllRunning(false);
+      setNotice("保存全部超时，请重试");
+    }, 6 * 60 * 1000);
+    const result = await transport.saveAll();
+    if (!result.ok) {
+      if (saveAllTimer.current !== null) window.clearTimeout(saveAllTimer.current);
+      setSaveAllRunning(false);
+      setNotice(result.message);
+    }
+  }, [saveAllRunning, transport]);
+
+  useEffect(() => {
+    return () => {
+      if (saveAllTimer.current !== null) window.clearTimeout(saveAllTimer.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    return transport.onSaveAllRequest((requestId) => {
+      void saveAllStep(requestId);
+    });
+  }, [saveAllStep, transport]);
+
+  useEffect(() => {
+    return transport.onSaveAllDone((summary) => {
+      if (saveAllTimer.current !== null) {
+        window.clearTimeout(saveAllTimer.current);
+        saveAllTimer.current = null;
+      }
+      setSaveAllRunning(false);
+      setSaveAllSummary(summary);
+      setNotice(`保存全部完成：已保存 ${summary.saved}，失败 ${summary.failed}，未处理 ${summary.unhandled}`);
+    });
+  }, [transport]);
 
   const continuePending = useCallback(() => {
     const action = pendingAction.current;
@@ -796,6 +1082,7 @@ export function App({ transport }: { transport: Transport }) {
   }, [continuePending]);
 
   const save = useCallback(async () => {
+    if (conflictOpenRef.current || unsavedOpenRef.current) return;
     if (modeRef.current === "reading") {
       setNotice("阅读模式没有可保存的修改");
       return;
@@ -808,6 +1095,7 @@ export function App({ transport }: { transport: Transport }) {
   }, [continuePending, saveBuffer]);
 
   const saveAs = useCallback(async () => {
+    if (conflictOpenRef.current || unsavedOpenRef.current) return;
     if (modeRef.current === "reading") {
       setNotice("阅读模式没有可保存的修改");
       return;
@@ -848,6 +1136,88 @@ export function App({ transport }: { transport: Transport }) {
     clearHighlights();
     setMode("editing");
   }, [buffer, transport]);
+
+  const onMenuCommand = useCallback(
+    (id: string) => {
+      const editor = editorRef.current;
+      const inEditor = modeRef.current === "editing" && editor !== null;
+      const run = (fn: (commands: SourceCommands) => void) => {
+        if (inEditor && editor) fn(editor);
+      };
+      switch (id) {
+        case "new-document": void newDocument(); return;
+        case "new-window": void newWindow(); return;
+        case "open-file": void openFile(); return;
+        case "open-folder": void openFolder(); return;
+        case "recent": setRecentOpen(true); return;
+        case "save": void save(); return;
+        case "save-as": void saveAs(); return;
+        case "save-all": void startSaveAll(); return;
+        case "settings": setSettingsError(null); setSettingsOpen(true); return;
+        case "close": requestClose(); return;
+        case "undo": run((c) => c.undo()); return;
+        case "redo": run((c) => c.redo()); return;
+        case "cut": run((c) => void c.cut()); return;
+        case "copy":
+          if (inEditor && editor) {
+            void editor.copy();
+          } else {
+            const selected = window.getSelection()?.toString() ?? "";
+            if (selected !== "") {
+              void transport.writeClipboardText(selected).then((result) => {
+                if (!result.ok) setNotice(result.message);
+              });
+            }
+          }
+          return;
+        case "paste": run((c) => void c.paste()); return;
+        case "paste-plain": run((c) => void c.pastePlain()); return;
+        case "copy-markdown": run((c) => void c.copyMarkdown()); return;
+        case "select-all": run((c) => c.selectAll()); return;
+        case "select-line": run((c) => c.selectLine()); return;
+        case "select-paragraph": run((c) => c.selectParagraph()); return;
+        case "move-line-up": run((c) => c.moveLine("up")); return;
+        case "move-line-down": run((c) => c.moveLine("down")); return;
+        case "delete": run((c) => c.deleteForward()); return;
+        case "find":
+          setFindOpen(true);
+          requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".find-bar input")?.focus());
+          return;
+        case "heading-1": run((c) => c.setHeading(1)); return;
+        case "heading-2": run((c) => c.setHeading(2)); return;
+        case "heading-3": run((c) => c.setHeading(3)); return;
+        case "heading-4": run((c) => c.setHeading(4)); return;
+        case "heading-5": run((c) => c.setHeading(5)); return;
+        case "heading-6": run((c) => c.setHeading(6)); return;
+        case "paragraph": run((c) => c.setParagraph()); return;
+        case "heading-promote": run((c) => c.promoteHeading()); return;
+        case "heading-demote": run((c) => c.demoteHeading()); return;
+        case "quote": run((c) => c.toggleQuote()); return;
+        case "formula-block": run((c) => c.insertFormulaBlock()); return;
+        case "code-block": run((c) => c.insertCodeBlock()); return;
+        case "ordered-list": run((c) => c.toggleOrderedList()); return;
+        case "unordered-list": run((c) => c.toggleUnorderedList()); return;
+        case "task-list": run((c) => c.toggleTaskList()); return;
+        case "task-done": run((c) => c.setTaskStatus(true)); return;
+        case "task-todo": run((c) => c.setTaskStatus(false)); return;
+        case "indent-in": run((c) => c.indentList("in")); return;
+        case "indent-out": run((c) => c.indentList("out")); return;
+        case "paragraph-above": run((c) => c.insertParagraph("above")); return;
+        case "paragraph-below": run((c) => c.insertParagraph("below")); return;
+        case "horizontal-rule": run((c) => c.insertHorizontalRule()); return;
+        case "bold": run((c) => c.toggleBold()); return;
+        case "italic": run((c) => c.toggleItalic()); return;
+        case "inline-code": run((c) => c.toggleInlineCode()); return;
+        case "strikethrough": run((c) => c.toggleStrikethrough()); return;
+        case "link": run((c) => c.insertLink()); return;
+        case "clear-format": run((c) => c.clearFormatting()); return;
+        case "toggle-source": void toggleSource(); return;
+        case "help-shortcuts": setHelpKind("shortcuts"); return;
+        case "help-about": setHelpKind("about"); return;
+      }
+    },
+    [newDocument, newWindow, openFile, openFolder, requestClose, save, saveAs, startSaveAll, toggleSource, transport],
+  );
 
   // Links in the preview do not replace the buffer before M4-2's protection.
   const handlePreviewLink = useCallback((href: string) => {
@@ -980,7 +1350,7 @@ export function App({ transport }: { transport: Transport }) {
       if (e.defaultPrevented) return;
       const command = commandFor(e);
       if (!command) return;
-      if (settingsOpen && command !== "dismiss") return;
+      if ((settingsOpen || unsavedOpen || conflict !== null || saveAllSummary !== null || recentOpen || helpKind !== null) && command !== "dismiss") return;
       const editorAction = EDITOR_ACTIONS[command];
       if (editorAction) {
         const active = document.activeElement;
@@ -1094,11 +1464,28 @@ export function App({ transport }: { transport: Transport }) {
     save,
     saveAs,
     settingsOpen,
+    unsavedOpen,
+    conflict,
+    saveAllSummary,
+    recentOpen,
+    helpKind,
     toggleSource,
   ]);
 
   return (
     <div className="win">
+      <MenuBar
+        menus={buildMenus({
+          editing: mode === "editing",
+          canSave: mode !== "reading" && Boolean(doc),
+          hasDoc: Boolean(doc),
+          saveAllRunning,
+          saving,
+          promptOpen: unsavedOpen || conflict !== null,
+          recentCount: recent.length,
+        })}
+        onCommand={onMenuCommand}
+      />
       <div className="toolbar" role="toolbar" aria-label="工具栏">
         <ToolButton
           label="打开文件"
@@ -1371,20 +1758,68 @@ export function App({ transport }: { transport: Transport }) {
           saving={saving}
           error={saveError}
           onSaveAs={() => {
+            const request = saveAllConflict.current;
+            if (request !== null) {
+              saveAllConflict.current = null;
+              setConflict(null);
+              setSaveError(null);
+              void saveAllAsStep(request);
+              return;
+            }
             void (async () => {
               if (await saveBufferAs()) continuePending();
             })();
           }}
           onForce={() => {
+            const request = saveAllConflict.current;
+            if (request !== null) {
+              saveAllConflict.current = null;
+              setConflict(null);
+              setSaveError(null);
+              void saveAllForceStep(request);
+              return;
+            }
             void (async () => {
               if (await saveBuffer(true)) continuePending();
             })();
           }}
           onCancel={() => {
+            const request = saveAllConflict.current;
+            saveAllConflict.current = null;
             pendingAction.current = null;
             setConflict(null);
             setSaveError(null);
+            if (request !== null) void reportSaveAll(request, "unhandled", "已取消保存");
           }}
+        />
+      )}
+      {saveAllSummary && (
+        <SaveAllDialog
+          rows={saveAllSummary.results}
+          saved={saveAllSummary.saved}
+          failed={saveAllSummary.failed}
+          unhandled={saveAllSummary.unhandled}
+          onClose={() => setSaveAllSummary(null)}
+        />
+      )}
+      {recentOpen && (
+        <RecentDialog
+          entries={recent}
+          onOpen={(path) => {
+            const entry = recent.find((item) => item.path === path);
+            if (entry) {
+              setRecentOpen(false);
+              void openRecent(entry);
+            }
+          }}
+          onClose={() => setRecentOpen(false)}
+        />
+      )}
+      {helpKind && (
+        <HelpDialog
+          kind={helpKind}
+          version={ready.kind === "ready" ? ready.info.version : ""}
+          onClose={() => setHelpKind(null)}
         />
       )}
       {settingsOpen && (

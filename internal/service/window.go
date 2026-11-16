@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
@@ -77,6 +78,10 @@ type Deps struct {
 	Confirm func(ctx context.Context, title, message, detail string) bool
 	// External opens a URL with the system browser.
 	External func(url string) error
+	// SaveAllRequest asks one window to save its dirty buffer.
+	SaveAllRequest func(windowID, requestID int) bool
+	// SaveAllDone sends the aggregate to the window that started save-all.
+	SaveAllDone func(windowID int, summary contract.SaveAllSummary)
 }
 
 type WindowService struct {
@@ -105,6 +110,12 @@ type WindowService struct {
 	metaFailed atomic.Bool
 	confirm    func(ctx context.Context, title, message, detail string) bool
 	external   func(url string) error
+	// Save-all runs one window at a time; pages report back through a binding.
+	saveAllRequest func(windowID, requestID int) bool
+	saveAllDone    func(windowID int, summary contract.SaveAllSummary)
+	saveAllMu      sync.Mutex
+	saveAll        *saveAllRun
+	saveAllSeq     atomic.Int64
 }
 
 // NewWindowService returns a WindowService over the open windows. resources is
@@ -133,25 +144,27 @@ func NewWindowService(d Deps) *WindowService {
 			}
 			return w.ID(), true
 		},
-		version:       mygo.App.Version,
-		windows:       d.Windows,
-		open:          d.Open,
-		pick:          d.PickFile,
-		pickDir:       d.PickFolder,
-		render:        markdown.New(),
-		resources:     d.Resources,
-		watcher:       d.Watcher,
-		docUpdated:    d.DocUpdated,
-		treeWatcher:   d.TreeWatcher,
-		treeChanged:   d.TreeChanged,
-		closeWindow:   d.CloseWindow,
-		savePick:      d.SavePicker,
-		startedAt:     d.StartedAt,
-		state:         d.State,
-		startupNotice: d.StartupNotice,
-		themeChanged:  d.ThemeChanged,
-		confirm:       d.Confirm,
-		external:      d.External,
+		version:        mygo.App.Version,
+		windows:        d.Windows,
+		open:           d.Open,
+		pick:           d.PickFile,
+		pickDir:        d.PickFolder,
+		render:         markdown.New(),
+		resources:      d.Resources,
+		watcher:        d.Watcher,
+		docUpdated:     d.DocUpdated,
+		treeWatcher:    d.TreeWatcher,
+		treeChanged:    d.TreeChanged,
+		closeWindow:    d.CloseWindow,
+		savePick:       d.SavePicker,
+		startedAt:      d.StartedAt,
+		state:          d.State,
+		startupNotice:  d.StartupNotice,
+		themeChanged:   d.ThemeChanged,
+		confirm:        d.Confirm,
+		external:       d.External,
+		saveAllRequest: d.SaveAllRequest,
+		saveAllDone:    d.SaveAllDone,
 	}
 }
 
