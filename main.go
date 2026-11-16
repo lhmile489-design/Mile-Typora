@@ -18,6 +18,7 @@ import (
 	"github.com/lhmile489-design/mile-typora/internal/resource"
 	"github.com/lhmile489-design/mile-typora/internal/service"
 	"github.com/lhmile489-design/mile-typora/internal/watch"
+	"github.com/lhmile489-design/mile-typora/internal/webview"
 	"github.com/lhmile489-design/mile-typora/internal/winctx"
 )
 
@@ -92,6 +93,13 @@ var appNotice = mygo.NewEvent[contract.Notice]("app-notice")
 var openRequest = mygo.NewEvent[contract.OpenRequest]("open-request")
 
 func main() {
+	// Without the runtime the window would stay blank; tell the user what to
+	// install before any window exists (PRD §8.1).
+	if !webview.Available() {
+		webview.ShowPrompt()
+		return
+	}
+
 	// The single instance lock is the first mygo call (CLAUDE.md §5.1). A
 	// second instance passes its command line to the first and exits.
 	if !mygo.App.RequestSingleInstanceLock() {
