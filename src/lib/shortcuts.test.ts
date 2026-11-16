@@ -27,6 +27,19 @@ describe("the P0 shortcut table", () => {
     ["l", { ctrlKey: true, shiftKey: true }, "toggle-left"],
     ["/", { ctrlKey: true }, "toggle-source"],
     ["s", { ctrlKey: true }, "save-blocked"],
+    ["1", { ctrlKey: true }, "heading-1"],
+    ["6", { ctrlKey: true }, "heading-6"],
+    ["0", { ctrlKey: true }, "paragraph"],
+    ["=", { ctrlKey: true }, "heading-promote"],
+    ["-", { ctrlKey: true }, "heading-demote"],
+    ["q", { ctrlKey: true, shiftKey: true }, "quote"],
+    ["m", { ctrlKey: true, shiftKey: true }, "formula-block"],
+    ["k", { ctrlKey: true, shiftKey: true }, "code-block"],
+    ["[", { ctrlKey: true, shiftKey: true }, "ordered-list"],
+    ["{", { ctrlKey: true, shiftKey: true }, "ordered-list"],
+    ["]", { ctrlKey: true, shiftKey: true }, "unordered-list"],
+    ["}", { ctrlKey: true, shiftKey: true }, "unordered-list"],
+    ["x", { ctrlKey: true, shiftKey: true }, "task-list"],
     ["c", { ctrlKey: true, shiftKey: true }, "copy-markdown"],
     ["v", { ctrlKey: true, shiftKey: true }, "paste-plain"],
     ["Escape", {}, "dismiss"],
@@ -43,6 +56,13 @@ describe("the P0 shortcut table", () => {
     expect(commandFor(press("F5", { shiftKey: true }))).toBeNull();
     expect(commandFor(press("F5", { ctrlKey: true }))).toBeNull();
     expect(commandFor(press("l", { ctrlKey: true }))).toBeNull();
+    // The Shift variants stay free for P2 zoom and are not heading commands.
+    expect(commandFor(press("=", { ctrlKey: true, shiftKey: true }))).toBeNull();
+    expect(commandFor(press("-", { ctrlKey: true, shiftKey: true }))).toBeNull();
+    expect(commandFor(press("1", { ctrlKey: true, shiftKey: true }))).toBeNull();
+    // Task status, list indent, inserted paragraphs and rules are menu-only.
+    expect(commandFor(press("t", { ctrlKey: true, shiftKey: true }))).toBeNull();
+    expect(commandFor(press("ArrowUp", { ctrlKey: true, altKey: true }))).toBeNull();
   });
 
   it("ignores the repeats of a held key", () => {

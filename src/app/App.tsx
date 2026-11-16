@@ -39,7 +39,7 @@ import { advance, clearHighlights, collectRanges, paint, scrollToRange } from ".
 import { capture, metricsOf, restore, type Position } from "../render/position";
 import { renderMath } from "../render/math";
 import { renderDiagrams, rerenderDiagrams } from "../render/mermaid";
-import { commandFor, SHORTCUT_HINT } from "../lib/shortcuts";
+import { commandFor, SHORTCUT_HINT, type Command } from "../lib/shortcuts";
 
 type ReadyState =
   | { kind: "waiting" }
@@ -55,6 +55,25 @@ type ViewMode = "reading" | "editing" | "preview";
  * wires them; until then they are disabled rather than absent, so the
  * toolbar matches the design and nothing looks clickable that is not.
  */
+/** Editor commands that only run while the source editor has focus (PRD 15.1). */
+const EDITOR_ACTIONS: Partial<Record<Command, (editor: SourceCommands) => boolean>> = {
+  "heading-1": (editor) => editor.setHeading(1),
+  "heading-2": (editor) => editor.setHeading(2),
+  "heading-3": (editor) => editor.setHeading(3),
+  "heading-4": (editor) => editor.setHeading(4),
+  "heading-5": (editor) => editor.setHeading(5),
+  "heading-6": (editor) => editor.setHeading(6),
+  paragraph: (editor) => editor.setParagraph(),
+  "heading-promote": (editor) => editor.promoteHeading(),
+  "heading-demote": (editor) => editor.demoteHeading(),
+  quote: (editor) => editor.toggleQuote(),
+  "formula-block": (editor) => editor.insertFormulaBlock(),
+  "code-block": (editor) => editor.insertCodeBlock(),
+  "ordered-list": (editor) => editor.toggleOrderedList(),
+  "unordered-list": (editor) => editor.toggleUnorderedList(),
+  "task-list": (editor) => editor.toggleTaskList(),
+};
+
 export function App({ transport }: { transport: Transport }) {
   const [ready, setReady] = useState<ReadyState>({ kind: "waiting" });
   const [requests, setRequests] = useState<OpenRequest[]>([]);
@@ -909,6 +928,15 @@ export function App({ transport }: { transport: Transport }) {
       const command = commandFor(e);
       if (!command) return;
       if (settingsOpen && command !== "dismiss") return;
+      const editorAction = EDITOR_ACTIONS[command];
+      if (editorAction) {
+        const active = document.activeElement;
+        const inEditor = active instanceof HTMLElement && active.closest(".source-editor") !== null;
+        if (modeRef.current !== "editing" || !inEditor) return;
+        e.preventDefault();
+        if (editorRef.current) editorAction(editorRef.current);
+        return;
+      }
       switch (command) {
         case "dismiss":
           if (findOpen) {

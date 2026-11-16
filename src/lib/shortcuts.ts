@@ -18,6 +18,21 @@ export type Command =
   | "save-as"
   | "copy-markdown"
   | "paste-plain"
+  | "heading-1"
+  | "heading-2"
+  | "heading-3"
+  | "heading-4"
+  | "heading-5"
+  | "heading-6"
+  | "paragraph"
+  | "heading-promote"
+  | "heading-demote"
+  | "quote"
+  | "formula-block"
+  | "code-block"
+  | "ordered-list"
+  | "unordered-list"
+  | "task-list"
   | "dismiss";
 
 /** The keyboard fields the table reads. */
@@ -66,6 +81,16 @@ export function commandFor(e: KeyPress): Command | null {
   if (shift && key === "s") return "save-as";
   if (shift && key === "c") return "copy-markdown";
   if (shift && key === "v") return "paste-plain";
+  if (!shift && key >= "1" && key <= "6") return `heading-${key}` as Command;
+  if (!shift && key === "0") return "paragraph";
+  if (!shift && key === "=") return "heading-promote";
+  if (!shift && key === "-") return "heading-demote";
+  if (shift && key === "q") return "quote";
+  if (shift && key === "m") return "formula-block";
+  if (shift && key === "k") return "code-block";
+  if (shift && (key === "[" || key === "{")) return "ordered-list";
+  if (shift && (key === "]" || key === "}")) return "unordered-list";
+  if (shift && key === "x") return "task-list";
   if (!shift && key === ",") return "settings";
   if (shift && key === "l") return "toggle-left";
   return null;
@@ -87,4 +112,19 @@ export const SHORTCUT_HINT: Partial<Record<Command, string>> = {
   "save-as": "Ctrl+Shift+S",
   "copy-markdown": "Ctrl+Shift+C",
   "paste-plain": "Ctrl+Shift+V",
+  "heading-1": "Ctrl+1",
+  "heading-2": "Ctrl+2",
+  "heading-3": "Ctrl+3",
+  "heading-4": "Ctrl+4",
+  "heading-5": "Ctrl+5",
+  "heading-6": "Ctrl+6",
+  paragraph: "Ctrl+0",
+  "heading-promote": "Ctrl+=",
+  "heading-demote": "Ctrl+-",
+  quote: "Ctrl+Shift+Q",
+  "formula-block": "Ctrl+Shift+M",
+  "code-block": "Ctrl+Shift+K",
+  "ordered-list": "Ctrl+Shift+[",
+  "unordered-list": "Ctrl+Shift+]",
+  "task-list": "Ctrl+Shift+X",
 };

@@ -471,6 +471,74 @@ describe("keyboard commands", () => {
     await waitFor(() => expect(content.textContent).toContain("# 标题"));
   });
 
+  it("applies paragraph commands only while the source editor has focus", async () => {
+    const doc = {
+      name: "笔记.md",
+      path: "E:/notes/笔记.md",
+      size: 12,
+      hasBom: false,
+      lineEnding: "LF",
+      hash: "",
+      text: "正文\n第二行",
+      html: "<h1>正文</h1>",
+      counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
+    };
+    render(<App transport={fakeTransport({ openFile: async () => ({ kind: "loaded" as const, doc }) })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "正文" });
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    content.focus();
+
+    fireEvent.keyDown(window, { key: "1", ctrlKey: true });
+    await waitFor(() => expect(content.textContent).toContain("# 正文"));
+    expect(screen.getByText("未保存")).toBeTruthy();
+
+    fireEvent.keyDown(content, { key: "z", ctrlKey: true });
+    await waitFor(() => expect(content.textContent).not.toContain("# 正文"));
+
+    screen.getByRole("button", { name: "打开文件" }).focus();
+    fireEvent.keyDown(window, { key: "2", ctrlKey: true });
+    expect(content.textContent).not.toContain("## 正文");
+  });
+
+  it("does not run paragraph commands in preview", async () => {
+    const doc = {
+      name: "笔记.md",
+      path: "E:/notes/笔记.md",
+      size: 12,
+      hasBom: false,
+      lineEnding: "LF",
+      hash: "",
+      text: "正文",
+      html: "<h1>正文</h1>",
+      counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
+    };
+    const renderSource = vi.fn(async (text: string) => ({
+      kind: "ok" as const,
+      html: `<h1>${text.replace(/^#+\s*/, "")}</h1>`,
+      counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
+    }));
+    render(
+      <App
+        transport={fakeTransport({
+          openFile: async () => ({ kind: "loaded" as const, doc }),
+          renderSource,
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "正文" });
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    await waitFor(() => expect(renderSource).toHaveBeenCalledTimes(1));
+    expect(screen.getByText("预览")).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: "1", ctrlKey: true });
+    expect(renderSource).toHaveBeenCalledTimes(1);
+  });
+
   it("closes the find bar with Escape before anything else", async () => {
     const doc = {
       name: "笔记.md",

@@ -1,5 +1,9 @@
 import { useEffect, useImperativeHandle, useRef } from "react";
 import type { EditorView } from "@codemirror/view";
+import type { AnnotationType, Extension } from "@codemirror/state";
+import type { HeadingLevel, ParagraphEdit, Snapshot } from "../editor/paragraph";
+
+type ParagraphModule = typeof import("../editor/paragraph");
 
 /** Commands the app and, later, the Edit menu call on the editor. */
 export type SourceCommands = {
@@ -14,6 +18,25 @@ export type SourceCommands = {
   /** Pastes clipboard text at the selection, ignoring rich formatting. */
   pastePlain(): Promise<boolean>;
   selectionText(): string;
+  /** Paragraph commands (P1 PARA-01..07, 10..17, 20). */
+  setHeading(level: HeadingLevel): boolean;
+  setParagraph(): boolean;
+  promoteHeading(): boolean;
+  demoteHeading(): boolean;
+  toggleQuote(): boolean;
+  toggleOrderedList(): boolean;
+  toggleUnorderedList(): boolean;
+  toggleTaskList(): boolean;
+  /** Menu command, wired with the M4-7 paragraph menu. */
+  setTaskStatus(checked: boolean): boolean;
+  /** Menu command, wired with the M4-7 paragraph menu. */
+  indentList(direction: "in" | "out"): boolean;
+  /** Menu command, wired with the M4-7 paragraph menu. */
+  insertParagraph(where: "above" | "below"): boolean;
+  /** Menu command, wired with the M4-7 paragraph menu. */
+  insertHorizontalRule(): boolean;
+  insertFormulaBlock(): boolean;
+  insertCodeBlock(language?: string): boolean;
 };
 
 type Props = {
@@ -48,6 +71,46 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, r
     undo: (view: EditorView) => boolean;
     redo: (view: EditorView) => boolean;
   } | null>(null);
+  const paragraph = useRef<ParagraphModule | null>(null);
+  const isolateHistory = useRef<AnnotationType<"after" | "before" | "full"> | null>(null);
+  const stateCtor = useRef<typeof import("@codemirror/state").EditorState | null>(null);
+  const extensions = useRef<Extension[] | null>(null);
+
+  /** applyEdit dispatches one transaction so one command is one undo step. */
+  const applyEdit = (edit: ParagraphEdit): boolean => {
+    const view = viewRef.current;
+    if (!view || !edit) return false;
+    const current = view.state.doc.toString();
+    if (current !== edit.text) {
+      let start = 0;
+      while (start < current.length && start < edit.text.length && current[start] === edit.text[start]) start++;
+      let oldEnd = current.length;
+      let newEnd = edit.text.length;
+      while (oldEnd > start && newEnd > start && current[oldEnd - 1] === edit.text[newEnd - 1]) {
+        oldEnd--;
+        newEnd--;
+      }
+      view.dispatch({
+        changes: { from: start, to: oldEnd, insert: edit.text.slice(start, newEnd) },
+        selection: { anchor: edit.anchor, head: edit.head },
+        scrollIntoView: true,
+        annotations: isolateHistory.current ? [isolateHistory.current.of("full")] : undefined,
+      });
+    } else {
+      view.dispatch({ selection: { anchor: edit.anchor, head: edit.head }, scrollIntoView: true });
+    }
+    view.focus();
+    return true;
+  };
+
+  /** runParagraph gives a pure transform a fresh snapshot and one dispatch. */
+  const runParagraph = (transform: (mod: ParagraphModule, snapshot: Snapshot) => ParagraphEdit): boolean => {
+    const view = viewRef.current;
+    const mod = paragraph.current;
+    if (!view || !mod) return false;
+    const range = view.state.selection.main;
+    return applyEdit(transform(mod, { text: view.state.doc.toString(), anchor: range.anchor, head: range.head }));
+  };
 
   useImperativeHandle(
     ref,
@@ -108,6 +171,48 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, r
         const view = viewRef.current;
         return view ? selectedText(view) : "";
       },
+      setHeading(level) {
+        return runParagraph((mod, snapshot) => mod.setHeading(snapshot, level));
+      },
+      setParagraph() {
+        return runParagraph((mod, snapshot) => mod.setHeading(snapshot, 0));
+      },
+      promoteHeading() {
+        return runParagraph((mod, snapshot) => mod.shiftHeading(snapshot, "promote"));
+      },
+      demoteHeading() {
+        return runParagraph((mod, snapshot) => mod.shiftHeading(snapshot, "demote"));
+      },
+      toggleQuote() {
+        return runParagraph((mod, snapshot) => mod.toggleQuote(snapshot));
+      },
+      toggleOrderedList() {
+        return runParagraph((mod, snapshot) => mod.toggleList(snapshot, "ordered"));
+      },
+      toggleUnorderedList() {
+        return runParagraph((mod, snapshot) => mod.toggleList(snapshot, "unordered"));
+      },
+      toggleTaskList() {
+        return runParagraph((mod, snapshot) => mod.toggleList(snapshot, "task"));
+      },
+      setTaskStatus(checked) {
+        return runParagraph((mod, snapshot) => mod.setTaskStatus(snapshot, checked));
+      },
+      indentList(direction) {
+        return runParagraph((mod, snapshot) => mod.indentList(snapshot, direction));
+      },
+      insertParagraph(where) {
+        return runParagraph((mod, snapshot) => mod.insertParagraph(snapshot, where));
+      },
+      insertHorizontalRule() {
+        return runParagraph((mod, snapshot) => mod.insertHorizontalRule(snapshot));
+      },
+      insertFormulaBlock() {
+        return runParagraph((mod, snapshot) => mod.insertFence(snapshot, "formula"));
+      },
+      insertCodeBlock(language) {
+        return runParagraph((mod, snapshot) => mod.insertFence(snapshot, "code", language));
+      },
     }),
     [],
   );
@@ -115,15 +220,24 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, r
   useEffect(() => {
     let alive = true;
     void (async () => {
-      const [{ EditorView, keymap, lineNumbers, drawSelection, highlightActiveLine }, { EditorState }, { defaultKeymap, history, historyKeymap, undo, redo }, { markdown }] =
-        await Promise.all([
-          import("@codemirror/view"),
-          import("@codemirror/state"),
-          import("@codemirror/commands"),
-          import("@codemirror/lang-markdown"),
-        ]);
+      const [
+        { EditorView, keymap, lineNumbers, drawSelection, highlightActiveLine },
+        { EditorState },
+        { defaultKeymap, history, historyKeymap, undo, redo, isolateHistory: isolateHistoryType },
+        { markdown },
+        paragraphModule,
+      ] = await Promise.all([
+        import("@codemirror/view"),
+        import("@codemirror/state"),
+        import("@codemirror/commands"),
+        import("@codemirror/lang-markdown"),
+        import("../editor/paragraph"),
+      ]);
       if (!alive || !host.current) return;
       historyActions.current = { undo, redo };
+      isolateHistory.current = isolateHistoryType;
+      paragraph.current = paragraphModule;
+      stateCtor.current = EditorState;
 
       const theme = EditorView.theme({
         "&": {
@@ -157,26 +271,25 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, r
         "&.cm-focused": { outline: "none" },
       });
 
+      const editorExtensions: Extension[] = [
+        lineNumbers(),
+        history(),
+        drawSelection(),
+        highlightActiveLine(),
+        EditorView.lineWrapping,
+        keymap.of([...defaultKeymap.filter((binding) => binding.key !== "Mod-/"), ...historyKeymap]),
+        markdown(),
+        theme,
+        EditorView.contentAttributes.of({ "aria-label": "Markdown 源码" }),
+        EditorView.updateListener.of((update) => {
+          if (!update.docChanged || applying.current) return;
+          changeRef.current(update.state.doc.toString());
+        }),
+      ];
+      extensions.current = editorExtensions;
       const view = new EditorView({
         parent: host.current,
-        state: EditorState.create({
-          doc: valueRef.current,
-          extensions: [
-            lineNumbers(),
-            history(),
-            drawSelection(),
-            highlightActiveLine(),
-            EditorView.lineWrapping,
-            keymap.of([...defaultKeymap.filter((binding) => binding.key !== "Mod-/"), ...historyKeymap]),
-            markdown(),
-            theme,
-            EditorView.contentAttributes.of({ "aria-label": "Markdown 源码" }),
-            EditorView.updateListener.of((update) => {
-              if (!update.docChanged || applying.current) return;
-              changeRef.current(update.state.doc.toString());
-            }),
-          ],
-        }),
+        state: EditorState.create({ doc: valueRef.current, extensions: editorExtensions }),
       });
       viewRef.current = view;
       view.focus();
@@ -189,14 +302,17 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, r
     };
   }, []);
 
-  // A different buffer (another document) replaces the editor's content
-  // without pretending the user typed it.
+  // A different buffer (another document, a reload or a discard) resets the
+  // editor state and its undo history: Ctrl+Z must never reach the previous
+  // document or resurrect text the user chose to discard.
   useEffect(() => {
     const view = viewRef.current;
-    if (!view || view.state.doc.toString() === value) return;
+    if (!view || !stateCtor.current || !extensions.current) return;
+    if (view.state.doc.toString() === value) return;
     applying.current = true;
-    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } });
+    view.setState(stateCtor.current.create({ doc: value, extensions: extensions.current }));
     applying.current = false;
+    view.focus();
   }, [value]);
 
   return <div className="source-editor" ref={host} />;
