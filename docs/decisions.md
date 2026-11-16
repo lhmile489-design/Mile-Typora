@@ -208,3 +208,11 @@ M1 需验证：mermaid 12 的 `securityLevel: "strict"` 与 `%%{init}%%` 指令�
 - 文件树点击 → 当前窗口打开（FR-02.6，目录上下文保留在窗口上）；行内"在新窗口打开"→ 新窗口，原窗口目录不变（AC-06）。
 - 树内相对路径走 `pathguard.Within`，越界返回 `out_of_scope`。请求的 `Kind` 区分文件与文件夹：文件夹请求由 Go 设好窗口根，页面接着 `Scan`。
 - **设计补充**：文件行悬停出现"在新窗口打开"按钮，设计稿画板里没有这个元素。这是 PRD FR-02.4 在 P0 唯一可行的入口（P1 才有菜单），按 G6 记在这里，用户不认可可以改成右键菜单或去掉。
+
+### D-T26 · 代码高亮、锚点与 front matter
+
+- 高亮用 chroma v2.27.0 的 HTML formatter（`WithClasses(true)`），输出 `div.code[data-lang]` 包住 `pre.chroma`；颜色全部由 `markdown.css` 把 Pygments 短类名映射到 `--syn-*` 令牌，不用 chroma 自带样式表（否则深浅模式各要一套内联颜色）。
+- 白名单要放行 chroma 的短类名：`span[class]` 与 `pre[class]` 额外允许 `^[a-z][a-z0-9]{0,7}$`。这些类名只决定颜色，没有行为，仍不允许 `style`。
+- 标题锚点自己生成：goldmark 默认生成器丢掉非 ASCII，中文标题全变 `heading`。规则保留任意文字的字母与数字、ASCII 转小写、空白与连字符合并成 `-`；重复标题追加 `-1`、`-2`；IDs 每篇文档一份（通过 `parser.WithContext` 传），同一标题在不同文件里互不影响。
+- front matter 不引入 YAML 解析：只把首个 `---` 到下一个 `---`/`...` 的内容作为文本放进 `details.fm`，统计顶层键数显示"元信息 · N 项"。未闭合的 `---` 按正文处理（可能只是分隔线）。
+- 任务列表复选框由 Go 输出 `disabled`，页面再补 `aria-readonly`；CSS 关掉 `pointer-events`，只读在视觉与行为上都成立。

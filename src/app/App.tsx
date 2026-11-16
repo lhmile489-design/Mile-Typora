@@ -330,6 +330,10 @@ function Reader({ doc }: { doc: OpenedDoc }) {
   useEffect(() => {
     const root = ref.current;
     if (!root) return;
+    // Task list boxes show state and take no input (PRD FR-04).
+    for (const box of root.querySelectorAll('input[type="checkbox"]')) {
+      box.setAttribute("aria-readonly", "true");
+    }
     renderMath(root);
     void renderDiagrams(root);
   }, [doc.html]);

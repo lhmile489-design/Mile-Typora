@@ -176,7 +176,7 @@ func TestOpenFileDialogReadsTheChosenFile(t *testing.T) {
 	if got.Doc == nil || got.Doc.Name != "笔记.md" || !strings.HasPrefix(got.Doc.Text, "# 标题") {
 		t.Fatalf("doc = %+v, want the chosen file's content", got.Doc)
 	}
-	if !strings.Contains(got.Doc.HTML, "<h1>标题</h1>") {
+	if !strings.Contains(got.Doc.HTML, `id="标题"`) {
 		t.Fatalf("html = %q, want the rendered heading", got.Doc.HTML)
 	}
 	if got.Doc.LineEnding != "LF" || got.Doc.Size != int64(len("# 标题\n正文\n")) {

@@ -94,8 +94,8 @@ func textOf(out string) string {
 func TestGFMElements(t *testing.T) {
 	html := renderFile(t, "../../testdata/render/gfm.md")
 	for _, want := range []string{
-		"<h1>一级标题</h1>",
-		"<h2>列表</h2>",
+		"<h1 id=\"一级标题\">",
+		"<h2 id=\"列表\">",
 		"<strong>加粗</strong>",
 		"<em>斜体</em>",
 		"<del>删除线</del>",
@@ -104,7 +104,7 @@ func TestGFMElements(t *testing.T) {
 		"<blockquote>",
 		"<hr>",
 		"<table>", "<thead>", "<tbody>", "<th", "<td",
-		"<pre><code",
+		`<div class="code" data-lang="go">`, `<pre class="chroma">`, `<span class="`,
 		`<a href="https://example.com">外部链接</a>`,
 		`<img src="images/logo.png" alt="相对图片"`,
 		"中文",
@@ -124,7 +124,7 @@ func TestGFMElements(t *testing.T) {
 
 func TestUnknownLanguageFallsBackToPlainCode(t *testing.T) {
 	html := render(t, "```nosuchlang\nplain text\n```\n")
-	if !strings.Contains(html, "plain text") || !strings.Contains(html, "<pre>") {
+	if !strings.Contains(html, "plain text") || !strings.Contains(html, `class="chroma"`) {
 		t.Fatalf("output = %s, want a plain code block", html)
 	}
 }
@@ -330,5 +330,55 @@ func TestImagesWithoutResolverKeepTheirSource(t *testing.T) {
 	res := renderResult(t, "![图](images/a.png)\n")
 	if !strings.Contains(res.HTML, `<img src="images/a.png" alt="图">`) {
 		t.Fatalf("output = %s, want the source untouched", res.HTML)
+	}
+}
+func TestHeadingIDsKeepChinese(t *testing.T) {
+	html := render(t, "# 安装步骤\n\n## 安装步骤\n\n### 第一步：准备环境\n\n#### \n")
+	for _, want := range []string{
+		`id="安装步骤"`,
+		`id="安装步骤-1"`,
+		`id="第一步准备环境"`,
+		`id="heading"`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("output lacks %q\n%s", want, html)
+		}
+	}
+}
+
+func TestHeadingIDsArePerDocument(t *testing.T) {
+	r := New()
+	first, _ := r.Render(context.Background(), []byte("# 标题"), nil)
+	second, _ := r.Render(context.Background(), []byte("# 标题"), nil)
+	if first.HTML != second.HTML {
+		t.Fatalf("the same heading got different ids across renders:\n%s\n%s", first.HTML, second.HTML)
+	}
+}
+
+func TestFrontMatterIsFolded(t *testing.T) {
+	src := "---\ntitle: 标题\ntags: [a, b]\n---\n\n# 正文\n"
+	res := renderResult(t, src)
+	if !strings.Contains(res.HTML, `class="fm"`) || !strings.Contains(res.HTML, "元信息 · 2 项") {
+		t.Fatalf("output lacks the front matter block\n%s", res.HTML)
+	}
+	if !strings.Contains(res.HTML, "title: 标题") {
+		t.Fatalf("the YAML is not shown\n%s", res.HTML)
+	}
+	if strings.Contains(res.HTML, "<h2>") || !strings.Contains(res.HTML, ">正文</h1>") {
+		t.Fatalf("the document after the front matter is wrong\n%s", res.HTML)
+	}
+}
+
+func TestUnclosedFrontMatterStaysText(t *testing.T) {
+	res := renderResult(t, "---\ntitle: 标题\n\n# 正文\n")
+	if strings.Contains(res.HTML, `class="fm"`) {
+		t.Fatalf("an unclosed block became front matter\n%s", res.HTML)
+	}
+}
+
+func TestTaskListCheckboxesAreReadOnly(t *testing.T) {
+	html := render(t, "- [x] 完成\n- [ ] 未完成\n")
+	if strings.Count(html, `type="checkbox"`) != 2 || strings.Count(html, `disabled=""`) != 2 {
+		t.Fatalf("output = %s, want two disabled checkboxes", html)
 	}
 }

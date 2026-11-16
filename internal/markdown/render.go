@@ -17,6 +17,7 @@ import (
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/renderer"
 	"github.com/yuin/goldmark/util"
 )
@@ -63,10 +64,11 @@ type Counts struct {
 // document are counted on the Renderer itself: renders are serialized. They
 // are CPU-bound and short; M3-7 measures whether that is enough.
 type Renderer struct {
-	mu     sync.Mutex
-	md     goldmark.Markdown
-	policy *bluemonday.Policy
-	counts Counts
+	mu          sync.Mutex
+	highlighter *highlighter
+	md          goldmark.Markdown
+	policy      *bluemonday.Policy
+	counts      Counts
 	// images resolves image references of the render in progress; it is set
 	// under mu, like counts.
 	images ImageResolver
@@ -74,11 +76,15 @@ type Renderer struct {
 
 // New returns a Renderer for CommonMark with GFM and formula delimiters.
 func New() *Renderer {
-	r := &Renderer{policy: newPolicy()}
+	r := &Renderer{policy: newPolicy(), highlighter: newHighlighter()}
 	r.md = goldmark.New(
 		goldmark.WithExtensions(
 			extension.GFM,
 			Math(),
+		),
+		goldmark.WithParserOptions(
+			// Anchors keep Chinese; the ids themselves are made per document.
+			parser.WithAutoHeadingID(),
 		),
 		goldmark.WithRendererOptions(
 			renderer.WithNodeRenderers(util.Prioritized(r, 100)),
@@ -112,16 +118,22 @@ func (r *Renderer) Render(ctx context.Context, src []byte, images ImageResolver)
 				done <- outcome{err: fmt.Errorf("renderer panic: %v", rec)}
 			}
 		}()
+		meta, body := splitFrontMatter(src)
 		var buf bytes.Buffer
 		// Block formulas become fences first; see preprocessMath.
-		if err := r.md.Convert(preprocessMath(src), &buf); err != nil {
+		parseCtx := parser.NewContext(parser.WithIDs(newHeadingIDs()))
+		if err := r.md.Convert(preprocessMath(body), &buf, parser.WithContext(parseCtx)); err != nil {
 			done <- outcome{err: err}
 			return
 		}
 		counts := r.counts
+		rendered := buf.String()
+		if meta != "" {
+			rendered = metaHTML(meta) + rendered
+		}
 		// The whitelist is the last line of defence: whatever the renderer
 		// emitted, only known tags and attributes reach the page.
-		done <- outcome{res: Result{HTML: r.policy.Sanitize(buf.String()), Counts: counts}}
+		done <- outcome{res: Result{HTML: r.policy.Sanitize(rendered), Counts: counts}}
 	}()
 
 	select {
@@ -234,13 +246,19 @@ func (r *Renderer) renderFence(w util.BufWriter, source []byte, node ast.Node, e
 	}
 
 	if !strings.EqualFold(language, "mermaid") {
-		if language == "" {
-			_, _ = w.WriteString("<pre><code>")
-		} else {
+		if language != "" {
+			if highlighted := r.highlighter.highlight(language, string(lines)); highlighted != "" {
+				_, _ = fmt.Fprintf(w, `<div class="code" data-lang=%q>`, language)
+				_, _ = w.WriteString(highlighted)
+				_, _ = w.WriteString("</div>" + "\n")
+				return ast.WalkContinue, nil
+			}
 			_, _ = fmt.Fprintf(w, `<pre><code class="language-%s">`, util.EscapeHTML([]byte(language)))
+		} else {
+			_, _ = w.WriteString("<pre><code>")
 		}
 		_, _ = w.Write(util.EscapeHTML(lines))
-		_, _ = w.WriteString("</code></pre>\n")
+		_, _ = w.WriteString("</code></pre>" + "\n")
 		return ast.WalkContinue, nil
 	}
 
@@ -310,7 +328,11 @@ func limitReason(size, maxSize, count, maxCount int) string {
 
 // classNames are the only class values this package emits; the whitelist keeps
 // any others out (a document cannot invent a class of its own).
-var classNames = regexp.MustCompile(`^(raw-html|math|mermaid-src|limited|code|fm)$`)
+var classNames = regexp.MustCompile(`^(raw-html|math|mermaid-src|limited|code|fm|chroma)$`)
+
+// tokenClass is the shape of chroma's token classes, as "k", "s1" or "nf".
+// They only choose a colour: no behaviour hangs on them.
+var tokenClass = regexp.MustCompile(`^[a-z][a-z0-9]{0,7}$`)
 
 // newPolicy is a whitelist designed for what this package emits, not a
 // general-purpose one (CLAUDE.md §6).
@@ -323,11 +345,14 @@ func newPolicy() *bluemonday.Policy {
 		"blockquote", "ul", "ol", "li",
 		"table", "thead", "tbody", "tr", "th", "td",
 		"hr", "br", "img", "span", "div", "input",
+		"details", "summary",
 	)
 	p.AllowAttrs("href").OnElements("a")
 	p.AllowAttrs("src", "alt", "title").OnElements("img")
 	p.AllowAttrs("id").OnElements("h1", "h2", "h3", "h4", "h5", "h6")
-	p.AllowAttrs("class").Matching(classNames).OnElements("span", "div", "pre", "code")
+	p.AllowAttrs("class").Matching(classNames).OnElements("div", "pre", "code", "details")
+	// Syntax highlighting names its tokens with short classes of its own.
+	p.AllowAttrs("class").Matching(tokenClass).OnElements("span", "pre")
 	p.AllowAttrs("data-display").OnElements("span", "div")
 	p.AllowAttrs("data-kind", "data-reason").OnElements("div")
 	p.AllowAttrs("data-lang").OnElements("pre", "div")

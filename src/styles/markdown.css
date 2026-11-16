@@ -176,3 +176,79 @@
   color: var(--text-muted);
   font-family: var(--font-ui);
 }
+
+/* 代码块：chroma 用 class 输出，颜色全部来自令牌（design-tokens §4） */
+.markdown .code {
+  margin: 0 0 1em;
+  background: var(--bg-sunken);
+  border-radius: var(--r-md);
+  overflow-x: auto;
+}
+.markdown .code pre.chroma {
+  margin: 0;
+  padding: 12px 16px;
+  background: none;
+  font-size: 0.875em;
+  line-height: 1.6;
+}
+.markdown .code pre.chroma code { background: none; padding: 0; }
+.markdown .chroma .line { display: block; }
+
+/* Pygments 风格短名 → 令牌；未列出的继承正文色 */
+.markdown .chroma .k,
+.markdown .chroma .kc,
+.markdown .chroma .kd,
+.markdown .chroma .kn,
+.markdown .chroma .kp,
+.markdown .chroma .kr { color: var(--syn-keyword); }
+.markdown .chroma .kt { color: var(--syn-type); }
+.markdown .chroma .s,
+.markdown .chroma .s1,
+.markdown .chroma .s2,
+.markdown .chroma .sb,
+.markdown .chroma .sc,
+.markdown .chroma .sd,
+.markdown .chroma .se,
+.markdown .chroma .sh,
+.markdown .chroma .si,
+.markdown .chroma .sr,
+.markdown .chroma .ss,
+.markdown .chroma .sx { color: var(--syn-string); }
+.markdown .chroma .c,
+.markdown .chroma .c1,
+.markdown .chroma .cm,
+.markdown .chroma .cp,
+.markdown .chroma .cs,
+.markdown .chroma .ch { color: var(--syn-comment); font-style: italic; }
+.markdown .chroma .nf,
+.markdown .chroma .fm { color: var(--syn-function); }
+.markdown .chroma .m,
+.markdown .chroma .mb,
+.markdown .chroma .mf,
+.markdown .chroma .mh,
+.markdown .chroma .mi,
+.markdown .chroma .mo,
+.markdown .chroma .il { color: var(--syn-number); }
+.markdown .chroma .nc,
+.markdown .chroma .nn,
+.markdown .chroma .nt,
+.markdown .chroma .no { color: var(--syn-type); }
+
+/* YAML 元信息：默认折叠的一行（DESIGN.md §8.3） */
+.markdown details.fm {
+  margin: 0 0 1.2em;
+  font-size: var(--ui-sm);
+  color: var(--text-muted);
+}
+.markdown details.fm summary {
+  cursor: pointer;
+  padding: var(--sp-1) 0;
+  color: var(--text-muted);
+}
+.markdown details.fm pre {
+  margin: var(--sp-2) 0 0;
+  font-size: 0.875em;
+}
+
+/* 任务列表：复选框不可改写 */
+.markdown input[type="checkbox"] { pointer-events: none; }
