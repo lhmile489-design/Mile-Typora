@@ -88,19 +88,8 @@ body {
 .statusbar svg { width: 12px; height: 12px; }
 .st-danger { color: var(--danger); }
 
-/* 阅读区：M1-3 显示纯文本，M1-4 起换成 markdown.css 的排版 */
+/* 阅读区容器：滚动交给它，排版交给 markdown.css */
 .reader { flex: 1; min-height: 0; overflow-y: auto; }
-.plain-doc {
-  max-width: calc(var(--content-max) + var(--content-pad-x) * 2);
-  margin: 0 auto;
-  padding: var(--content-pad-top) var(--content-pad-x) 40vh;
-  font-family: var(--font-mono);
-  font-size: var(--ui-base);
-  line-height: 1.75;
-  color: var(--text);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
 
 /* 只读徽标（DESIGN.md §8.8） */
 .badge-ro {

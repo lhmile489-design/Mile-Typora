@@ -4,6 +4,7 @@ import { App } from "./app/App";
 import { mygoTransport } from "./lib/transport";
 import "./styles/tokens.css";
 import "./styles/app.css";
+import "./styles/markdown.css";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("missing #root");

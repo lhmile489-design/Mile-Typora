@@ -14,7 +14,10 @@ export interface Doc {
   size: number;
   hasBom: boolean;
   lineEnding: string;
+  /** Text is the Markdown source, with the BOM removed and LF endings. */
   text: string;
+  /** HTML is the rendered, whitelisted markup the page shows. */
+  html: string;
 }
 
 /**

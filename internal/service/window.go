@@ -10,6 +10,7 @@ import (
 
 	"github.com/lhmile489-design/mile-typora/internal/contract"
 	"github.com/lhmile489-design/mile-typora/internal/docread"
+	"github.com/lhmile489-design/mile-typora/internal/markdown"
 	"github.com/lhmile489-design/mile-typora/internal/pathguard"
 	"github.com/lhmile489-design/mile-typora/internal/winctx"
 )
@@ -38,6 +39,7 @@ type WindowService struct {
 	windows *winctx.Registry
 	open    Opener
 	pick    Picker
+	render  *markdown.Renderer
 }
 
 // NewWindowService returns a WindowService over the open windows.
@@ -57,6 +59,7 @@ func NewWindowService(windows *winctx.Registry, open Opener, pick Picker) *Windo
 		windows: windows,
 		open:    open,
 		pick:    pick,
+		render:  markdown.New(),
 	}
 }
 
@@ -116,6 +119,12 @@ func (s *WindowService) OpenFileDialog(ctx context.Context) (contract.LoadResult
 			Limit:  readFailure.Limit,
 		}}, nil
 	}
+	html, renderFailure := s.render.Render(ctx, []byte(doc.Text))
+	if renderFailure != nil {
+		return contract.LoadResult{Failure: &contract.Failure{
+			Code: renderFailure.Code, Detail: renderFailure.Detail,
+		}}, nil
+	}
 	w.SetOpenFile(real)
 	return contract.LoadResult{Doc: &contract.Doc{
 		Name:       filepath.Base(real),
@@ -124,6 +133,7 @@ func (s *WindowService) OpenFileDialog(ctx context.Context) (contract.LoadResult
 		HasBOM:     doc.HasBOM,
 		LineEnding: doc.LineEnding,
 		Text:       doc.Text,
+		HTML:       html,
 	}}, nil
 }
 

@@ -117,6 +117,7 @@ const loadedDoc = {
     hasBom: false,
     lineEnding: "LF",
     text: "# 标题\n\n正文",
+    html: "<h1>标题</h1>\n<p>正文</p>",
   },
 };
 
@@ -124,7 +125,7 @@ describe("opening a file", () => {
   it("shows the text, the read-only badge and the file details", async () => {
     render(<App transport={fakeTransport({ openFile: async () => loadedDoc })} />);
     fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
-    expect(await screen.findByText(/# 标题/)).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "标题" })).toBeTruthy();
     expect(screen.getByText("只读")).toBeTruthy();
     // The name shows in the file pane and in the status bar.
     expect(screen.getAllByText("笔记.md").length).toBeGreaterThan(0);
@@ -162,7 +163,7 @@ describe("opening a file", () => {
   });
 
   it("shows an empty document as valid, not as an error", async () => {
-    const empty = { kind: "loaded" as const, doc: { ...loadedDoc.doc, text: "", size: 0 } };
+    const empty = { kind: "loaded" as const, doc: { ...loadedDoc.doc, text: "", html: "", size: 0 } };
     render(<App transport={fakeTransport({ openFile: async () => empty })} />);
     fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
     expect(await screen.findByText("这是一个空 Markdown 文件")).toBeTruthy();

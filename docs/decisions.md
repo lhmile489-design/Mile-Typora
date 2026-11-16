@@ -141,3 +141,11 @@ M1 需验证：mermaid 12 的 `securityLevel: "strict"` 与 `%%{init}%%` 指令�
 - 试过三种方式让脚本在系统文件对话框里选文件：`SendKeys` 打字、`SetWindowText` 写文件名输入框、`PostMessage IDOK`。Windows 11 的通用文件对话框是 DirectUI（`DirectUIHWND`），没有经典 `Edit` 控件，`SendKeys` 又依赖前台焦点，Windows 会拒绝跨进程抢焦点，结果时好时坏。
 - 结论：**打开文件的对话框交互由用户点一次**，脚本只负责准备环境（`scripts/native-windows.ps1` 计数/关窗）和读取结果（`scripts/native-eval.mjs`）。曾写的 `native-open-file.ps1` 已删除，避免留下不可靠的工具。
 - 走通的自动化原生验收仍是：多窗口计数、关窗、最后一窗退出、页面文本与样式读取、第二个实例传参。
+
+### D-T18 · 渲染管线：先转义再白名单
+
+- 原始 HTML 用自定义 `rawHTMLRenderer` 转义成文本（`pre.raw-html` / `code.raw-html`），而不是 goldmark 默认的 `<!-- raw HTML omitted -->`：PRD FR-04 要求"以转义后的文本展示"，丢弃会让人以为文档缺了内容。
+- 无论渲染器产出什么，最后都过一遍只为本项目设计的 bluemonday 白名单（不设 `style`、`on*`、`iframe`、`object`、`embed`、`svg`；URL 只放行 `http`、`https`、`mtres` 与相对地址）。
+- 渲染放在 goroutine 里，`select` 等 8 秒；goldmark 不接受 ctx，超时只是放弃结果，不会真正中断计算（与 Mermaid 的 `Promise.race` 同性质）。病态输入是否需要预检，留到 M1-5 与 Mermaid 一起实测。
+- 安全断言不用子串匹配：转义后的文本本身就会出现 `<script>`、`onerror=` 这些字样。测试用 `x/net/html` 的 token 流遍历输出，断言没有危险元素、事件属性、`style` 和危险协议；token 流没有 512 层嵌套限制，模糊测试发现的深层嵌套输入不会让断言本身崩掉。
+- 模糊测试 60 秒、约 240 万次执行，无 panic、无危险输出。时间上限与深层嵌套的界面观感仍待 M3-7 性能阶段评估。

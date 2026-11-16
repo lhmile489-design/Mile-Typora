@@ -40,7 +40,10 @@ type Doc struct {
 	Size       int64  `json:"size"`
 	HasBOM     bool   `json:"hasBom"`
 	LineEnding string `json:"lineEnding"`
-	Text       string `json:"text"`
+	// Text is the Markdown source, with the BOM removed and LF endings.
+	Text string `json:"text"`
+	// HTML is the rendered, whitelisted markup the page shows.
+	HTML string `json:"html"`
 }
 
 // LoadResult answers an open request. Doc is nil when Failure is set or when

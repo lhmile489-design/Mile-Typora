@@ -189,7 +189,10 @@ export function App({ transport }: { transport: Transport }) {
   );
 }
 
-/** The reader as it stands in M1-3: the file's text. M1-4 renders it. */
+/**
+ * The reader shows the HTML Go rendered and cleaned (decisions.md D-T02):
+ * whatever the document contains, only whitelisted markup arrives here.
+ */
 function Reader({ doc }: { doc: OpenedDoc }) {
   if (doc.text === "") {
     return (
@@ -200,7 +203,7 @@ function Reader({ doc }: { doc: OpenedDoc }) {
   }
   return (
     <div className="reader">
-      <pre className="plain-doc">{doc.text}</pre>
+      <article className="markdown" dangerouslySetInnerHTML={{ __html: doc.html }} />
     </div>
   );
 }
