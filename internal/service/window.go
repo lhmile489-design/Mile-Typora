@@ -4,6 +4,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/lhmile489-design/mile-typora/internal/markdown"
 	"github.com/lhmile489-design/mile-typora/internal/pathguard"
 	"github.com/lhmile489-design/mile-typora/internal/resource"
+	"github.com/lhmile489-design/mile-typora/internal/watch"
 	"github.com/lhmile489-design/mile-typora/internal/winctx"
 )
 
@@ -30,6 +32,10 @@ var (
 // registers the window; tests supply their own.
 type Opener func() (int, error)
 
+// WatchFunc watches a file and reports its changes until stopped. main
+// supplies one over mygo's file watch; tests may supply their own.
+type WatchFunc func(ctx context.Context, path string, onEvent func(watch.Event)) (stop func(), err error)
+
 // Picker shows the system file dialog and returns the chosen path, or "" when
 // the user cancelled. Tests supply their own.
 type Picker func(ctx context.Context) (string, error)
@@ -44,11 +50,12 @@ type WindowService struct {
 	pick      Picker
 	render    *markdown.Renderer
 	resources *resource.Store
+	watch     WatchFunc
 }
 
 // NewWindowService returns a WindowService over the open windows. resources is
 // the store the mtres protocol serves from; main registers that handler.
-func NewWindowService(windows *winctx.Registry, open Opener, pick Picker, resources *resource.Store) *WindowService {
+func NewWindowService(windows *winctx.Registry, open Opener, pick Picker, resources *resource.Store, watchFn WatchFunc) *WindowService {
 	if pick == nil {
 		pick = PickMarkdown
 	}
@@ -66,6 +73,7 @@ func NewWindowService(windows *winctx.Registry, open Opener, pick Picker, resour
 		pick:      pick,
 		render:    markdown.New(),
 		resources: resources,
+		watch:     watchFn,
 	}
 }
 
@@ -209,6 +217,19 @@ func (s *WindowService) OpenFileDialog(ctx context.Context) (contract.LoadResult
 		}}, nil
 	}
 	w.SetOpenFile(real)
+	// Watch the file so a change outside the app can be picked up. M3-4
+	// refreshes the document here; M1-7 records that events arrive.
+	if s.watch != nil {
+		stop, err := s.watch(w.Context(), real, func(ev watch.Event) {
+			// The path is the user's file name: log the kind, never it.
+			log.Printf("window %d: file %s", w.ID(), ev.Op)
+		})
+		if err != nil {
+			log.Printf("window %d: cannot watch its file: %v", w.ID(), err)
+		} else {
+			w.SetStopWatch(stop)
+		}
+	}
 	return contract.LoadResult{Doc: &contract.Doc{
 		Name:       filepath.Base(real),
 		Path:       real,

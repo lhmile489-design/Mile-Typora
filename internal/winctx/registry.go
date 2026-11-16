@@ -15,9 +15,11 @@ type Window struct {
 	cancel context.CancelFunc
 	// q holds the open requests that arrive before the page is ready.
 	q intentQueue
-	// state is what the window is showing. M1-3 tracks the open file.
-	stateMu  sync.Mutex
-	openFile string
+	// state is what the window is showing. M1-3 tracks the open file, M1-7
+	// the watch on it.
+	stateMu   sync.Mutex
+	openFile  string
+	stopWatch func()
 }
 
 // ID is the native window's ID, as mygo.Window.ID reports it.
@@ -33,6 +35,29 @@ func (w *Window) SetOpenFile(path string) {
 	w.stateMu.Lock()
 	w.openFile = path
 	w.stateMu.Unlock()
+}
+
+// SetStopWatch records how to stop watching the open file, replacing any
+// earlier watch.
+func (w *Window) SetStopWatch(stop func()) {
+	w.stateMu.Lock()
+	previous := w.stopWatch
+	w.stopWatch = stop
+	w.stateMu.Unlock()
+	if previous != nil {
+		previous()
+	}
+}
+
+// StopWatch stops watching the open file, if a watch is running.
+func (w *Window) StopWatch() {
+	w.stateMu.Lock()
+	stop := w.stopWatch
+	w.stopWatch = nil
+	w.stateMu.Unlock()
+	if stop != nil {
+		stop()
+	}
 }
 
 // OpenFile is the file the window shows, if any.
@@ -83,6 +108,7 @@ func (r *Registry) Remove(id int) bool {
 	}
 	r.mu.Unlock()
 	if ok {
+		w.StopWatch()
 		w.cancel()
 	}
 	return ok

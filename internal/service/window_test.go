@@ -139,7 +139,7 @@ func TestNewWindowRequiresCaller(t *testing.T) {
 
 func TestNewWindowServiceOutsideCall(t *testing.T) {
 	// A context that did not come from a page call has no window.
-	s := NewWindowService(winctx.NewRegistry(), func() (int, error) { return 1, nil }, nil, resource.New())
+	s := NewWindowService(winctx.NewRegistry(), func() (int, error) { return 1, nil }, nil, resource.New(), nil)
 	if _, err := s.Ready(context.Background()); !errors.Is(err, ErrNoCallerWindow) {
 		t.Fatalf("Ready error = %v, want ErrNoCallerWindow", err)
 	}

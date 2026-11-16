@@ -11,6 +11,7 @@ import (
 	"github.com/lhmile489-design/mile-typora/internal/contract"
 	"github.com/lhmile489-design/mile-typora/internal/resource"
 	"github.com/lhmile489-design/mile-typora/internal/service"
+	"github.com/lhmile489-design/mile-typora/internal/watch"
 	"github.com/lhmile489-design/mile-typora/internal/winctx"
 )
 
@@ -42,7 +43,7 @@ func main() {
 	if err := mygo.Protocol.HandleFunc(resource.Scheme, resources.ServeHTTP); err != nil {
 		log.Fatal(err)
 	}
-	mygo.Bind(service.NewWindowService(windows, openWindow, service.PickMarkdown, resources))
+	mygo.Bind(service.NewWindowService(windows, openWindow, service.PickMarkdown, resources, watch.Start))
 
 	mygo.App.WhenReady(func() {
 		// The window opened for this launch: its page loads next, so these

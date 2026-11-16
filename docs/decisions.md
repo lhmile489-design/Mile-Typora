@@ -172,3 +172,11 @@ M1 需验证：mermaid 12 的 `securityLevel: "strict"` 与 `%%{init}%%` 指令�
 - 范围判定把词法检查放在文件系统之前：`../` 越界直接拒绝，不泄露外面文件是否存在。
 - 页面侧：`PageOptions.DevTools = DevToolsAuto`（`mygo build` 的产物里自动关闭，连同 WebView2 的 F5/Ctrl+F 等默认键）、`OnWillNavigate` 只放行应用自身来源（开发期另放行 `localhost:5273`）、`OnContextMenu` 置 `Menu = nil` 关掉右键菜单（否则会露出 Reload/Back）。
 - CSP 在生产构建注入（`vite-plugins/csp.ts`，`apply: "build"`）：`script-src 'self'`、`style-src 'self' 'unsafe-inline'`（KaTeX 与 Mermaid 需要内联样式）、`img-src 'self' http://mtres.localhost`，其余按 PRD 收紧。开发期不注入，Vite 自己要写内联脚本。
+
+### D-T21 · 文件监听与扫描的实测事实（M1-7）
+
+- `mygo.WatchFiles` 在 Windows 上满足 FR-07：普通覆盖保存与"临时文件 + 改名"的原子保存都报一次 `write`，删除报 `remove`，去抖 80 ms 后只报一次。验证用一个临时命令 `cmd/watchprobe` 在真实窗口进程里跑，输出记在 `docs/develop/M1-技术验证报告.md` §8，命令已删除。
+- `WatchFiles` 必须由运行中的应用提供事件循环（`needsApp`），不能在纯 `go test` 里跑；`internal/watch` 只把 `FileOp` 映射成页面需要的事件，映射函数单测。
+- 监听按文件所在目录登记（mygo 的做法），所以编辑器替换文件也能看到；每个窗口只监听当前文档，换文档时先停旧监听（`winctx.Window` 上带 `SetStopWatch`）。
+- 扫描的联接判定：Go 1.23 起 `EvalSymlinks` 不解析目录联接，`Lstat` 报 `ModeIrregular`；扫描与 `pathguard.CheckComponents` 都用这条判断，实测 `mklink /J` 被正确跳过。
+- 打包：`bun run build` 产物 `Mile Typora.exe` 18.4 MB、安装包 6.2 MB；停掉 Vite 后独立运行正常，说明前端已嵌入。
