@@ -4,6 +4,12 @@ import { call, event, type Channel } from "mygo-runtime";
 
 // ---- Types ----
 
+/**
+ * CloseRequested asks a window's page to run the unsaved-changes prompt
+ * before the native close goes through.
+ */
+export interface CloseRequested {}
+
 /** Counts are a document's formula and diagram totals. */
 export interface Counts {
   math: number;
@@ -22,6 +28,8 @@ export interface Doc {
   size: number;
   hasBom: boolean;
   lineEnding: string;
+  /** Hash is the SHA-256 of the file on disk, the base for save conflicts. */
+  hash: string;
   /** Text is the Markdown source, with the BOM removed and LF endings. */
   text: string;
   /** HTML is the rendered, whitelisted markup the page shows. */
@@ -159,6 +167,8 @@ export interface ReadyInfo {
    * the document it meant to restore (PRD FR-10.6).
    */
   startupNotice?: string;
+  /** StartUntitled asks the page to begin with an unsaved document (Ctrl+N). */
+  startUntitled?: boolean;
 }
 
 /** RecentEntry is one row of the start page's recent list. */
@@ -181,6 +191,17 @@ export interface RenderSourceResult {
 
 /** SaveOutcome answers a settings write. Failure is set when nothing was saved. */
 export interface SaveOutcome {
+  failure?: Failure;
+}
+
+/** SaveResult answers a save or save-as. Failure means nothing was written. */
+export interface SaveResult {
+  path?: string;
+  name?: string;
+  size?: number;
+  hash?: string;
+  hasBom?: boolean;
+  lineEnding?: string;
   failure?: Failure;
 }
 
@@ -261,6 +282,13 @@ export const WindowService = {
     return call("WindowService.ClearRecent");
   },
   /**
+   * ClearStartUntitled stops asking the page for an unsaved document once it
+   * has created one.
+   */
+  clearStartUntitled(): Promise<void> {
+    return call("WindowService.ClearStartUntitled");
+  },
+  /**
    * CloseDocument drops the window's document: the page returns to its start
    * state and the watch ends. A folder stays open (PRD FR-07.5).
    */
@@ -271,8 +299,8 @@ export const WindowService = {
    * CloseWindow closes the calling window (PRD FR-09, Ctrl+W). The last window
    * closes the app, as the window manager would.
    */
-  closeWindow(): Promise<void> {
-    return call("WindowService.CloseWindow");
+  closeWindow(force: boolean): Promise<void> {
+    return call("WindowService.CloseWindow", force);
   },
   /**
    * GetSettings hands the page the settings and the recent list. A damaged file
@@ -280,6 +308,13 @@ export const WindowService = {
    */
   getSettings(): Promise<SettingsResult> {
     return call("WindowService.GetSettings");
+  },
+  /**
+   * NewDocument starts an unsaved Markdown buffer: the current window when it
+   * is empty, a new window otherwise (PRD FILE-01, §4.1).
+   */
+  newDocument(): Promise<NewWindowResult> {
+    return call("WindowService.NewDocument");
   },
   /**
    * NewWindow opens another window (PRD FR-02). The reuse matrix of M2-2 decides
@@ -379,6 +414,17 @@ export const WindowService = {
     return call("WindowService.RenderSource", text);
   },
   /**
+   * SaveDocument writes the window's buffer to its file (PRD 10.2). force skips
+   * the conflict check after the user confirmed an overwrite or recreate.
+   */
+  saveDocument(text: string, force: boolean): Promise<SaveResult> {
+    return call("WindowService.SaveDocument", text, force);
+  },
+  /** SaveDocumentAs asks for a path and writes the buffer there. */
+  saveDocumentAs(text: string): Promise<SaveResult> {
+    return call("WindowService.SaveDocumentAs", text);
+  },
+  /**
    * SaveSettings writes the settings the page edited. A failed write keeps the
    * previous settings (PRD FR-10.2).
    */
@@ -392,6 +438,17 @@ export const WindowService = {
    */
   scan(frames: Channel<ScanFrame>): Promise<void> {
     return call("WindowService.Scan", frames);
+  },
+  /**
+   * SetEditState lets the page tell the backend whether its buffer is dirty and
+   * which file version it started from. The native close handler uses it.
+   */
+  setEditState(dirty: boolean, hash: string, hasBOM: boolean, lineEnding: string): Promise<void> {
+    return call("WindowService.SetEditState", dirty, hash, hasBOM, lineEnding);
+  },
+  /** WindowDirty answers the native close handler; main calls it directly. */
+  windowDirty(id: number): Promise<boolean> {
+    return call("WindowService.WindowDirty", id);
   },
 } as const;
 
@@ -407,6 +464,11 @@ export const events = {
   treeChanged: event<TreeChanged>("tree-changed"),
   /** appNotice tells one window about something the app refused to do. */
   appNotice: event<Notice>("app-notice"),
+  /**
+   * closeRequested asks a page to run its unsaved-changes prompt before the
+   * native close goes through.
+   */
+  closeRequested: event<CloseRequested>("close-requested"),
   /**
    * openRequest tells one window to open something after its page is ready.
    * Only the target window receives it (CLAUDE.md §5, decisions.md D-T01).

@@ -87,6 +87,7 @@ body {
 .statusbar .item { display: inline-flex; align-items: center; gap: var(--sp-1); }
 .statusbar svg { width: 12px; height: 12px; }
 .st-danger { color: var(--danger); }
+.st-ok { color: var(--ok); }
 
 /* 整篇级提示条（DESIGN.md §8.7）：宽度与正文一致，贴在正文区顶部 */
 .stale-banner {
@@ -308,3 +309,5 @@ body {
 /* 源码编辑（M4-1）：CodeMirror 只在编辑时加载，颜色全部来自令牌 */
 .source-editor { flex: 1; min-height: 0; overflow: hidden; background: var(--bg-app); }
 .source-editor .cm-editor { height: 100%; }
+
+.dialog-text { margin: 0 0 var(--sp-3); color: var(--text-soft); }

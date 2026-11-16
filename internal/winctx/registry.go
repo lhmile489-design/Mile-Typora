@@ -23,6 +23,15 @@ type Window struct {
 	root       string
 	stopWatch  func()
 	stopTree   func()
+	// What editing knows about the file: whether the buffer differs from
+	// disk, the hash it started from, and the format saving must keep.
+	dirty      bool
+	untitled   bool
+	closing    bool
+	baseHash   string
+	hasBOM     bool
+	lineEnding string
+	savedHash  string
 }
 
 // ID is the native window's ID, as mygo.Window.ID reports it.
@@ -38,6 +47,10 @@ func (w *Window) SetRoot(root string) {
 	w.stateMu.Lock()
 	w.root = root
 	w.openFile = ""
+	w.dirty = false
+	w.baseHash = ""
+	w.hasBOM = false
+	w.lineEnding = ""
 	w.stateMu.Unlock()
 }
 
@@ -76,7 +89,83 @@ func (w *Window) Root() (string, bool) {
 func (w *Window) SetOpenFile(path string) {
 	w.stateMu.Lock()
 	w.openFile = path
+	if path == "" {
+		w.dirty = false
+		w.baseHash = ""
+		w.hasBOM = false
+		w.lineEnding = ""
+	}
 	w.stateMu.Unlock()
+}
+
+// SetEditState records what the page knows: whether its buffer is dirty and
+// which file version it started from (PRD 10.2, 10.3).
+func (w *Window) SetEditState(dirty bool, hash string, hasBOM bool, lineEnding string) {
+	w.stateMu.Lock()
+	w.dirty = dirty
+	w.baseHash = hash
+	w.hasBOM = hasBOM
+	w.lineEnding = lineEnding
+	w.stateMu.Unlock()
+}
+
+// EditState returns the dirty flag and the save baseline.
+func (w *Window) EditState() (dirty bool, hash string, hasBOM bool, lineEnding string) {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	return w.dirty, w.baseHash, w.hasBOM, w.lineEnding
+}
+
+// SetStartUntitled asks the next page handshake to start an unsaved document.
+func (w *Window) SetStartUntitled(start bool) {
+	w.stateMu.Lock()
+	w.untitled = start
+	w.stateMu.Unlock()
+}
+
+// StartUntitled reports whether this window should begin with an unsaved
+// document. It stays true across ready handshakes (React StrictMode remounts).
+func (w *Window) StartUntitled() bool {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	return w.untitled
+}
+
+// ClearStartUntitled stops asking for an unsaved document.
+func (w *Window) ClearStartUntitled() {
+	w.stateMu.Lock()
+	w.untitled = false
+	w.stateMu.Unlock()
+}
+
+// SetClosing marks a close the page already resolved, so the native close
+// handler lets it through.
+func (w *Window) SetClosing(closing bool) {
+	w.stateMu.Lock()
+	w.closing = closing
+	w.stateMu.Unlock()
+}
+
+// Closing reports whether a resolved close is under way.
+func (w *Window) Closing() bool {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	return w.closing
+}
+
+// SetSavedHash records the hash a save just wrote, so the watch can ignore
+// the write it causes itself.
+func (w *Window) SetSavedHash(hash string) {
+	w.stateMu.Lock()
+	w.savedHash = hash
+	w.stateMu.Unlock()
+}
+
+// SavedHash is the last hash written by a save, if any.
+func (w *Window) SavedHash() (string, bool) {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	return w.savedHash, w.savedHash != ""
 }
 
 // SetStopWatch records how to stop watching the open file, replacing any

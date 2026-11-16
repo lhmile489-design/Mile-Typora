@@ -88,6 +88,10 @@ var treeChanged = mygo.NewEvent[contract.TreeChanged]("tree-changed")
 // appNotice tells one window about something the app refused to do.
 var appNotice = mygo.NewEvent[contract.Notice]("app-notice")
 
+// closeRequested asks a page to run its unsaved-changes prompt before the
+// native close goes through.
+var closeRequested = mygo.NewEvent[contract.CloseRequested]("close-requested")
+
 // openRequest tells one window to open something after its page is ready.
 // Only the target window receives it (CLAUDE.md §5, decisions.md D-T01).
 var openRequest = mygo.NewEvent[contract.OpenRequest]("open-request")
@@ -265,6 +269,17 @@ func newWindow() *mygo.Window {
 	w.OnFocus(func() {
 		if windowsService != nil {
 			windowsService.RecordFocus(id)
+		}
+	})
+	// A dirty buffer is the page's call: the native close waits for its
+	// save / discard / cancel answer (PRD 10.2).
+	w.OnClose(func(e *mygo.CloseEvent) {
+		if windowsService == nil || ctx.Closing() {
+			return
+		}
+		if windowsService.WindowDirty(id) {
+			e.PreventDefault()
+			_ = closeRequested.Emit(w, contract.CloseRequested{})
 		}
 	})
 	// Closing the window cancels its context, so work started for it stops.

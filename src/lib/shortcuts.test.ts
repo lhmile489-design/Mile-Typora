@@ -19,6 +19,7 @@ describe("the P0 shortcut table", () => {
     ["O", { ctrlKey: true }, "open-file"],
     ["o", { ctrlKey: true, shiftKey: true }, "open-folder"],
     ["n", { ctrlKey: true, shiftKey: true }, "new-window"],
+    ["n", { ctrlKey: true }, "new-document"],
     ["f", { ctrlKey: true }, "find"],
     ["F5", {}, "refresh"],
     ["w", { ctrlKey: true }, "close-window"],

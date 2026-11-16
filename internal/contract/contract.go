@@ -27,6 +27,8 @@ type ReadyInfo struct {
 	// StartupNotice explains why the launch opened a blank page instead of
 	// the document it meant to restore (PRD FR-10.6).
 	StartupNotice string `json:"startupNotice,omitempty"`
+	// StartUntitled asks the page to begin with an unsaved document (Ctrl+N).
+	StartUntitled bool `json:"startUntitled,omitempty"`
 }
 
 // PendingResult lists the open requests the page has not acknowledged yet, in
@@ -43,6 +45,8 @@ type Doc struct {
 	Size       int64  `json:"size"`
 	HasBOM     bool   `json:"hasBom"`
 	LineEnding string `json:"lineEnding"`
+	// Hash is the SHA-256 of the file on disk, the base for save conflicts.
+	Hash string `json:"hash"`
 	// Text is the Markdown source, with the BOM removed and LF endings.
 	Text string `json:"text"`
 	// HTML is the rendered, whitelisted markup the page shows.
@@ -143,6 +147,21 @@ type RenderSourceResult struct {
 	Counts  Counts   `json:"counts"`
 	Failure *Failure `json:"failure,omitempty"`
 }
+
+// SaveResult answers a save or save-as. Failure means nothing was written.
+type SaveResult struct {
+	Path       string   `json:"path,omitempty"`
+	Name       string   `json:"name,omitempty"`
+	Size       int64    `json:"size,omitempty"`
+	Hash       string   `json:"hash,omitempty"`
+	HasBOM     bool     `json:"hasBom,omitempty"`
+	LineEnding string   `json:"lineEnding,omitempty"`
+	Failure    *Failure `json:"failure,omitempty"`
+}
+
+// CloseRequested asks a window's page to run the unsaved-changes prompt
+// before the native close goes through.
+type CloseRequested struct{}
 
 // Notice is a short message a window shows in its status bar: something the
 // app refused or could not do, said without blocking (PRD §7.3, §9.2.4).

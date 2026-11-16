@@ -16,6 +16,7 @@ import {
   type OpenRequestResult,
   type RecentEntry,
   type RenderSourceResult,
+  type SaveResult,
   type SettingsResult,
   type SettingsView,
   type ScanFrame,
@@ -57,6 +58,12 @@ export type OpenFolderResult =
   | { kind: "cancelled" }
   | { kind: "opened"; root: string; name: string }
   | { kind: "handedOff" }
+  | { kind: "failed"; code: string; message: string };
+
+/** What a save or save-as produced. */
+export type SaveOutcome =
+  | { kind: "saved"; path: string; name: string; size: number; hash: string; hasBom: boolean; lineEnding: string }
+  | { kind: "cancelled" }
   | { kind: "failed"; code: string; message: string };
 
 /** What rendering an edited buffer produced. */
@@ -115,8 +122,20 @@ export interface Transport {
   renderSource(text: string): Promise<SourcePreview>;
   /** Drops the window's document, leaving its folder open (PRD FR-07.5). */
   closeDocument(): Promise<Outcome<void>>;
-  /** Closes this window; the last window quits the app (PRD FR-09, Ctrl+W). */
-  closeWindow(): Promise<Outcome<void>>;
+  /** Closes this window; force skips the dirty check after the page asked. */
+  closeWindow(force: boolean): Promise<Outcome<void>>;
+  /** Subscribes to a native close that waits for the unsaved prompt. */
+  onCloseRequested(listener: () => void): () => void;
+  /** Starts an unsaved document here (empty window) or in a new window. */
+  newDocument(): Promise<Outcome<number>>;
+  /** Stops the ready handshake from asking for an unsaved document again. */
+  clearStartUntitled(): Promise<void>;
+  /** Writes the buffer to the window's file; force overwrites a conflict. */
+  saveDocument(text: string, force: boolean): Promise<SaveOutcome>;
+  /** Asks for a path and writes the buffer there. */
+  saveDocumentAs(text: string): Promise<SaveOutcome>;
+  /** Tells Go whether the buffer is dirty and which version it started from. */
+  setEditState(dirty: boolean, hash: string, hasBom: boolean, lineEnding: string): Promise<void>;
   /** Reads the settings and the recent list. */
   getSettings(): Promise<SettingsOutcome>;
   /** Writes the settings the page edited. */
@@ -244,10 +263,22 @@ export const mygoTransport: Transport = {
     wrap(async () => {
       await WindowService.closeDocument();
     }),
-  closeWindow: () =>
+  closeWindow: (force) =>
     wrap(async () => {
-      await WindowService.closeWindow();
+      await WindowService.closeWindow(force);
     }),
+  onCloseRequested: (listener) => subscribe(() => events.closeRequested.on(() => listener())),
+  newDocument: () =>
+    wrap(async () => {
+      const result = await WindowService.newDocument();
+      if (result.failure) throw new Error(result.failure.detail);
+      return result.windowId;
+    }),
+  clearStartUntitled: () => WindowService.clearStartUntitled(),
+  saveDocument: async (text, force) => saveOutcome(() => WindowService.saveDocument(text, force)),
+  saveDocumentAs: async (text) => saveOutcome(() => WindowService.saveDocumentAs(text)),
+  setEditState: (dirty, hash, hasBom, lineEnding) =>
+    WindowService.setEditState(dirty, hash, hasBom, lineEnding),
   getSettings: async () => {
     try {
       const result = await WindowService.getSettings();
@@ -325,6 +356,39 @@ async function requestedOutcome(call: () => Promise<OpenRequestResult>): Promise
       kind: "failed",
       code: "unknown",
       message: failureMessage("unknown", err instanceof Error ? err.message : ""),
+    };
+  }
+}
+
+/** saveOutcome turns a SaveResult into what the page does. */
+async function saveOutcome(call: () => Promise<SaveResult>): Promise<SaveOutcome> {
+  try {
+    const result = await call();
+    if (result.failure) {
+      if (result.failure.code === "cancelled") return { kind: "cancelled" };
+      return {
+        kind: "failed",
+        code: result.failure.code,
+        message: failureText(result.failure),
+      };
+    }
+    return {
+      kind: "saved",
+      path: result.path ?? "",
+      name: result.name ?? "",
+      size: result.size ?? 0,
+      hash: result.hash ?? "",
+      hasBom: result.hasBom ?? false,
+      lineEnding: result.lineEnding ?? "",
+    };
+  } catch (err) {
+    return {
+      kind: "failed",
+      code: "unknown",
+      message: failureText({
+        code: "unknown",
+        detail: err instanceof Error ? err.message : "",
+      }),
     };
   }
 }

@@ -24,12 +24,34 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     }),
     saveSettings: async () => ({ ok: true as const, value: undefined }),
     clearRecent: async () => ({ ok: true as const, value: undefined }),
+    newDocument: async () => ({ ok: true as const, value: 3 }),
+    clearStartUntitled: async () => {},
     openRecent: async () => ({ kind: "handedOff" as const }),
     removeRecent: async () => ({ ok: true as const, value: undefined }),
     onThemeChange: () => () => {},
     onDocUpdated: () => () => {},
     onTreeChanged: () => () => {},
     onNotice: () => () => {},
+    onCloseRequested: () => () => {},
+    saveDocument: async () => ({
+      kind: "saved" as const,
+      path: "",
+      name: "",
+      size: 0,
+      hash: "",
+      hasBom: false,
+      lineEnding: "LF",
+    }),
+    saveDocumentAs: async () => ({
+      kind: "saved" as const,
+      path: "",
+      name: "",
+      size: 0,
+      hash: "",
+      hasBom: false,
+      lineEnding: "LF",
+    }),
+    setEditState: async () => {},
     refresh: async () => ({ kind: "cancelled" as const }),
     closeDocument: async () => ({ ok: true as const, value: undefined }),
     closeWindow: async () => ({ ok: true as const, value: undefined }),
@@ -125,6 +147,7 @@ describe("exception feedback", () => {
       size: 32,
       hasBom: false,
       lineEnding: "LF",
+      hash: "",
       text: "# 标题",
       html: "<h1>标题</h1>",
       counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
@@ -201,6 +224,7 @@ describe("exception feedback", () => {
       size: 64,
       hasBom: false,
       lineEnding: "LF",
+      hash: "",
       text: "![示意图](图.png)",
       html: '<p><img src="http://mtres.localhost/missing" alt="示意图"></p>',
       counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
@@ -270,10 +294,10 @@ describe("keyboard commands", () => {
     await waitFor(() => expect(closeWindow).toHaveBeenCalledTimes(1));
 
     fireEvent.keyDown(window, { key: "s", ctrlKey: true });
-    expect(await screen.findByText(/仅支持阅读/)).toBeTruthy();
+    expect(await screen.findByText(/阅读模式没有可保存的修改/)).toBeTruthy();
     // Escape clears the temporary message before it could close anything.
     fireEvent.keyDown(window, { key: "Escape" });
-    expect(screen.queryByText(/仅支持阅读/)).toBeNull();
+    expect(screen.queryByText(/阅读模式没有可保存的修改/)).toBeNull();
   });
 
   it("returns to the open find bar when Ctrl+F repeats", async () => {
@@ -283,6 +307,7 @@ describe("keyboard commands", () => {
       size: 32,
       hasBom: false,
       lineEnding: "LF",
+      hash: "",
       text: "# 标题",
       html: "<h1>标题</h1>",
       counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
@@ -307,6 +332,7 @@ describe("keyboard commands", () => {
       size: 32,
       hasBom: false,
       lineEnding: "LF",
+      hash: "",
       text: "# 标题",
       html: "<h1>标题</h1>",
       counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
@@ -326,6 +352,15 @@ describe("keyboard commands", () => {
     await waitFor(() => expect(screen.queryByRole("search")).toBeNull());
   });
 
+  it("starts an unsaved document with Ctrl+N", async () => {
+    render(<App transport={fakeTransport()} />);
+    await screen.findByText("窗口 3 · v0.1.0");
+    fireEvent.keyDown(window, { key: "n", ctrlKey: true });
+    expect(await screen.findByText("编辑中")).toBeTruthy();
+    expect(screen.getAllByText("未命名-1").length).toBeGreaterThan(0);
+    expect(await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 })).toBeTruthy();
+  });
+
   it("toggles source editing and preview with Ctrl+/", async () => {
     const doc = {
       name: "笔记.md",
@@ -333,6 +368,7 @@ describe("keyboard commands", () => {
       size: 32,
       hasBom: false,
       lineEnding: "LF",
+      hash: "",
       text: "# 标题",
       html: "<h1>标题</h1>",
       counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
@@ -373,6 +409,7 @@ describe("keyboard commands", () => {
       size: 32,
       hasBom: false,
       lineEnding: "LF",
+      hash: "",
       text: "# 标题",
       html: "<h1>标题</h1>",
       counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },

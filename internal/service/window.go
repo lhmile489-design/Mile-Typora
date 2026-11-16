@@ -61,6 +61,8 @@ type Deps struct {
 	TreeChanged func(windowID int)
 	// CloseWindow closes one native window; the last one quits the app.
 	CloseWindow func(windowID int) error
+	// SavePicker asks where to save; nil uses the system save dialog.
+	SavePicker SavePicker
 	// StartedAt is when the process started, for the startup measurement
 	// (docs/develop/性能基线.md).
 	StartedAt time.Time
@@ -96,6 +98,7 @@ type WindowService struct {
 	treeWatcher   *watch.Pool
 	treeChanged   func(windowID int)
 	closeWindow   func(windowID int) error
+	savePick      SavePicker
 	startedAt     time.Time
 	// metaFailed records that an implicit settings write failed, so the next
 	// GetSettings can tell the user without blocking the reading (PRD FR-08.8).
@@ -119,6 +122,9 @@ func NewWindowService(d Deps) *WindowService {
 	if d.External == nil {
 		d.External = mygo.Shell.OpenExternal
 	}
+	if d.SavePicker == nil {
+		d.SavePicker = PickSavePath
+	}
 	return &WindowService{
 		caller: func(ctx context.Context) (int, bool) {
 			w := mygo.CallerWindow(ctx)
@@ -139,6 +145,7 @@ func NewWindowService(d Deps) *WindowService {
 		treeWatcher:   d.TreeWatcher,
 		treeChanged:   d.TreeChanged,
 		closeWindow:   d.CloseWindow,
+		savePick:      d.SavePicker,
 		startedAt:     d.StartedAt,
 		state:         d.State,
 		startupNotice: d.StartupNotice,
@@ -593,6 +600,7 @@ func (s *WindowService) openPath(ctx context.Context, w *winctx.Window, chosen s
 		return result, nil
 	}
 	s.finishOpen(w, result.Doc.Path)
+	w.SetEditState(false, result.Doc.Hash, result.Doc.HasBOM, result.Doc.LineEnding)
 	return result, nil
 }
 
@@ -633,6 +641,7 @@ func (s *WindowService) readAndRender(ctx context.Context, w *winctx.Window, cho
 		Size:       doc.Size,
 		HasBOM:     doc.HasBOM,
 		LineEnding: doc.LineEnding,
+		Hash:       doc.Hash,
 		Text:       doc.Text,
 		HTML:       rendered.HTML,
 		Counts: contract.Counts{
@@ -649,6 +658,11 @@ func (s *WindowService) finishOpen(w *winctx.Window, real string) {
 	w.SetOpenFile(real)
 	s.recordRecent(real, false)
 	s.recordResumeOf(w)
+	s.watchFile(w, real)
+}
+
+// watchFile subscribes this window to its file, replacing any earlier watch.
+func (s *WindowService) watchFile(w *winctx.Window, real string) {
 	if s.watcher == nil {
 		return
 	}
@@ -665,6 +679,14 @@ func (s *WindowService) finishOpen(w *winctx.Window, real string) {
 // onFileEvent refreshes the window's document after a change outside the app.
 // The path stays out of the log: it is the user's file name (CLAUDE.md §6).
 func (s *WindowService) onFileEvent(w *winctx.Window, ev watch.Event) {
+	// A write the app itself just made is not an external change.
+	if path, ok := w.OpenFile(); ok {
+		if saved, has := w.SavedHash(); has {
+			if current, err := hashFile(path); err == nil && current == saved {
+				return
+			}
+		}
+	}
 	if ev.Op == watch.Gone {
 		// The file's folder went away: read once more so the page marks the
 		// document stale instead of keeping it as if it were current
@@ -785,18 +807,67 @@ func (s *WindowService) RenderSource(ctx context.Context, text string) (contract
 
 // CloseWindow closes the calling window (PRD FR-09, Ctrl+W). The last window
 // closes the app, as the window manager would.
-func (s *WindowService) CloseWindow(ctx context.Context) error {
+func (s *WindowService) CloseWindow(ctx context.Context, force bool) error {
 	id, ok := s.caller(ctx)
 	if !ok {
 		return ErrNoCallerWindow
 	}
-	if _, exists := s.windows.Get(id); !exists {
+	w, exists := s.windows.Get(id)
+	if !exists {
 		return ErrWindowNotOpen
+	}
+	if force {
+		w.SetClosing(true)
+	} else if s.WindowDirty(id) {
+		return ErrWindowDirty
 	}
 	if s.closeWindow == nil {
 		return nil
 	}
 	return s.closeWindow(id)
+}
+
+// NewDocument starts an unsaved Markdown buffer: the current window when it
+// is empty, a new window otherwise (PRD FILE-01, §4.1).
+func (s *WindowService) NewDocument(ctx context.Context) (contract.NewWindowResult, error) {
+	w, err := s.callerWindow(ctx)
+	if err != nil {
+		return contract.NewWindowResult{}, err
+	}
+	target := w
+	if !w.IsEmpty() {
+		if s.open == nil {
+			return contract.NewWindowResult{Failure: &contract.Failure{
+				Code: "window_failed", Detail: "无法创建新窗口",
+			}}, nil
+		}
+		id, err := s.open()
+		if err != nil {
+			return contract.NewWindowResult{Failure: &contract.Failure{
+				Code: "window_failed", Detail: "无法创建新窗口，请关闭其他窗口后重试",
+			}}, nil
+		}
+		next, ok := s.windows.Get(id)
+		if !ok {
+			return contract.NewWindowResult{Failure: &contract.Failure{
+				Code: "window_failed", Detail: "新窗口没有注册",
+			}}, nil
+		}
+		target = next
+	}
+	target.SetStartUntitled(true)
+	return contract.NewWindowResult{WindowID: target.ID()}, nil
+}
+
+// ClearStartUntitled stops asking the page for an unsaved document once it
+// has created one.
+func (s *WindowService) ClearStartUntitled(ctx context.Context) error {
+	w, err := s.callerWindow(ctx)
+	if err != nil {
+		return err
+	}
+	w.ClearStartUntitled()
+	return nil
 }
 
 // CloseDocument drops the window's document: the page returns to its start
@@ -845,7 +916,7 @@ func (s *WindowService) Ready(ctx context.Context) (contract.ReadyInfo, error) {
 		// no path or content (CLAUDE.md §6).
 		log.Printf("perf: ready window=%d ms=%d", w.ID(), time.Since(s.startedAt).Milliseconds())
 	}
-	info := contract.ReadyInfo{WindowID: w.ID(), Version: s.version()}
+	info := contract.ReadyInfo{WindowID: w.ID(), Version: s.version(), StartUntitled: w.StartUntitled()}
 	// The reason a restore fell back to a blank page belongs to this launch,
 	// so every handshake of it reports the reason: a page that remounts
 	// (React StrictMode in development) must not lose it.

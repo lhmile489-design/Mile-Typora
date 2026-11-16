@@ -331,3 +331,13 @@ M1 需验证：mermaid 12 的 `securityLevel: "strict"` 与 `%%{init}%%` 指令�
 - 同一窗口一份缓冲；`Ctrl+/` 在 reading → editing → preview → editing 间切换。M4-1 还没有保存，因此编辑中暂时阻止打开文件/目录、最近记录、树内文件、外部打开请求、刷新与关窗，只给状态栏说明；M4-2 用保存 / 放弃 / 取消替换这些临时拦截。OS 标题栏关闭仍可能丢失缓冲，这是 M4-1 的已知边界，M4-2 修。
 - 预览由新的 `RenderSource` 绑定用 P0 的 goldmark + bluemonday 管线渲染内存文本，不读盘不写盘；超过 10 MiB 或非法 UTF-8 直接失败。图片 token 分 `read` 与 `preview` 两种，预览只清理自己的，因此渲染编辑缓冲不会让阅读视图图片失效。
 - 原生验证：进入编辑后 CodeMirror 显示原文，插入文本后预览显示新内容，切回源码缓冲仍在；Ctrl+O 被拦截且无对话框；gfm.md 字节未变（git 无差异）。
+
+### D-T40 · M4-2 保存：哈希基线、原子替换、原生关闭交页面确认
+
+- 冲突判断不依赖内存时间戳：`docread` 计算磁盘字节（含 BOM）的 SHA-256，随 `Doc.hash` 到页面；页面在打开、应用外部刷新、保存成功后同步 `SetEditState(dirty, hash, hasBOM, lineEnding)`。保存前比较磁盘哈希与此基线，后保存窗口必然拿到 `conflict`，不会静默覆盖。
+- 写入用 `internal/docwrite`：同目录临时文件写入并 Sync，`ReplaceFileW(REPLACEFILE_WRITE_THROUGH)` 替换，保留原文件 ACL、属性与创建时间；目标不存在时 `os.Rename` 创建。保存失败保留原文件与编辑缓冲，返回 `save_failed`。
+- 格式：编辑缓冲始终 LF；保存按基线恢复 BOM 与 CRLF（P1 决策）。另存为尚无路径时使用 UTF-8 无 BOM + LF；未写扩展名补 `.md`，非 Markdown 拒绝。另存为成功后窗口切到新路径、重新挂文件监听、记入最近与恢复目标。
+- 原生关闭：`Window.OnClose` 读窗口脏标记，脏则 `PreventDefault` 并发出 `close-requested`；页面完成保存 / 放弃后调用 `closeWindow(true)`，Go 标记 `Closing` 放行。Ctrl+W 与切换文件 / 目录走同一三选一；取消则保留原状态。OS 关窗因此不再能绕过未保存保护。
+- 新建：`NewDocument` 对空窗口复用、非空窗口新建；目标窗口 `ReadyInfo.startUntitled` 通过握手交给页面，页面创建未命名缓冲并 `clearStartUntitled`。新建不写盘，首次保存走另存为。
+- 自己保存产生的写事件会触发监听；`onFileEvent` 读当前文件哈希，与 `SetSavedHash` 相同就忽略，避免保存后误报外部修改。
+- **未完成**：保存全部的跨窗口编排与菜单入口没有做。它需要事件广播、各窗口回报与汇总，且没有菜单就无用户入口；按计划随 M4-7 菜单一起实现，M4-2 进度里明确标为部分完成，不写成已交付。

@@ -5,6 +5,8 @@ package docread
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"os"
 	"unicode/utf8"
@@ -23,6 +25,9 @@ type Doc struct {
 	HasBOM bool
 	// LineEnding is "CRLF" when the file used Windows line endings, else "LF".
 	LineEnding string
+	// Hash is the SHA-256 of the bytes on disk, BOM included. Saving compares
+	// it with the disk before overwriting (PRD 10.3).
+	Hash string
 }
 
 // Failure is an expected read problem, phrased for the user. Its fields mirror
@@ -87,7 +92,8 @@ func Read(path string) (*Doc, *Failure) {
 		}
 	}
 
-	doc := &Doc{Size: int64(len(data)), LineEnding: "LF"}
+	sum := sha256.Sum256(data)
+	doc := &Doc{Size: int64(len(data)), LineEnding: "LF", Hash: hex.EncodeToString(sum[:])}
 	if bytes.HasPrefix(data, []byte{0xEF, 0xBB, 0xBF}) {
 		doc.HasBOM = true
 		data = data[3:]

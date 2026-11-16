@@ -23,13 +23,16 @@ import type {
   ReadyInfo,
   RecentEntry,
   RequestedOutcome,
+  SaveOutcome,
   ScanFrame,
   Transport,
   TreeEntry,
 } from "../lib/transport";
 import { failureMessage, failureText, formatBytes } from "../lib/errors";
 import { FileTree } from "../components/FileTree";
+import { SaveConflictDialog } from "../components/SaveConflictDialog";
 import { SettingsDialog } from "../components/SettingsDialog";
+import { UnsavedDialog } from "../components/UnsavedDialog";
 import { FindBar } from "../components/FindBar";
 import { SourceEditor } from "../components/SourceEditor";
 import { advance, clearHighlights, collectRanges, paint, scrollToRange } from "../render/find";
@@ -61,6 +64,16 @@ export function App({ transport }: { transport: Transport }) {
   const [mode, setMode] = useState<ViewMode>("reading");
   const [buffer, setBuffer] = useState("");
   const [preview, setPreview] = useState<{ html: string; counts: OpenedDoc["counts"] } | null>(null);
+  // M4-2: the buffer is dirty when it differs from the last saved/loaded text.
+  const [savedText, setSavedText] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [unsavedOpen, setUnsavedOpen] = useState(false);
+  const [unsavedError, setUnsavedError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState<{ kind: "conflict" | "missing"; message: string } | null>(null);
+  const pendingAction = useRef<(() => void) | null>(null);
+  const dirty = mode !== "reading" && buffer !== savedText;
+  const untitledCount = useRef(0);
   const [loadError, setLoadError] = useState<LoadError | null>(null);
   // stale is why the content on screen may no longer match its file; the
   // document stays until a refresh succeeds (PRD FR-07.5, FR-07.11).
@@ -111,6 +124,8 @@ export function App({ transport }: { transport: Transport }) {
   const treeRows = useRef<TreeEntry[]>([]);
   const docRef = useRef<OpenedDoc | null>(null);
   const modeRef = useRef<ViewMode>("reading");
+  const bufferRef = useRef("");
+  const dirtyRef = useRef(false);
   const refreshingRef = useRef(false);
   // The newest document update applied; an older one arrives too late.
   const updateSeq = useRef(0);
@@ -223,6 +238,55 @@ export function App({ transport }: { transport: Transport }) {
   }, [mode]);
 
   useEffect(() => {
+    bufferRef.current = buffer;
+  }, [buffer]);
+
+  useEffect(() => {
+    dirtyRef.current = dirty;
+  }, [dirty]);
+
+  // Go needs the dirty flag for the native close prompt, and the hash the
+  // buffer started from for save conflicts (PRD 10.2, 10.3).
+  useEffect(() => {
+    if (!doc) return;
+    void transport.setEditState(dirty, doc.hash, doc.hasBom, doc.lineEnding);
+  }, [dirty, doc, transport]);
+
+  const holdForDirty = useCallback((action: () => void) => {
+    pendingAction.current = action;
+    setUnsavedError(null);
+    setUnsavedOpen(true);
+  }, []);
+
+  // Ctrl+N: an unsaved buffer, no file written until the user saves it.
+  const startUntitled = useCallback(() => {
+    untitledCount.current += 1;
+    const untitled: OpenedDoc = {
+      name: `未命名-${untitledCount.current}`,
+      path: "",
+      size: 0,
+      hasBom: false,
+      lineEnding: "LF",
+      hash: "",
+      text: "",
+      html: "",
+      counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
+    };
+    setDoc(untitled);
+    setBuffer("");
+    setSavedText("");
+    setMode("editing");
+    setPreview(null);
+    setLoadError(null);
+    setStale(null);
+    setUpdatedAt(null);
+    setSelected(null);
+    setFindOpen(false);
+    clearHighlights();
+    void transport.clearStartUntitled();
+  }, [transport]);
+
+  useEffect(() => {
     return transport.onNotice((notice) => setNotice(notice.text));
   }, [transport]);
 
@@ -289,6 +353,7 @@ export function App({ transport }: { transport: Transport }) {
           setDoc(result.doc);
           setMode("reading");
           setBuffer(result.doc.text);
+          setSavedText(result.doc.text);
           setPreview(null);
           void loadSettings();
           setLoadError(null);
@@ -329,26 +394,26 @@ export function App({ transport }: { transport: Transport }) {
 
   // M4-1 has no save yet, so an open that would replace the buffer is held
   // back until M4-2 brings the save/discard prompt.
-  const blockWhileEditing = useCallback(() => {
-    if (modeRef.current === "reading") return false;
-    setNotice("编辑中：保存与文档切换保护在 M4-2 提供，请保持当前文档");
-    return true;
-  }, []);
-
   // Opening what a request names: a double-clicked file, a command-line
   // argument, or another instance's request (PRD FR-02.8, docs/踩坑记录.md).
   const openRequested = useCallback(
     async (seq: number) => {
-      if (blockWhileEditing()) return;
+      if (dirtyRef.current) {
+        holdForDirty(() => void openRequested(seq));
+        return;
+      }
       applyOutcome(await transport.openRequested(seq));
     },
-    [applyOutcome, blockWhileEditing, transport],
+    [applyOutcome, holdForDirty, transport],
   );
 
   // A click in the tree opens the file here; its arrow opens it elsewhere.
   const openRecent = useCallback(
     async (entry: RecentEntry) => {
-      if (blockWhileEditing()) return;
+      if (dirtyRef.current) {
+        holdForDirty(() => void openRecent(entry));
+        return;
+      }
       const result = await transport.openRecent(entry.path);
       if (result.kind === "failed") {
         setNotice(`${entry.name} 不可用：${result.message}`);
@@ -362,16 +427,19 @@ export function App({ transport }: { transport: Transport }) {
       }
       applyOutcome(result);
     },
-    [applyOutcome, blockWhileEditing, transport],
+    [applyOutcome, holdForDirty, transport],
   );
 
   const openTreeFile = useCallback(
     async (entry: TreeEntry, newWindow: boolean) => {
-      if (blockWhileEditing()) return;
+      if (dirtyRef.current) {
+        holdForDirty(() => void openTreeFile(entry, newWindow));
+        return;
+      }
       setSelected(entry.path);
       applyOutcome(await transport.openTreeFile(entry.path, newWindow));
     },
-    [applyOutcome, blockWhileEditing, transport],
+    [applyOutcome, holdForDirty, transport],
   );
 
   // A link in the document: Go decides, the page scrolls or opens.
@@ -426,6 +494,7 @@ export function App({ transport }: { transport: Transport }) {
       }
       if (r.value.startupNotice) setNotice(r.value.startupNotice);
       setReady({ kind: "ready", info: r.value });
+      if (r.value.startUntitled && !docRef.current) startUntitled();
       const pending = await transport.pending(0);
       if (!alive || !pending.ok) return;
       pending.value.forEach(add);
@@ -434,17 +503,21 @@ export function App({ transport }: { transport: Transport }) {
       alive = false;
       off();
     };
-  }, [openRequested, transport]);
+  }, [openRequested, startUntitled, transport]);
 
   // Opening a file replaces what the window shows; cancelling changes nothing.
   const openFile = useCallback(async () => {
-    if (blockWhileEditing()) return;
+    if (dirtyRef.current) {
+      holdForDirty(() => void openFile());
+      return;
+    }
     setNotice(null);
     const result = await transport.openFile();
     if (result.kind === "loaded") {
       setDoc(result.doc);
       setMode("reading");
       setBuffer(result.doc.text);
+      setSavedText(result.doc.text);
       setPreview(null);
       setLoadError(null);
       setStale(null);
@@ -453,11 +526,14 @@ export function App({ transport }: { transport: Transport }) {
       if (docRef.current || folderRef.current) setNotice(result.message);
       else setLoadError({ code: result.code, message: result.message, kind: "file" });
     }
-  }, [blockWhileEditing, transport]);
+  }, [holdForDirty, transport]);
 
   // Opening a folder replaces the tree, dropping any scan still running.
   const openFolder = useCallback(async () => {
-    if (blockWhileEditing()) return;
+    if (dirtyRef.current) {
+      holdForDirty(() => void openFolder());
+      return;
+    }
     setNotice(null);
     const result = await transport.openFolder();
     if (result.kind === "failed") {
@@ -467,7 +543,7 @@ export function App({ transport }: { transport: Transport }) {
     }
     if (result.kind !== "opened") return;
     startScan(result.root, result.name);
-  }, [blockWhileEditing, startScan, transport]);
+  }, [holdForDirty, startScan, transport]);
 
   useEffect(() => () => scanRef.current?.abort(), []);
 
@@ -492,7 +568,10 @@ export function App({ transport }: { transport: Transport }) {
   // F5 and the toolbar refresh the reading context: the tree as well in a
   // folder window (PRD FR-07.8). A failure keeps what is on screen.
   const refresh = useCallback(async () => {
-    if (blockWhileEditing()) return;
+    if (modeRef.current !== "reading") {
+      setNotice("编辑中不刷新，请先保存或放弃修改");
+      return;
+    }
     if (refreshingRef.current) return;
     const openFolder = folderRef.current;
     const hasDoc = docRef.current !== null;
@@ -514,12 +593,15 @@ export function App({ transport }: { transport: Transport }) {
     } else if (result.kind === "failed") {
       setStale(result.message);
     }
-  }, [blockWhileEditing, captureHere, startScan, transport]);
+  }, [captureHere, startScan, transport]);
 
   // Closing the document returns the window to its start state; the file
   // tree stays when a folder is open (PRD FR-07.5).
   const closeDocument = useCallback(async () => {
-    if (blockWhileEditing()) return;
+    if (dirtyRef.current) {
+      holdForDirty(() => void closeDocument());
+      return;
+    }
     const result = await transport.closeDocument();
     if (!result.ok) {
       setNotice(result.message);
@@ -538,7 +620,7 @@ export function App({ transport }: { transport: Transport }) {
     clearHighlights();
     setMode("reading");
     setPreview(null);
-  }, [blockWhileEditing, transport]);
+  }, [holdForDirty, transport]);
 
   const saveSettings = useCallback(async () => {
     setSettingsSaving(true);
@@ -565,12 +647,148 @@ export function App({ transport }: { transport: Transport }) {
     if (!r.ok) setNotice(r.message);
   }, [transport]);
 
+  const newDocument = useCallback(async () => {
+    if (dirtyRef.current) {
+      holdForDirty(() => void newDocument());
+      return;
+    }
+    const result = await transport.newDocument();
+    if (!result.ok) {
+      setNotice(result.message);
+      return;
+    }
+    if (ready.kind === "ready" && result.value === ready.info.windowId) {
+      startUntitled();
+    }
+  }, [holdForDirty, ready, startUntitled, transport]);
+
   // Ctrl+W closes this window; the app quits with its last window (PRD FR-09).
-  const closeWindow = useCallback(async () => {
-    if (blockWhileEditing()) return;
-    const result = await transport.closeWindow();
+  const forceClose = useCallback(async () => {
+    const result = await transport.closeWindow(true);
     if (!result.ok) setNotice(result.message);
-  }, [blockWhileEditing, transport]);
+  }, [transport]);
+
+  const requestClose = useCallback(() => {
+    if (!dirtyRef.current) {
+      void forceClose();
+      return;
+    }
+    holdForDirty(() => void forceClose());
+  }, [forceClose, holdForDirty]);
+
+  useEffect(() => {
+    return transport.onCloseRequested(() => requestClose());
+  }, [requestClose, transport]);
+
+  // M4-2: the buffer is saved through the window's file, or through Save As
+  // when it has none. A conflict opens the explicit overwrite prompt.
+  const applySaved = useCallback((result: Extract<SaveOutcome, { kind: "saved" }>) => {
+    const text = bufferRef.current;
+    setDoc((prev) =>
+      prev
+        ? {
+            ...prev,
+            path: result.path || prev.path,
+            name: result.name || prev.name,
+            size: result.size,
+            hasBom: result.hasBom,
+            lineEnding: result.lineEnding,
+            hash: result.hash,
+            text,
+          }
+        : prev,
+    );
+    setSavedText(text);
+    dirtyRef.current = false;
+    setUpdatedAt(nowHM());
+    setNotice("已保存");
+  }, []);
+
+  const saveBufferAs = useCallback(async (): Promise<boolean> => {
+    if (!docRef.current) return false;
+    setSaving(true);
+    setSaveError(null);
+    const result = await transport.saveDocumentAs(bufferRef.current);
+    setSaving(false);
+    if (result.kind === "saved") {
+      applySaved(result);
+      return true;
+    }
+    if (result.kind === "cancelled") return false;
+    setSaveError(result.message);
+    setUnsavedError(result.message);
+    setNotice(result.message);
+    return false;
+  }, [applySaved, transport]);
+
+  const saveBuffer = useCallback(
+    async (force = false): Promise<boolean> => {
+      if (!docRef.current) return false;
+      setSaving(true);
+      setSaveError(null);
+      const result = await transport.saveDocument(bufferRef.current, force);
+      setSaving(false);
+      if (result.kind === "saved") {
+        applySaved(result);
+        return true;
+      }
+      if (result.kind === "cancelled") return false;
+      if (result.code === "no_path") return saveBufferAs();
+      if (result.code === "conflict" || result.code === "missing") {
+        setUnsavedOpen(false);
+        setConflict({ kind: result.code, message: result.message });
+        return false;
+      }
+      setSaveError(result.message);
+      setUnsavedError(result.message);
+      setNotice(result.message);
+      return false;
+    },
+    [applySaved, saveBufferAs, transport],
+  );
+
+  const continuePending = useCallback(() => {
+    const action = pendingAction.current;
+    pendingAction.current = null;
+    setUnsavedOpen(false);
+    setUnsavedError(null);
+    setConflict(null);
+    if (action) action();
+  }, []);
+
+  const discardChanges = useCallback(() => {
+    const current = docRef.current;
+    if (current) {
+      setBuffer(current.text);
+      setSavedText(current.text);
+    }
+    dirtyRef.current = false;
+    continuePending();
+  }, [continuePending]);
+
+  const save = useCallback(async () => {
+    if (modeRef.current === "reading") {
+      setNotice("阅读模式没有可保存的修改");
+      return;
+    }
+    const ok = await saveBuffer(false);
+    if (ok) {
+      if (pendingAction.current) continuePending();
+      else setUnsavedOpen(false);
+    }
+  }, [continuePending, saveBuffer]);
+
+  const saveAs = useCallback(async () => {
+    if (modeRef.current === "reading") {
+      setNotice("阅读模式没有可保存的修改");
+      return;
+    }
+    const ok = await saveBufferAs();
+    if (ok) {
+      if (pendingAction.current) continuePending();
+      else setUnsavedOpen(false);
+    }
+  }, [continuePending, saveBufferAs]);
 
   // M4-1: Ctrl+/ enters source editing, shows the preview, or returns to the
   // source. The buffer stays in the window; no file is written (M4-2 saves).
@@ -712,6 +930,10 @@ export function App({ transport }: { transport: Transport }) {
           e.preventDefault();
           void newWindow();
           return;
+        case "new-document":
+          e.preventDefault();
+          void newDocument();
+          return;
         case "find":
           e.preventDefault();
           if (modeRef.current === "editing") {
@@ -729,7 +951,7 @@ export function App({ transport }: { transport: Transport }) {
           return;
         case "close-window":
           e.preventDefault();
-          void closeWindow();
+          requestClose();
           return;
         case "settings":
           e.preventDefault();
@@ -746,13 +968,11 @@ export function App({ transport }: { transport: Transport }) {
           return;
         case "save-blocked":
           e.preventDefault();
-          // M4-1 edits in memory; M4-2 brings the real save. In reading the
-          // web view would otherwise offer to save the page.
-          setNotice(
-            modeRef.current === "reading"
-              ? "当前版本仅支持阅读，不会保存文件"
-              : "保存将在 M4-2 提供，当前修改还没有写入磁盘",
-          );
+          void save();
+          return;
+        case "save-as":
+          e.preventDefault();
+          void saveAs();
           return;
       }
     };
@@ -760,13 +980,16 @@ export function App({ transport }: { transport: Transport }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [
     closeFind,
-    closeWindow,
     findOpen,
+    newDocument,
     newWindow,
     notice,
     openFile,
     openFolder,
     refresh,
+    requestClose,
+    save,
+    saveAs,
     settingsOpen,
     toggleSource,
   ]);
@@ -975,6 +1198,12 @@ export function App({ transport }: { transport: Transport }) {
             {mode !== "reading" && (
               <span className="item">{mode === "editing" ? "Ctrl+/ 预览" : "Ctrl+/ 返回编辑"}</span>
             )}
+            {dirty && (
+              <span className="item st-danger">
+                <CircleAlert aria-hidden="true" />
+                未保存
+              </span>
+            )}
             <span className="grow" />
             {refreshing ? (
               <span className="item">
@@ -998,13 +1227,49 @@ export function App({ transport }: { transport: Transport }) {
           </>
         )}
         {notice && (
-          <span className="item st-danger">
+          <span className={notice.startsWith("已保存") ? "item st-ok" : "item st-danger"}>
             <CircleAlert aria-hidden="true" />
             {notice}
           </span>
         )}
         <ReadyBadge state={ready} />
       </footer>
+      {unsavedOpen && (
+        <UnsavedDialog
+          saving={saving}
+          error={unsavedError}
+          onSave={() => void save()}
+          onDiscard={discardChanges}
+          onCancel={() => {
+            pendingAction.current = null;
+            setUnsavedOpen(false);
+            setUnsavedError(null);
+          }}
+        />
+      )}
+      {conflict && (
+        <SaveConflictDialog
+          kind={conflict.kind}
+          message={conflict.message}
+          saving={saving}
+          error={saveError}
+          onSaveAs={() => {
+            void (async () => {
+              if (await saveBufferAs()) continuePending();
+            })();
+          }}
+          onForce={() => {
+            void (async () => {
+              if (await saveBuffer(true)) continuePending();
+            })();
+          }}
+          onCancel={() => {
+            pendingAction.current = null;
+            setConflict(null);
+            setSaveError(null);
+          }}
+        />
+      )}
       {settingsOpen && (
         <SettingsDialog
           startup={settings.startup}

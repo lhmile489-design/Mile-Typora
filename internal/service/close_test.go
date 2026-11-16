@@ -13,7 +13,7 @@ func TestCloseWindowClosesTheCallingWindow(t *testing.T) {
 		closed = id
 		return nil
 	}
-	if err := s.CloseWindow(context.Background()); err != nil {
+	if err := s.CloseWindow(context.Background(), false); err != nil {
 		t.Fatalf("CloseWindow: %v", err)
 	}
 	if closed != 5 {
@@ -23,7 +23,7 @@ func TestCloseWindowClosesTheCallingWindow(t *testing.T) {
 
 func TestCloseWindowRefusesAnUnregisteredWindow(t *testing.T) {
 	s, _ := newTestService(6, false)
-	err := s.CloseWindow(context.Background())
+	err := s.CloseWindow(context.Background(), false)
 	if !errors.Is(err, ErrWindowNotOpen) {
 		t.Fatalf("error = %v, want ErrWindowNotOpen", err)
 	}

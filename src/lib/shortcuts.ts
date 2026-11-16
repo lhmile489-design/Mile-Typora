@@ -7,6 +7,7 @@ export type Command =
   | "open-file"
   | "open-folder"
   | "new-window"
+  | "new-document"
   | "find"
   | "refresh"
   | "close-window"
@@ -14,6 +15,7 @@ export type Command =
   | "toggle-left"
   | "toggle-source"
   | "save-blocked"
+  | "save-as"
   | "dismiss";
 
 /** The keyboard fields the table reads. */
@@ -54,10 +56,12 @@ export function commandFor(e: KeyPress): Command | null {
   if (!shift && key === "o") return "open-file";
   if (shift && key === "o") return "open-folder";
   if (shift && key === "n") return "new-window";
+  if (!shift && key === "n") return "new-document";
   if (!shift && key === "f") return "find";
   if (!shift && key === "w") return "close-window";
   if (!shift && key === "s") return "save-blocked";
   if (!shift && key === "/") return "toggle-source";
+  if (shift && key === "s") return "save-as";
   if (!shift && key === ",") return "settings";
   if (shift && key === "l") return "toggle-left";
   return null;
@@ -68,6 +72,7 @@ export const SHORTCUT_HINT: Partial<Record<Command, string>> = {
   "open-file": "Ctrl+O",
   "open-folder": "Ctrl+Shift+O",
   "new-window": "Ctrl+Shift+N",
+  "new-document": "Ctrl+N",
   find: "Ctrl+F",
   refresh: "F5",
   "close-window": "Ctrl+W",
@@ -75,4 +80,5 @@ export const SHORTCUT_HINT: Partial<Record<Command, string>> = {
   "toggle-left": "Ctrl+Shift+L",
   "toggle-source": "Ctrl+/",
   "save-blocked": "Ctrl+S",
+  "save-as": "Ctrl+Shift+S",
 };
