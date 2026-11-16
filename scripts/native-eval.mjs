@@ -16,7 +16,9 @@
 const args = process.argv.slice(2);
 const portArg = args.find((a) => a.startsWith("--port="));
 const port = portArg ? portArg.slice("--port=".length) : "9222";
-const expression = args.filter((a) => !a.startsWith("--port=")).join(" ");
+const indexArg = args.find((a) => a.startsWith("--index="));
+const index = indexArg ? Number(indexArg.slice("--index=".length)) : 0;
+const expression = args.filter((a) => !a.startsWith("--port=") && !a.startsWith("--index=")).join(" ");
 
 if (!expression) {
   console.error("usage: node scripts/native-eval.mjs [--port=9222] <expression>");
@@ -24,7 +26,8 @@ if (!expression) {
 }
 
 const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then((r) => r.json());
-const page = targets.find((t) => t.type === "page" && t.webSocketDebuggerUrl);
+const pages = targets.filter((t) => t.type === "page" && t.webSocketDebuggerUrl);
+const page = pages[index] ?? pages[0];
 if (!page) {
   console.error(`no page target on port ${port}; is the window running with the debug port?`);
   process.exit(1);

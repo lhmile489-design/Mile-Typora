@@ -36,6 +36,7 @@ import { SaveAllDialog } from "../components/SaveAllDialog";
 import { MenuBar, type MenuGroup } from "../components/MenuBar";
 import { RecentDialog } from "../components/RecentDialog";
 import { HelpDialog } from "../components/HelpDialog";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { SettingsDialog } from "../components/SettingsDialog";
 import { UnsavedDialog } from "../components/UnsavedDialog";
 import { FindBar } from "../components/FindBar";
@@ -53,6 +54,11 @@ type ReadyState =
 
 type LoadError = { code: string; message: string; kind: "file" | "folder" };
 type ViewMode = "reading" | "editing" | "preview";
+type ExternalChange = {
+  kind: "changed" | "deleted" | "unreadable";
+  message: string;
+  doc: OpenedDoc | null;
+};
 
 /**
  * The window shell, laid out after artboard 2 of the design draft
@@ -240,12 +246,23 @@ export function App({ transport }: { transport: Transport }) {
   const saveAllConflict = useRef<number | null>(null);
   const pendingAction = useRef<(() => void) | null>(null);
   const editorRef = useRef<SourceCommands | null>(null);
-  const dirty = mode !== "reading" && buffer !== savedText;
   const untitledCount = useRef(0);
   const [loadError, setLoadError] = useState<LoadError | null>(null);
   // stale is why the content on screen may no longer match its file; the
   // document stays until a refresh succeeds (PRD FR-07.5, FR-07.11).
   const [stale, setStale] = useState<string | null>(null);
+  const [externalChange, setExternalChange] = useState<ExternalChange | null>(null);
+  const [reloadOpen, setReloadOpen] = useState(false);
+  // A deleted or unreadable file leaves the buffer without a writable target;
+  // treat it as unsaved even when its text still matches the last saved copy.
+  const [externalLost, setExternalLost] = useState(false);
+  const externalChangeRef = useRef(false);
+  externalChangeRef.current = externalChange !== null;
+  const reloadOpenRef = useRef(false);
+  reloadOpenRef.current = reloadOpen;
+  // Guards a preview render that can finish after another external reload.
+  const previewToken = useRef(0);
+  const dirty = mode !== "reading" && (buffer !== savedText || externalLost);
   const [refreshing, setRefreshing] = useState(false);
   // updatedAt is the status bar's "已更新 14:32" (DESIGN.md §8.8).
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
@@ -442,6 +459,9 @@ export function App({ transport }: { transport: Transport }) {
       counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
     };
     setDoc(untitled);
+    setExternalChange(null);
+    setReloadOpen(false);
+    setExternalLost(false);
     setBuffer("");
     setSavedText("");
     setMode("editing");
@@ -459,14 +479,57 @@ export function App({ transport }: { transport: Transport }) {
     return transport.onNotice((notice) => setNotice(notice.text));
   }, [transport]);
 
-  // A change outside the app replaces the document, or marks it stale when
-  // the file cannot be read any more (PRD FR-07.1, FR-07.5, FR-07.11).
+  const applyExternalDoc = useCallback(
+    (next: OpenedDoc) => {
+      setDoc(next);
+      setBuffer(next.text);
+      setSavedText(next.text);
+      dirtyRef.current = false;
+      setStale(null);
+      setLoadError(null);
+      setUpdatedAt(nowHM());
+      setExternalChange(null);
+      setReloadOpen(false);
+      setExternalLost(false);
+      if (modeRef.current === "preview") {
+        const token = ++previewToken.current;
+        void transport.renderSource(next.text).then((result) => {
+          if (result.kind === "ok" && modeRef.current === "preview" && token === previewToken.current) {
+            setPreview({ html: result.html, counts: result.counts });
+          }
+        });
+      }
+    },
+    [transport],
+  );
+
+  // A change outside the app replaces a clean document, or asks the editor
+  // what to do when the local buffer is dirty (P1 §6, AC-08).
   useEffect(() => {
     return transport.onDocUpdated((update: DocUpdate) => {
       if (update.seq <= updateSeq.current) return;
       updateSeq.current = update.seq;
       if (modeRef.current !== "reading") {
-        setNotice("编辑中，外部修改暂未应用");
+        if (update.failure) {
+          if (!docRef.current) return;
+          setExternalLost(true);
+          setExternalChange({
+            kind: update.failure.code === "not_found" ? "deleted" : "unreadable",
+            message: failureText(update.failure),
+            doc: null,
+          });
+          return;
+        }
+        if (!update.doc) return;
+        if (!dirtyRef.current) {
+          applyExternalDoc(update.doc);
+          return;
+        }
+        setExternalChange({
+          kind: "changed",
+          message: "文件已在外部修改。保存时仍会按冲突流程处理。",
+          doc: update.doc,
+        });
         return;
       }
       if (update.failure) {
@@ -482,7 +545,7 @@ export function App({ transport }: { transport: Transport }) {
       setLoadError(null);
       setUpdatedAt(nowHM());
     });
-  }, [captureHere, transport]);
+  }, [applyExternalDoc, captureHere, transport]);
 
   // The settings and the recent list (PRD FR-08, FR-10).
   const loadSettings = useCallback(async () => {
@@ -520,6 +583,9 @@ export function App({ transport }: { transport: Transport }) {
         case "file":
           rememberHere();
           setDoc(result.doc);
+          setExternalChange(null);
+          setReloadOpen(false);
+          setExternalLost(false);
           setMode("reading");
           setBuffer(result.doc.text);
           setSavedText(result.doc.text);
@@ -684,6 +750,9 @@ export function App({ transport }: { transport: Transport }) {
     const result = await transport.openFile();
     if (result.kind === "loaded") {
       setDoc(result.doc);
+      setExternalChange(null);
+      setReloadOpen(false);
+      setExternalLost(false);
       setMode("reading");
       setBuffer(result.doc.text);
       setSavedText(result.doc.text);
@@ -756,6 +825,9 @@ export function App({ transport }: { transport: Transport }) {
     if (result.kind === "loaded") {
       captureHere();
       setDoc(result.doc);
+      setExternalChange(null);
+      setReloadOpen(false);
+      setExternalLost(false);
       setStale(null);
       setLoadError(null);
       setUpdatedAt(nowHM());
@@ -777,6 +849,9 @@ export function App({ transport }: { transport: Transport }) {
       return;
     }
     setDoc(null);
+    setExternalChange(null);
+    setReloadOpen(false);
+    setExternalLost(false);
     setStale(null);
     setLoadError(null);
     setSelected(null);
@@ -851,8 +926,9 @@ export function App({ transport }: { transport: Transport }) {
 
   // M4-2: the buffer is saved through the window's file, or through Save As
   // when it has none. A conflict opens the explicit overwrite prompt.
-  const applySaved = useCallback((result: Extract<SaveOutcome, { kind: "saved" }>) => {
-    const text = bufferRef.current;
+  // text is the exact buffer sent to disk; typing during the save keeps the
+  // newer buffer dirty instead of being marked saved.
+  const applySaved = useCallback((result: Extract<SaveOutcome, { kind: "saved" }>, text: string) => {
     setDoc((prev) =>
       prev
         ? {
@@ -868,9 +944,12 @@ export function App({ transport }: { transport: Transport }) {
         : prev,
     );
     setSavedText(text);
-    dirtyRef.current = false;
+    dirtyRef.current = bufferRef.current !== text;
+    setExternalChange(null);
+    setReloadOpen(false);
+    setExternalLost(false);
     setUpdatedAt(nowHM());
-    setNotice("已保存");
+    setNotice(bufferRef.current === text ? "已保存" : "已保存磁盘版本，保存期间的新修改尚未写入");
   }, []);
 
   const saveBufferAs = useCallback(async (): Promise<boolean> => {
@@ -878,11 +957,12 @@ export function App({ transport }: { transport: Transport }) {
     savingRef.current = true;
     setSaving(true);
     setSaveError(null);
-    const result = await transport.saveDocumentAs(bufferRef.current);
+    const text = bufferRef.current;
+    const result = await transport.saveDocumentAs(text);
     savingRef.current = false;
     setSaving(false);
     if (result.kind === "saved") {
-      applySaved(result);
+      applySaved(result, text);
       return true;
     }
     if (result.kind === "cancelled") return false;
@@ -898,11 +978,12 @@ export function App({ transport }: { transport: Transport }) {
       savingRef.current = true;
       setSaving(true);
       setSaveError(null);
-      const result = await transport.saveDocument(bufferRef.current, force);
+      const text = bufferRef.current;
+      const result = await transport.saveDocument(text, force);
       savingRef.current = false;
       setSaving(false);
       if (result.kind === "saved") {
-        applySaved(result);
+        applySaved(result, text);
         return true;
       }
       if (result.kind === "cancelled") return false;
@@ -938,11 +1019,12 @@ export function App({ transport }: { transport: Transport }) {
       savingRef.current = true;
       setSaving(true);
       setSaveError(null);
-      const result = await transport.saveDocumentAs(bufferRef.current);
+      const text = bufferRef.current;
+      const result = await transport.saveDocumentAs(text);
       savingRef.current = false;
       setSaving(false);
       if (result.kind === "saved") {
-        applySaved(result);
+        applySaved(result, text);
         await reportSaveAll(requestId, "saved", "", result.name);
         return;
       }
@@ -964,11 +1046,12 @@ export function App({ transport }: { transport: Transport }) {
       savingRef.current = true;
       setSaving(true);
       setSaveError(null);
-      const result = await transport.saveDocument(bufferRef.current, true);
+      const text = bufferRef.current;
+      const result = await transport.saveDocument(text, true);
       savingRef.current = false;
       setSaving(false);
       if (result.kind === "saved") {
-        applySaved(result);
+        applySaved(result, text);
         await reportSaveAll(requestId, "saved", "", result.name);
         return;
       }
@@ -979,7 +1062,7 @@ export function App({ transport }: { transport: Transport }) {
 
   const saveAllStep = useCallback(
     async (requestId: number) => {
-      if (unsavedOpenRef.current || conflictOpenRef.current) {
+      if (unsavedOpenRef.current || conflictOpenRef.current || externalChangeRef.current || reloadOpenRef.current) {
         await reportSaveAll(requestId, "unhandled", "窗口有未处理的保存提示");
         return;
       }
@@ -994,11 +1077,12 @@ export function App({ transport }: { transport: Transport }) {
       savingRef.current = true;
       setSaving(true);
       setSaveError(null);
-      const result = await transport.saveDocument(bufferRef.current, false);
+      const text = bufferRef.current;
+      const result = await transport.saveDocument(text, false);
       savingRef.current = false;
       setSaving(false);
       if (result.kind === "saved") {
-        applySaved(result);
+        applySaved(result, text);
         await reportSaveAll(requestId, "saved", "", result.name);
         return;
       }
@@ -1022,7 +1106,7 @@ export function App({ transport }: { transport: Transport }) {
   );
 
   const startSaveAll = useCallback(async () => {
-    if (saveAllRunning || savingRef.current || unsavedOpenRef.current || conflictOpenRef.current) return;
+    if (saveAllRunning || savingRef.current || unsavedOpenRef.current || conflictOpenRef.current || externalChangeRef.current || reloadOpenRef.current) return;
     setSaveAllRunning(true);
     setNotice("正在保存全部…");
     if (saveAllTimer.current !== null) window.clearTimeout(saveAllTimer.current);
@@ -1077,6 +1161,7 @@ export function App({ transport }: { transport: Transport }) {
       setBuffer(current.text);
       setSavedText(current.text);
     }
+    setExternalLost(false);
     dirtyRef.current = false;
     continuePending();
   }, [continuePending]);
@@ -1350,7 +1435,7 @@ export function App({ transport }: { transport: Transport }) {
       if (e.defaultPrevented) return;
       const command = commandFor(e);
       if (!command) return;
-      if ((settingsOpen || unsavedOpen || conflict !== null || saveAllSummary !== null || recentOpen || helpKind !== null) && command !== "dismiss") return;
+      if ((settingsOpen || unsavedOpen || conflict !== null || reloadOpen || saveAllSummary !== null || recentOpen || helpKind !== null) && command !== "dismiss") return;
       const editorAction = EDITOR_ACTIONS[command];
       if (editorAction) {
         const active = document.activeElement;
@@ -1466,6 +1551,7 @@ export function App({ transport }: { transport: Transport }) {
     settingsOpen,
     unsavedOpen,
     conflict,
+    reloadOpen,
     saveAllSummary,
     recentOpen,
     helpKind,
@@ -1581,6 +1667,32 @@ export function App({ transport }: { transport: Transport }) {
               onReplace={replaceFind}
               onReplaceAll={replaceAllFind}
             />
+          )}
+          {doc && externalChange && mode !== "reading" && (
+            <div className="stale-banner external-banner" role="alert">
+              <CircleAlert aria-hidden="true" />
+              <span className="txt">{externalChange.message}</span>
+              {externalChange.kind === "changed" && (
+                <button className="btn text" type="button" disabled={saving} onClick={() => setReloadOpen(true)}>
+                  重新载入磁盘版本…
+                </button>
+              )}
+              <button
+                className="btn text"
+                type="button"
+                disabled={saving}
+                onClick={() => {
+                  void (async () => {
+                    if (await saveBufferAs()) setExternalChange(null);
+                  })();
+                }}
+              >
+                另存为
+              </button>
+              <button className="btn text" type="button" onClick={() => setExternalChange(null)}>
+                保留当前编辑
+              </button>
+            </div>
           )}
           {doc && stale && mode === "reading" && (
             <div className="stale-banner" role="alert">
@@ -1791,6 +1903,17 @@ export function App({ transport }: { transport: Transport }) {
             setSaveError(null);
             if (request !== null) void reportSaveAll(request, "unhandled", "已取消保存");
           }}
+        />
+      )}
+      {reloadOpen && externalChange?.doc && (
+        <ConfirmDialog
+          title="重新载入磁盘版本？"
+          message="本地尚未保存的修改将丢失。此操作不能用 Ctrl+Z 撤销。"
+          confirmLabel="重新载入"
+          onConfirm={() => {
+            if (externalChange.doc) applyExternalDoc(externalChange.doc);
+          }}
+          onCancel={() => setReloadOpen(false)}
         />
       )}
       {saveAllSummary && (

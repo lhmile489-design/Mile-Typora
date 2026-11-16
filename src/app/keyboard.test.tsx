@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App } from "./App";
-import type { Transport } from "../lib/transport";
+import type { DocUpdate, SaveOutcome, Transport } from "../lib/transport";
 
 afterEach(cleanup);
 
@@ -725,6 +725,259 @@ describe("keyboard commands", () => {
     });
     expect(await screen.findByRole("dialog", { name: "保存全部" })).toBeTruthy();
     expect(screen.getByText("已保存 1 个，失败 0 个，未处理 0 个。")).toBeTruthy();
+  });
+
+  it("keeps local edits and offers reload or keep for an external change", async () => {
+    let docListener: ((update: DocUpdate) => void) | null = null;
+    const doc = {
+      name: "笔记.md",
+      path: "E:/notes/笔记.md",
+      size: 6,
+      hasBom: false,
+      lineEnding: "LF",
+      hash: "",
+      text: "正文",
+      html: "<h1>正文</h1>",
+      counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
+    };
+    const external = { ...doc, hash: "outside", text: "# 外部\n", html: "<h1>外部</h1>" };
+    render(
+      <App
+        transport={fakeTransport({
+          openFile: async () => ({ kind: "loaded" as const, doc }),
+          onDocUpdated: (listener) => {
+            docListener = listener;
+            return () => {};
+          },
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "正文" });
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    content.focus();
+    fireEvent.keyDown(content, { key: "1", ctrlKey: true });
+    await waitFor(() => expect(content.textContent).toContain("# 正文"));
+
+    await act(async () => {
+      docListener?.({ seq: 1, doc: external });
+    });
+    expect(await screen.findByText("文件已在外部修改。保存时仍会按冲突流程处理。")).toBeTruthy();
+    expect(content.textContent).toContain("# 正文");
+
+    fireEvent.click(screen.getByRole("button", { name: "保留当前编辑" }));
+    await waitFor(() => expect(screen.queryByText("文件已在外部修改。保存时仍会按冲突流程处理。")).toBeNull());
+    expect(content.textContent).toContain("# 正文");
+
+    await act(async () => {
+      docListener?.({ seq: 2, doc: external });
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "重新载入磁盘版本…" }));
+    fireEvent.click(await screen.findByRole("button", { name: "重新载入" }));
+    await waitFor(() => expect(content.textContent).toContain("# 外部"));
+    expect(content.textContent).not.toContain("# 正文");
+
+    await act(async () => {
+      docListener?.({ seq: 3, doc: { ...external, hash: "outside2", text: "# 外部2\n" } });
+    });
+    await waitFor(() => expect(content.textContent).toContain("# 外部2"));
+
+    fireEvent.keyDown(content, { key: "1", ctrlKey: true });
+    await act(async () => {
+      docListener?.({
+        seq: 4,
+        failure: { code: "not_found", detail: "文件已被删除" },
+      });
+    });
+    expect(await screen.findByText("文件已被删除", {}, { timeout: 2000 })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "重新载入磁盘版本…" })).toBeNull();
+  });
+
+  it("keeps the buffer and shows the reason when saving fails", async () => {
+    const doc = {
+      name: "笔记.md",
+      path: "E:/notes/笔记.md",
+      size: 6,
+      hasBom: false,
+      lineEnding: "LF",
+      hash: "",
+      text: "正文",
+      html: "<h1>正文</h1>",
+      counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
+    };
+    render(
+      <App
+        transport={fakeTransport({
+          openFile: async () => ({ kind: "loaded" as const, doc }),
+          saveDocument: async () => ({
+            kind: "failed" as const,
+            code: "save_failed",
+            message: "保存失败，文件可能被占用或没有写入权限",
+          }),
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "正文" });
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    content.focus();
+    fireEvent.keyDown(content, { key: "1", ctrlKey: true });
+    await waitFor(() => expect(content.textContent).toContain("# 正文"));
+
+    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+    expect(await screen.findByText("保存失败，文件可能被占用或没有写入权限")).toBeTruthy();
+    expect(screen.getByText("未保存")).toBeTruthy();
+    expect(content.textContent).toContain("# 正文");
+    expect(screen.queryByText("已保存")).toBeNull();
+  });
+
+  it("keeps typing during a save dirty instead of marking it saved", async () => {
+    let finishSave: ((outcome: SaveOutcome) => void) | null = null;
+    const saveDocument = vi.fn(
+      () =>
+        new Promise<SaveOutcome>((resolve) => {
+          finishSave = resolve;
+        }),
+    );
+    const doc = {
+      name: "笔记.md",
+      path: "E:/notes/笔记.md",
+      size: 6,
+      hasBom: false,
+      lineEnding: "LF",
+      hash: "",
+      text: "正文",
+      html: "<h1>正文</h1>",
+      counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
+    };
+    render(
+      <App
+        transport={fakeTransport({
+          openFile: async () => ({ kind: "loaded" as const, doc }),
+          saveDocument,
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "正文" });
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    content.focus();
+    fireEvent.keyDown(content, { key: "1", ctrlKey: true });
+    await waitFor(() => expect(content.textContent).toContain("# 正文"));
+
+    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+    await waitFor(() => expect(saveDocument).toHaveBeenCalledWith("# 正文", false));
+    fireEvent.keyDown(content, { key: "2", ctrlKey: true });
+    await waitFor(() => expect(content.textContent).toContain("## 正文"));
+
+    await act(async () => {
+      finishSave?.({
+        kind: "saved",
+        path: "E:/notes/笔记.md",
+        name: "笔记.md",
+        size: 6,
+        hash: "saved-hash",
+        hasBom: false,
+        lineEnding: "LF",
+      });
+      await Promise.resolve();
+    });
+    expect(await screen.findByText("未保存")).toBeTruthy();
+    expect(content.textContent).toContain("## 正文");
+  });
+
+  it("reports a window with an external-change prompt as unhandled for save-all", async () => {
+    let docListener: ((update: DocUpdate) => void) | null = null;
+    let requestListener: ((requestId: number) => void) | null = null;
+    const reportSaveAll = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    const doc = {
+      name: "笔记.md",
+      path: "E:/notes/笔记.md",
+      size: 6,
+      hasBom: false,
+      lineEnding: "LF",
+      hash: "",
+      text: "正文",
+      html: "<h1>正文</h1>",
+      counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
+    };
+    render(
+      <App
+        transport={fakeTransport({
+          openFile: async () => ({ kind: "loaded" as const, doc }),
+          onDocUpdated: (listener) => {
+            docListener = listener;
+            return () => {};
+          },
+          onSaveAllRequest: (listener) => {
+            requestListener = listener;
+            return () => {};
+          },
+          reportSaveAll,
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "正文" });
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    content.focus();
+    fireEvent.keyDown(content, { key: "1", ctrlKey: true });
+    await waitFor(() => expect(content.textContent).toContain("# 正文"));
+
+    await act(async () => {
+      docListener?.({ seq: 1, doc: { ...doc, hash: "outside", text: "# 外部\n" } });
+    });
+    expect(await screen.findByText("文件已在外部修改。保存时仍会按冲突流程处理。")).toBeTruthy();
+
+    await act(async () => {
+      requestListener?.(9);
+    });
+    await waitFor(() =>
+      expect(reportSaveAll).toHaveBeenCalledWith(9, "笔记.md", "unhandled", "窗口有未处理的保存提示"),
+    );
+  });
+
+  it("keeps a deleted file marked unsaved after dismissing the banner", async () => {
+    let docListener: ((update: DocUpdate) => void) | null = null;
+    const doc = {
+      name: "笔记.md",
+      path: "E:/notes/笔记.md",
+      size: 6,
+      hasBom: false,
+      lineEnding: "LF",
+      hash: "",
+      text: "正文",
+      html: "<h1>正文</h1>",
+      counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
+    };
+    render(
+      <App
+        transport={fakeTransport({
+          openFile: async () => ({ kind: "loaded" as const, doc }),
+          onDocUpdated: (listener) => {
+            docListener = listener;
+            return () => {};
+          },
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "正文" });
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    expect(screen.queryByText("未保存")).toBeNull();
+
+    await act(async () => {
+      docListener?.({ seq: 1, failure: { code: "not_found", detail: "文件已被删除" } });
+    });
+    expect(await screen.findByText("文件已被删除")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "保留当前编辑" }));
+    await waitFor(() => expect(screen.queryByText("文件已被删除")).toBeNull());
+    expect(screen.getByText("未保存")).toBeTruthy();
   });
 
   it("closes the find bar with Escape before anything else", async () => {

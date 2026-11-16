@@ -459,10 +459,17 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, r
     const view = viewRef.current;
     if (!view || !stateCtor.current || !extensions.current) return;
     if (view.state.doc.toString() === value) return;
+    const previous = view.state.selection.main;
+    const scrollTop = view.scrollDOM.scrollTop;
+    const hadFocus = view.hasFocus;
     applying.current = true;
     view.setState(stateCtor.current.create({ doc: value, extensions: extensions.current }));
     applying.current = false;
-    view.focus();
+    const anchor = Math.min(previous.anchor, value.length);
+    const head = Math.min(previous.head, value.length);
+    view.dispatch({ selection: { anchor, head } });
+    view.scrollDOM.scrollTop = scrollTop;
+    if (hadFocus) view.focus();
   }, [value]);
 
   return <div className="source-editor" ref={host} />;
