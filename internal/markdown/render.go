@@ -22,8 +22,9 @@ import (
 	"github.com/yuin/goldmark/util"
 )
 
-// Timeout bounds one render (PRD §8.3).
-const Timeout = 8 * time.Second
+// Timeout bounds one render (PRD §8.3). A variable so a test can shrink it
+// and exercise the timeout path without waiting eight seconds.
+var Timeout = 8 * time.Second
 
 // Limits are the per-document bounds of PRD §8.3.
 const (

@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	xhtml "golang.org/x/net/html"
 )
@@ -398,5 +399,22 @@ func TestTaskListCheckboxesAreReadOnly(t *testing.T) {
 	html := render(t, "- [x] 完成\n- [ ] 未完成\n")
 	if strings.Count(html, `type="checkbox"`) != 2 || strings.Count(html, `disabled=""`) != 2 {
 		t.Fatalf("output = %s, want two disabled checkboxes", html)
+	}
+}
+
+func TestRenderTimesOut(t *testing.T) {
+	previous := Timeout
+	Timeout = time.Nanosecond
+	defer func() { Timeout = previous }()
+
+	renderer := New()
+	// Hold the renderer so the timeout, not a fast finish, is the only
+	// outcome the select can take.
+	renderer.mu.Lock()
+	defer renderer.mu.Unlock()
+
+	_, failure := renderer.Render(context.Background(), []byte("# x\n"), func(string) (string, string) { return "", "" })
+	if failure == nil || failure.Code != "render_timeout" {
+		t.Fatalf("failure = %+v, want render_timeout", failure)
 	}
 }
