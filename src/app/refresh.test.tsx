@@ -45,6 +45,8 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     clearRecent: async () => ({ ok: true as const, value: undefined }),
     newDocument: async () => ({ ok: true as const, value: 3 }),
     clearStartUntitled: async () => {},
+    readClipboardText: async () => ({ ok: true as const, value: "" }),
+    writeClipboardText: async () => ({ ok: true as const, value: undefined }),
     openRecent: async () => ({ kind: "handedOff" as const }),
     removeRecent: async () => ({ ok: true as const, value: undefined }),
     onThemeChange: () => () => {},

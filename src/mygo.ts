@@ -288,6 +288,14 @@ export const WindowService = {
   clearStartUntitled(): Promise<void> {
     return call("WindowService.ClearStartUntitled");
   },
+  /** ClipboardReadText returns the system clipboard's plain text (P1 EDIT-06). */
+  clipboardReadText(): Promise<string> {
+    return call("WindowService.ClipboardReadText");
+  },
+  /** ClipboardWriteText puts plain text on the system clipboard. */
+  clipboardWriteText(text: string): Promise<void> {
+    return call("WindowService.ClipboardWriteText", text);
+  },
   /**
    * CloseDocument drops the window's document: the page returns to its start
    * state and the watch ends. A folder stays open (PRD FR-07.5).

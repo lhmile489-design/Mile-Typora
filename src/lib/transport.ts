@@ -134,6 +134,10 @@ export interface Transport {
   saveDocument(text: string, force: boolean): Promise<SaveOutcome>;
   /** Asks for a path and writes the buffer there. */
   saveDocumentAs(text: string): Promise<SaveOutcome>;
+  /** Reads the system clipboard's plain text (P1 EDIT-06/11). */
+  readClipboardText(): Promise<Outcome<string>>;
+  /** Writes plain text to the system clipboard. */
+  writeClipboardText(text: string): Promise<Outcome<void>>;
   /** Tells Go whether the buffer is dirty and which version it started from. */
   setEditState(dirty: boolean, hash: string, hasBom: boolean, lineEnding: string): Promise<void>;
   /** Reads the settings and the recent list. */
@@ -277,6 +281,11 @@ export const mygoTransport: Transport = {
   clearStartUntitled: () => WindowService.clearStartUntitled(),
   saveDocument: async (text, force) => saveOutcome(() => WindowService.saveDocument(text, force)),
   saveDocumentAs: async (text) => saveOutcome(() => WindowService.saveDocumentAs(text)),
+  readClipboardText: () => wrap(() => WindowService.clipboardReadText()),
+  writeClipboardText: (text) =>
+    wrap(async () => {
+      await WindowService.clipboardWriteText(text);
+    }),
   setEditState: (dirty, hash, hasBom, lineEnding) =>
     WindowService.setEditState(dirty, hash, hasBom, lineEnding),
   getSettings: async () => {

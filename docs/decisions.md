@@ -341,3 +341,11 @@ M1 需验证：mermaid 12 的 `securityLevel: "strict"` 与 `%%{init}%%` 指令�
 - 新建：`NewDocument` 对空窗口复用、非空窗口新建；目标窗口 `ReadyInfo.startUntitled` 通过握手交给页面，页面创建未命名缓冲并 `clearStartUntitled`。新建不写盘，首次保存走另存为。
 - 自己保存产生的写事件会触发监听；`onFileEvent` 读当前文件哈希，与 `SetSavedHash` 相同就忽略，避免保存后误报外部修改。
 - **未完成**：保存全部的跨窗口编排与菜单入口没有做。它需要事件广播、各窗口回报与汇总，且没有菜单就无用户入口；按计划随 M4-7 菜单一起实现，M4-2 进度里明确标为部分完成，不写成已交付。
+
+### D-T41 · M4-3 剪贴板：走原生绑定，普通快捷键留给 WebView
+
+- 原生实现"粘贴为纯文本"时，页面调用 `navigator.clipboard.readText()` 会让 WebView2 打开一个 `edge://permission-request-dialog/` 权限页：编辑器失去焦点，页面内没有可点的允许按钮，后续按键全部失效。这不是可自动化的验收路径，也不能要求用户去处理一个内部页面。
+- 方案：Go 侧新增 `WindowService.ClipboardReadText` / `ClipboardWriteText`，内部用 mygo `Clipboard`；前端只经 `transport` 调用，`SourceEditor` 通过 `readClipboard` / `writeClipboard` props 注入，组件不直接依赖 transport，测试可替换。
+- 只在"复制为 Markdown"（`Ctrl+Shift+C`）与"粘贴为纯文本"（`Ctrl+Shift+V`）使用绑定。普通 `Ctrl+C` / `Ctrl+X` / `Ctrl+V` 保留 WebView 默认处理：键盘是用户手势，系统剪贴板可直接读写，也符合"粘贴按纯文本插入"；这样不改变用户已经熟悉的键位语义。
+- 页面用捕获阶段的 window 监听接管这两个组合键，避免 CodeMirror 的默认键位先处理；非编辑模式只提示"请在源码编辑模式复制 Markdown"，不静默吞键。粘贴写入用 `view.dispatch(replaceSelection)`，进入 CodeMirror 历史，一次粘贴一步撤销；撤回到保存基线后页面重新计算 `dirty=false` 并同步 `SetEditState`。
+- 原生验证：中文剪贴板往返、`Ctrl+X` + `Ctrl+Z`、`Ctrl+Y`、普通与纯文本粘贴各一次撤销均通过；复制出的内容与源文件逐字节一致。

@@ -27,6 +27,8 @@ describe("the P0 shortcut table", () => {
     ["l", { ctrlKey: true, shiftKey: true }, "toggle-left"],
     ["/", { ctrlKey: true }, "toggle-source"],
     ["s", { ctrlKey: true }, "save-blocked"],
+    ["c", { ctrlKey: true, shiftKey: true }, "copy-markdown"],
+    ["v", { ctrlKey: true, shiftKey: true }, "paste-plain"],
     ["Escape", {}, "dismiss"],
   ] as const)("%s with %o runs %s", (key, mods, command) => {
     expect(commandFor(press(key, mods))).toBe(command);

@@ -16,6 +16,8 @@ export type Command =
   | "toggle-source"
   | "save-blocked"
   | "save-as"
+  | "copy-markdown"
+  | "paste-plain"
   | "dismiss";
 
 /** The keyboard fields the table reads. */
@@ -62,6 +64,8 @@ export function commandFor(e: KeyPress): Command | null {
   if (!shift && key === "s") return "save-blocked";
   if (!shift && key === "/") return "toggle-source";
   if (shift && key === "s") return "save-as";
+  if (shift && key === "c") return "copy-markdown";
+  if (shift && key === "v") return "paste-plain";
   if (!shift && key === ",") return "settings";
   if (shift && key === "l") return "toggle-left";
   return null;
@@ -81,4 +85,6 @@ export const SHORTCUT_HINT: Partial<Record<Command, string>> = {
   "toggle-source": "Ctrl+/",
   "save-blocked": "Ctrl+S",
   "save-as": "Ctrl+Shift+S",
+  "copy-markdown": "Ctrl+Shift+C",
+  "paste-plain": "Ctrl+Shift+V",
 };

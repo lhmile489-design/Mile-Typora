@@ -1,11 +1,30 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useImperativeHandle, useRef } from "react";
 import type { EditorView } from "@codemirror/view";
+
+/** Commands the app and, later, the Edit menu call on the editor. */
+export type SourceCommands = {
+  focus(): void;
+  undo(): void;
+  redo(): void;
+  copy(): Promise<boolean>;
+  cut(): Promise<boolean>;
+  paste(): Promise<boolean>;
+  /** Copies the selected source; false when nothing is selected. */
+  copyMarkdown(): Promise<boolean>;
+  /** Pastes clipboard text at the selection, ignoring rich formatting. */
+  pastePlain(): Promise<boolean>;
+  selectionText(): string;
+};
 
 type Props = {
   /** The buffer the editor shows; changing it replaces the document. */
   value: string;
   /** Called on every user edit, with the whole buffer. */
   onChange: (value: string) => void;
+  /** Clipboard through the app's native binding, not the WebView permission. */
+  readClipboard: () => Promise<string | null>;
+  writeClipboard: (text: string) => Promise<boolean>;
+  ref?: React.Ref<SourceCommands>;
 };
 
 /**
@@ -13,19 +32,90 @@ type Props = {
  * when editing starts, so reading pays nothing for it. The buffer is the
  * editor's document; preview renders the same string through Go.
  */
-export function SourceEditor({ value, onChange }: Props) {
+export function SourceEditor({ value, onChange, readClipboard, writeClipboard, ref }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const valueRef = useRef(value);
   valueRef.current = value;
   const changeRef = useRef(onChange);
   changeRef.current = onChange;
+  const readClipboardRef = useRef(readClipboard);
+  readClipboardRef.current = readClipboard;
+  const writeClipboardRef = useRef(writeClipboard);
+  writeClipboardRef.current = writeClipboard;
   const applying = useRef(false);
+  const historyActions = useRef<{
+    undo: (view: EditorView) => boolean;
+    redo: (view: EditorView) => boolean;
+  } | null>(null);
+
+  useImperativeHandle(
+    ref,
+    (): SourceCommands => ({
+      focus() {
+        viewRef.current?.focus();
+      },
+      undo() {
+        const view = viewRef.current;
+        if (!view || !historyActions.current) return;
+        historyActions.current.undo(view);
+        view.focus();
+      },
+      redo() {
+        const view = viewRef.current;
+        if (!view || !historyActions.current) return;
+        historyActions.current.redo(view);
+        view.focus();
+      },
+      async copy() {
+        const view = viewRef.current;
+        if (!view) return false;
+        const text = selectedText(view);
+        if (text === "") return false;
+        return writeClipboardRef.current(text);
+      },
+      async cut() {
+        const view = viewRef.current;
+        if (!view) return false;
+        const text = selectedText(view);
+        if (text === "") return false;
+        const ok = await writeClipboardRef.current(text);
+        if (!ok) return false;
+        view.dispatch(view.state.replaceSelection(""));
+        view.focus();
+        return true;
+      },
+      async paste() {
+        return this.pastePlain();
+      },
+      async copyMarkdown() {
+        const view = viewRef.current;
+        if (!view) return false;
+        const text = selectedText(view);
+        if (text === "") return false;
+        return writeClipboardRef.current(text);
+      },
+      async pastePlain() {
+        const view = viewRef.current;
+        if (!view) return false;
+        const text = await readClipboardRef.current();
+        if (text === null || text === "") return false;
+        view.dispatch(view.state.replaceSelection(text));
+        view.focus();
+        return true;
+      },
+      selectionText() {
+        const view = viewRef.current;
+        return view ? selectedText(view) : "";
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     let alive = true;
     void (async () => {
-      const [{ EditorView, keymap, lineNumbers, drawSelection, highlightActiveLine }, { EditorState }, { defaultKeymap, history, historyKeymap }, { markdown }] =
+      const [{ EditorView, keymap, lineNumbers, drawSelection, highlightActiveLine }, { EditorState }, { defaultKeymap, history, historyKeymap, undo, redo }, { markdown }] =
         await Promise.all([
           import("@codemirror/view"),
           import("@codemirror/state"),
@@ -33,6 +123,7 @@ export function SourceEditor({ value, onChange }: Props) {
           import("@codemirror/lang-markdown"),
         ]);
       if (!alive || !host.current) return;
+      historyActions.current = { undo, redo };
 
       const theme = EditorView.theme({
         "&": {
@@ -109,4 +200,11 @@ export function SourceEditor({ value, onChange }: Props) {
   }, [value]);
 
   return <div className="source-editor" ref={host} />;
+}
+
+/** selectedText is the main selection's source text, or "". */
+function selectedText(view: EditorView): string {
+  const range = view.state.selection.main;
+  if (range.empty) return "";
+  return view.state.sliceDoc(range.from, range.to);
 }

@@ -26,6 +26,8 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     clearRecent: async () => ({ ok: true as const, value: undefined }),
     newDocument: async () => ({ ok: true as const, value: 3 }),
     clearStartUntitled: async () => {},
+    readClipboardText: async () => ({ ok: true as const, value: "" }),
+    writeClipboardText: async () => ({ ok: true as const, value: undefined }),
     openRecent: async () => ({ kind: "handedOff" as const }),
     removeRecent: async () => ({ ok: true as const, value: undefined }),
     onThemeChange: () => () => {},
@@ -400,6 +402,73 @@ describe("keyboard commands", () => {
 
     fireEvent.keyDown(window, { key: "/", ctrlKey: true });
     await waitFor(() => expect(screen.queryByText("预览")).toBeNull());
+  });
+
+  it("copies the selection as Markdown with Ctrl+Shift+C", async () => {
+    const doc = {
+      name: "笔记.md",
+      path: "E:/notes/笔记.md",
+      size: 32,
+      hasBom: false,
+      lineEnding: "LF",
+      hash: "",
+      text: "# 标题",
+      html: "<h1>标题</h1>",
+      counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
+    };
+    const writeClipboardText = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    render(
+      <App
+        transport={fakeTransport({
+          openFile: async () => ({ kind: "loaded" as const, doc }),
+          writeClipboardText,
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+
+    fireEvent.keyDown(content, { key: "a", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "c", ctrlKey: true, shiftKey: true });
+
+    await waitFor(() => expect(writeClipboardText).toHaveBeenCalledWith("# 标题"));
+    expect(await screen.findByText("已复制源码")).toBeTruthy();
+  });
+
+  it("pastes plain text from the native clipboard and undoes it in one step", async () => {
+    const doc = {
+      name: "笔记.md",
+      path: "E:/notes/笔记.md",
+      size: 32,
+      hasBom: false,
+      lineEnding: "LF",
+      hash: "",
+      text: "# 标题",
+      html: "<h1>标题</h1>",
+      counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
+    };
+    const readClipboardText = vi.fn(async () => ({ ok: true as const, value: "粘贴内容" }));
+    render(
+      <App
+        transport={fakeTransport({
+          openFile: async () => ({ kind: "loaded" as const, doc }),
+          readClipboardText,
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+
+    fireEvent.keyDown(content, { key: "a", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "v", ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(content.textContent).toContain("粘贴内容"));
+
+    fireEvent.keyDown(content, { key: "z", ctrlKey: true });
+    await waitFor(() => expect(content.textContent).toContain("# 标题"));
   });
 
   it("closes the find bar with Escape before anything else", async () => {

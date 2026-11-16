@@ -34,7 +34,7 @@ import { SaveConflictDialog } from "../components/SaveConflictDialog";
 import { SettingsDialog } from "../components/SettingsDialog";
 import { UnsavedDialog } from "../components/UnsavedDialog";
 import { FindBar } from "../components/FindBar";
-import { SourceEditor } from "../components/SourceEditor";
+import { SourceEditor, type SourceCommands } from "../components/SourceEditor";
 import { advance, clearHighlights, collectRanges, paint, scrollToRange } from "../render/find";
 import { capture, metricsOf, restore, type Position } from "../render/position";
 import { renderMath } from "../render/math";
@@ -72,6 +72,7 @@ export function App({ transport }: { transport: Transport }) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<{ kind: "conflict" | "missing"; message: string } | null>(null);
   const pendingAction = useRef<(() => void) | null>(null);
+  const editorRef = useRef<SourceCommands | null>(null);
   const dirty = mode !== "reading" && buffer !== savedText;
   const untitledCount = useRef(0);
   const [loadError, setLoadError] = useState<LoadError | null>(null);
@@ -974,10 +975,34 @@ export function App({ transport }: { transport: Transport }) {
           e.preventDefault();
           void saveAs();
           return;
+        case "copy-markdown":
+          e.preventDefault();
+          if (modeRef.current !== "editing") {
+            setNotice("请在源码编辑模式复制 Markdown");
+            return;
+          }
+          void (async () => {
+            const ok = await editorRef.current?.copyMarkdown();
+            setNotice(ok ? "已复制源码" : "先选择要复制的源码");
+          })();
+          return;
+        case "paste-plain":
+          e.preventDefault();
+          if (modeRef.current !== "editing") {
+            setNotice("请在源码编辑模式粘贴");
+            return;
+          }
+          void (async () => {
+            const ok = await editorRef.current?.pastePlain();
+            if (!ok) setNotice("无法读取剪贴板，请使用 Ctrl+V");
+          })();
+          return;
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Capture so an app shortcut wins over WebView/CodeMirror defaults;
+    // commands we do not own fall through untouched.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [
     closeFind,
     findOpen,
@@ -1100,7 +1125,16 @@ export function App({ transport }: { transport: Transport }) {
             </div>
           )}
           {mode === "editing" && doc ? (
-            <SourceEditor value={buffer} onChange={setBuffer} />
+            <SourceEditor
+              ref={editorRef}
+              value={buffer}
+              onChange={setBuffer}
+              readClipboard={async () => {
+                const result = await transport.readClipboardText();
+                return result.ok ? result.value : null;
+              }}
+              writeClipboard={async (text) => (await transport.writeClipboardText(text)).ok}
+            />
           ) : mode === "preview" && doc && preview ? (
             <Reader
               doc={{ ...doc, html: preview.html, text: buffer, counts: preview.counts }}
