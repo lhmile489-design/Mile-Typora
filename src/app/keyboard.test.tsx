@@ -502,6 +502,34 @@ describe("keyboard commands", () => {
     expect(content.textContent).not.toContain("## 正文");
   });
 
+  it("toggles bold from a keyboard shortcut and undoes it", async () => {
+    const doc = {
+      name: "笔记.md",
+      path: "E:/notes/笔记.md",
+      size: 6,
+      hasBom: false,
+      lineEnding: "LF",
+      hash: "",
+      text: "正文",
+      html: "<h1>正文</h1>",
+      counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
+    };
+    render(<App transport={fakeTransport({ openFile: async () => ({ kind: "loaded" as const, doc }) })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "正文" });
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    content.focus();
+
+    fireEvent.keyDown(content, { key: "a", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "b", ctrlKey: true });
+    await waitFor(() => expect(content.textContent).toContain("**正文**"));
+
+    fireEvent.keyDown(content, { key: "z", ctrlKey: true });
+    await waitFor(() => expect(content.textContent).toContain("正文"));
+    expect(content.textContent).not.toContain("**正文**");
+  });
+
   it("does not run paragraph commands in preview", async () => {
     const doc = {
       name: "笔记.md",

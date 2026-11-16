@@ -40,6 +40,14 @@ describe("the P0 shortcut table", () => {
     ["]", { ctrlKey: true, shiftKey: true }, "unordered-list"],
     ["}", { ctrlKey: true, shiftKey: true }, "unordered-list"],
     ["x", { ctrlKey: true, shiftKey: true }, "task-list"],
+    ["b", { ctrlKey: true }, "bold"],
+    ["i", { ctrlKey: true }, "italic"],
+    ["k", { ctrlKey: true }, "link"],
+    ["`", { ctrlKey: true, shiftKey: true }, "inline-code"],
+    ["~", { ctrlKey: true, shiftKey: true }, "inline-code"],
+    ["\\", { ctrlKey: true }, "clear-format"],
+    ["5", { altKey: true, shiftKey: true }, "strikethrough"],
+    ["%", { altKey: true, shiftKey: true }, "strikethrough"],
     ["c", { ctrlKey: true, shiftKey: true }, "copy-markdown"],
     ["v", { ctrlKey: true, shiftKey: true }, "paste-plain"],
     ["Escape", {}, "dismiss"],
@@ -60,6 +68,10 @@ describe("the P0 shortcut table", () => {
     expect(commandFor(press("=", { ctrlKey: true, shiftKey: true }))).toBeNull();
     expect(commandFor(press("-", { ctrlKey: true, shiftKey: true }))).toBeNull();
     expect(commandFor(press("1", { ctrlKey: true, shiftKey: true }))).toBeNull();
+    expect(commandFor(press("b", { ctrlKey: true, shiftKey: true }))).toBeNull();
+    expect(commandFor(press("i", { ctrlKey: true, shiftKey: true }))).toBeNull();
+    expect(commandFor(press("`", { ctrlKey: true }))).toBeNull();
+    expect(commandFor(press("5", { altKey: true }))).toBeNull();
     // Task status, list indent, inserted paragraphs and rules are menu-only.
     expect(commandFor(press("t", { ctrlKey: true, shiftKey: true }))).toBeNull();
     expect(commandFor(press("ArrowUp", { ctrlKey: true, altKey: true }))).toBeNull();

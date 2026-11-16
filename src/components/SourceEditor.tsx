@@ -4,6 +4,7 @@ import type { AnnotationType, Extension } from "@codemirror/state";
 import type { HeadingLevel, ParagraphEdit, Snapshot } from "../editor/paragraph";
 
 type ParagraphModule = typeof import("../editor/paragraph");
+type InlineModule = typeof import("../editor/inline");
 
 /** Commands the app and, later, the Edit menu call on the editor. */
 export type SourceCommands = {
@@ -37,6 +38,13 @@ export type SourceCommands = {
   insertHorizontalRule(): boolean;
   insertFormulaBlock(): boolean;
   insertCodeBlock(language?: string): boolean;
+  /** Inline formatting (P1 FORMAT-01/02/04/05/07/10). */
+  toggleBold(): boolean;
+  toggleItalic(): boolean;
+  toggleInlineCode(): boolean;
+  toggleStrikethrough(): boolean;
+  insertLink(): boolean;
+  clearFormatting(): boolean;
 };
 
 type Props = {
@@ -72,6 +80,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, r
     redo: (view: EditorView) => boolean;
   } | null>(null);
   const paragraph = useRef<ParagraphModule | null>(null);
+  const inline = useRef<InlineModule | null>(null);
   const isolateHistory = useRef<AnnotationType<"after" | "before" | "full"> | null>(null);
   const stateCtor = useRef<typeof import("@codemirror/state").EditorState | null>(null);
   const extensions = useRef<Extension[] | null>(null);
@@ -107,6 +116,15 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, r
   const runParagraph = (transform: (mod: ParagraphModule, snapshot: Snapshot) => ParagraphEdit): boolean => {
     const view = viewRef.current;
     const mod = paragraph.current;
+    if (!view || !mod) return false;
+    const range = view.state.selection.main;
+    return applyEdit(transform(mod, { text: view.state.doc.toString(), anchor: range.anchor, head: range.head }));
+  };
+
+  /** runInline is the same contract for the inline formatting transforms. */
+  const runInline = (transform: (mod: InlineModule, snapshot: Snapshot) => ParagraphEdit): boolean => {
+    const view = viewRef.current;
+    const mod = inline.current;
     if (!view || !mod) return false;
     const range = view.state.selection.main;
     return applyEdit(transform(mod, { text: view.state.doc.toString(), anchor: range.anchor, head: range.head }));
@@ -213,6 +231,24 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, r
       insertCodeBlock(language) {
         return runParagraph((mod, snapshot) => mod.insertFence(snapshot, "code", language));
       },
+      toggleBold() {
+        return runInline((mod, snapshot) => mod.toggleEmphasis(snapshot, "bold"));
+      },
+      toggleItalic() {
+        return runInline((mod, snapshot) => mod.toggleEmphasis(snapshot, "italic"));
+      },
+      toggleInlineCode() {
+        return runInline((mod, snapshot) => mod.toggleCode(snapshot));
+      },
+      toggleStrikethrough() {
+        return runInline((mod, snapshot) => mod.toggleEmphasis(snapshot, "strikethrough"));
+      },
+      insertLink() {
+        return runInline((mod, snapshot) => mod.insertLink(snapshot));
+      },
+      clearFormatting() {
+        return runInline((mod, snapshot) => mod.clearFormatting(snapshot));
+      },
     }),
     [],
   );
@@ -226,17 +262,20 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, r
         { defaultKeymap, history, historyKeymap, undo, redo, isolateHistory: isolateHistoryType },
         { markdown },
         paragraphModule,
+        inlineModule,
       ] = await Promise.all([
         import("@codemirror/view"),
         import("@codemirror/state"),
         import("@codemirror/commands"),
         import("@codemirror/lang-markdown"),
         import("../editor/paragraph"),
+        import("../editor/inline"),
       ]);
       if (!alive || !host.current) return;
       historyActions.current = { undo, redo };
       isolateHistory.current = isolateHistoryType;
       paragraph.current = paragraphModule;
+      inline.current = inlineModule;
       stateCtor.current = EditorState;
 
       const theme = EditorView.theme({

@@ -33,6 +33,12 @@ export type Command =
   | "ordered-list"
   | "unordered-list"
   | "task-list"
+  | "bold"
+  | "italic"
+  | "inline-code"
+  | "strikethrough"
+  | "link"
+  | "clear-format"
   | "dismiss";
 
 /** The keyboard fields the table reads. */
@@ -68,6 +74,7 @@ export function commandFor(e: KeyPress): Command | null {
 
   if (!ctrl && !shift && !e.altKey && key === "F5") return "refresh";
   if (!ctrl && !shift && !e.altKey && key === "Escape") return "dismiss";
+  if (!ctrl && shift && e.altKey && !e.metaKey && (key === "5" || key === "%")) return "strikethrough";
   if (!ctrl) return null;
 
   if (!shift && key === "o") return "open-file";
@@ -91,6 +98,11 @@ export function commandFor(e: KeyPress): Command | null {
   if (shift && (key === "[" || key === "{")) return "ordered-list";
   if (shift && (key === "]" || key === "}")) return "unordered-list";
   if (shift && key === "x") return "task-list";
+  if (!shift && key === "b") return "bold";
+  if (!shift && key === "i") return "italic";
+  if (!shift && key === "k") return "link";
+  if (!shift && key === "\\") return "clear-format";
+  if (shift && (key === "`" || key === "~")) return "inline-code";
   if (!shift && key === ",") return "settings";
   if (shift && key === "l") return "toggle-left";
   return null;
@@ -127,4 +139,10 @@ export const SHORTCUT_HINT: Partial<Record<Command, string>> = {
   "ordered-list": "Ctrl+Shift+[",
   "unordered-list": "Ctrl+Shift+]",
   "task-list": "Ctrl+Shift+X",
+  bold: "Ctrl+B",
+  italic: "Ctrl+I",
+  "inline-code": "Ctrl+Shift+`",
+  strikethrough: "Alt+Shift+5",
+  link: "Ctrl+K",
+  "clear-format": "Ctrl+\\",
 };

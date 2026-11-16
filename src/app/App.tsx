@@ -72,6 +72,12 @@ const EDITOR_ACTIONS: Partial<Record<Command, (editor: SourceCommands) => boolea
   "ordered-list": (editor) => editor.toggleOrderedList(),
   "unordered-list": (editor) => editor.toggleUnorderedList(),
   "task-list": (editor) => editor.toggleTaskList(),
+  bold: (editor) => editor.toggleBold(),
+  italic: (editor) => editor.toggleItalic(),
+  "inline-code": (editor) => editor.toggleInlineCode(),
+  strikethrough: (editor) => editor.toggleStrikethrough(),
+  link: (editor) => editor.insertLink(),
+  "clear-format": (editor) => editor.clearFormatting(),
 };
 
 export function App({ transport }: { transport: Transport }) {
