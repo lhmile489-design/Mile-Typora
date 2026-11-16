@@ -1,0 +1,23 @@
+{
+  "skill_name": "mygo-app-scaffold",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "M1 开始了，在 Mile-Typora 仓库根目录用 mygo v0.9.0 建项目，加上 React。仓库里已经有 docs 和 CLAUDE.md。",
+      "expected_output": "先确认已授权 M1；检查 go/bun/mygo 版本；因目录非空，在临时目录 mygo init 后逐个复制、不覆盖已有文件、合并 .gitignore；模板字段只增不改；叠加 React（plugin-react、jsx 配置、main.tsx）保留 strictPort 与 watch.ignored；go mod tidy -> bun install -> mygo generate -> mygo dev；identifier 定稿不改。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "跑 mygo generate 报错：main.go:8:2: no required module provides package github.com/egoist/mygo。",
+      "expected_output": "go.mod 缺 require，先 go mod tidy 再 generate。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "mygo dev 打开后窗口白屏，终端显示 Vite 跑在 5174。",
+      "expected_output": "5173 被占用后 Vite 换了端口，devUrl 仍指 5173；设 strictPort: true，换一个固定端口并同时修改 vite.config.ts 与 mygo.config.ts 的 devUrl；不结束别人的进程。",
+      "files": []
+    }
+  ]
+}

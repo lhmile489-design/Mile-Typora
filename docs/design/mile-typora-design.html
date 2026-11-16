@@ -1,0 +1,1136 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mile Typora 设计稿 v1.0</title>
+<script>
+  // 防白闪：挂载前按偏好写入主题（与 DESIGN.md §1 一致）
+  (function () {
+    var pref = localStorage.getItem('mt-design-theme') || 'system';
+    var dark = pref === 'dark' || (pref === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  })();
+</script>
+<style>
+/* ==========================================================
+   设计令牌：与 DESIGN.md §2–§6 一一对应
+   ========================================================== */
+:root {
+  color-scheme: light;
+  /* 表面与线条 */
+  --bg-app: #FFFFFF;
+  --bg-chrome: #F6F6F7;
+  --bg-sunken: #F6F7F8;
+  --bg-inline-code: #F0F1F3;
+  --bg-raised: #FFFFFF;
+  --bg-hover: #EBECEE;
+  --bg-active: #E1E3E6;
+  --bg-selected: #E5EDFA;
+  --bg-overlay: rgba(17, 17, 17, 0.32);
+  --line: #E3E4E7;
+  --line-strong: #D0D2D6;
+  --line-input: #8C9099;
+  --quote-bar: #D0D2D6;
+  /* 文字 */
+  --text: #262626;
+  --text-strong: #111111;
+  --text-soft: #4F555D;
+  --text-muted: #636973;
+  --text-faint: #9A9EA6;
+  --text-on-accent: #FFFFFF;
+  /* 强调色 */
+  --accent: #1F64C8;
+  --accent-hover: #1A55AA;
+  --accent-soft: #E5EDFA;
+  --focus-ring: #1F64C8;
+  /* 状态色 */
+  --warn: #8A5300;     --warn-bg: #FFF5DC;
+  --danger: #B3261E;   --danger-bg: #FDEDEB;
+  --ok: #18742F;       --ok-bg: #E6F4EA;
+  --info: #1F64C8;     --info-bg: #E5EDFA;
+  /* 正文专用 */
+  --mark: #FFE48A;
+  --mark-current: #FFC266;
+  --syn-keyword: #CF222E;
+  --syn-string: #0A3069;
+  --syn-comment: #5C636C;
+  --syn-function: #8250DF;
+  --syn-number: #0550AE;
+  --syn-type: #953800;
+  --diagram-node: #F6F7F8;
+  --diagram-stroke: #8C9099;
+  --diagram-text: #262626;
+  --diagram-accent: #E5EDFA;
+  /* 字体 */
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --font-reading: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --font-heading: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --font-mono: "Cascadia Mono", "Cascadia Code", Consolas, "Microsoft YaHei UI", monospace;
+  --font-math: "Cambria Math", "Latin Modern Math", serif; /* 仅设计稿模拟 KaTeX 观感 */
+  /* 界面字阶 */
+  --ui-xs: 12px;  --ui-xs-lh: 16px;
+  --ui-sm: 13px;  --ui-sm-lh: 20px;
+  --ui-base: 14px; --ui-base-lh: 20px;
+  --ui-lg: 16px;  --ui-lg-lh: 24px;
+  --ui-xl: 20px;  --ui-xl-lh: 28px;
+  --read-size: 16px;
+  /* 间距 */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-12: 48px;
+  /* 布局 */
+  --toolbar-h: 44px;
+  --statusbar-h: 26px;
+  --sidebar-left-w: 240px;
+  --sidebar-right-w: 260px;
+  --content-max: 860px;
+  --content-pad-x: 48px;
+  --content-pad-top: 40px;
+  --tree-row-h: 28px;
+  --tree-indent: 16px;
+  --control-h: 32px;
+  --icon-sm: 16px;
+  --icon-md: 20px;
+  /* 圆角 */
+  --r-xs: 3px; --r-sm: 4px; --r-md: 6px; --r-lg: 8px; --r-pill: 999px;
+  /* 阴影（只给浮层） */
+  --shadow-1: 0 2px 8px rgba(0, 0, 0, 0.08), 0 0 0 1px var(--line-strong);
+  --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.14), 0 0 0 1px var(--line-strong);
+  /* 层级 */
+  --z-sticky: 10; --z-popover: 20; --z-overlay: 30; --z-dialog: 31; --z-toast: 40;
+  /* 动效 */
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* ---- 以下仅属于设计稿画布，不是应用令牌 ---- */
+  --draft-canvas: #E8E9EC;
+  --draft-titlebar: #F3F3F3;
+  --draft-close-hover: #C42B1C;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-app: #1C1D20;
+  --bg-chrome: #222327;
+  --bg-sunken: #26282C;
+  --bg-inline-code: #2C2E33;
+  --bg-raised: #2A2C31;
+  --bg-hover: #2E3035;
+  --bg-active: #36383E;
+  --bg-selected: #253447;
+  --bg-overlay: rgba(0, 0, 0, 0.5);
+  --line: #33363B;
+  --line-strong: #43464D;
+  --line-input: #6A6F79;
+  --quote-bar: #4A4E56;
+  --text: #D5D7DB;
+  --text-strong: #EEEFF1;
+  --text-soft: #AEB3BA;
+  --text-muted: #959AA3;
+  --text-faint: #6C717A;
+  --text-on-accent: #111418;
+  --accent: #78AEF5;
+  --accent-hover: #9AC3F8;
+  --accent-soft: #253447;
+  --focus-ring: #78AEF5;
+  --warn: #E8B84A;     --warn-bg: #3A2F14;
+  --danger: #FF8C82;   --danger-bg: #3F2120;
+  --ok: #5CC27A;       --ok-bg: #1C3324;
+  --info: #78AEF5;     --info-bg: #253447;
+  --mark: #6E5A12;
+  --mark-current: #7A4F0A;
+  --syn-keyword: #FF7B72;
+  --syn-string: #A5D6FF;
+  --syn-comment: #8B949E;
+  --syn-function: #D2A8FF;
+  --syn-number: #79C0FF;
+  --syn-type: #FFA657;
+  --diagram-node: #26282C;
+  --diagram-stroke: #6A6F79;
+  --diagram-text: #D5D7DB;
+  --diagram-accent: #253447;
+  --shadow-1: 0 2px 8px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--line-strong);
+  --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--line-strong);
+
+  --draft-canvas: #121315;
+  --draft-titlebar: #202020;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-fast: 0ms; --dur-base: 0ms; }
+}
+
+/* ==========================================================
+   设计稿画布
+   ========================================================== */
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--draft-canvas);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--ui-base);
+  line-height: var(--ui-base-lh);
+}
+.draft-head {
+  position: sticky; top: 0; z-index: var(--z-sticky);
+  display: flex; align-items: center; gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-8);
+  background: var(--bg-chrome);
+  border-bottom: 1px solid var(--line-strong);
+}
+.draft-head h1 { margin: 0; font: 600 var(--ui-lg)/var(--ui-lg-lh) var(--font-heading); color: var(--text-strong); }
+.draft-head nav { display: flex; gap: var(--sp-1); margin-left: var(--sp-4); }
+.draft-head nav a {
+  padding: var(--sp-1) var(--sp-2); border-radius: var(--r-sm);
+  color: var(--text-soft); text-decoration: none; font-size: var(--ui-sm);
+}
+.draft-head nav a:hover { background: var(--bg-hover); }
+.seg { margin-left: auto; display: inline-flex; padding: 2px; border-radius: var(--r-sm); background: var(--bg-active); }
+.seg button {
+  display: inline-flex; align-items: center; gap: var(--sp-1);
+  height: 28px; padding: 0 var(--sp-3); border: 0; border-radius: var(--r-xs);
+  background: transparent; color: var(--text-soft); font: inherit; font-size: var(--ui-sm); cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: var(--bg-app); color: var(--text-strong); box-shadow: 0 0 0 1px var(--line-strong); }
+.draft-main { padding: var(--sp-8); display: grid; gap: var(--sp-12); }
+.frame-title { margin: 0 0 var(--sp-1); font: 600 var(--ui-xl)/var(--ui-xl-lh) var(--font-heading); color: var(--text-strong); }
+.frame-desc { margin: 0 0 var(--sp-4); color: var(--text-muted); font-size: var(--ui-sm); max-width: 900px; }
+.frame-scroll { overflow-x: auto; padding-bottom: var(--sp-2); }
+
+/* ==========================================================
+   应用窗口
+   ========================================================== */
+.win {
+  width: 1280px; height: 830px;
+  display: flex; flex-direction: column;
+  background: var(--bg-app);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-2);
+}
+.win.narrow { width: 1000px; height: 700px; }
+.win.start { height: 720px; }
+
+/* 原生标题栏（系统绘制，设计稿中仅示意） */
+.titlebar {
+  flex: none; height: 30px; display: flex; align-items: center;
+  background: var(--draft-titlebar); color: var(--text); font-size: var(--ui-xs);
+  border-bottom: 1px solid var(--line);
+}
+.titlebar .app-ico { width: 16px; height: 16px; margin: 0 var(--sp-2) 0 var(--sp-3); color: var(--accent); }
+.titlebar .native-tag { margin-left: var(--sp-2); color: var(--text-faint); }
+.titlebar .caps { margin-left: auto; display: flex; height: 100%; }
+.titlebar .caps span { width: 46px; display: grid; place-items: center; color: var(--text); }
+.titlebar .caps span:last-child:hover { background: var(--draft-close-hover); color: #FFFFFF; }
+
+/* 工具栏 */
+.toolbar {
+  flex: none; height: var(--toolbar-h);
+  display: flex; align-items: center; gap: var(--sp-1);
+  padding: 0 var(--sp-2);
+  background: var(--bg-chrome);
+  border-bottom: 1px solid var(--line);
+}
+.toolbar .sep { width: 1px; height: 20px; background: var(--line); margin: 0 var(--sp-1); }
+.toolbar .spacer { flex: 1; }
+.tb {
+  height: var(--control-h); min-width: var(--control-h);
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 0 var(--sp-2); border: 0; border-radius: var(--r-sm);
+  background: transparent; color: var(--text-soft);
+  font: inherit; font-size: var(--ui-sm); cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.tb:hover { background: var(--bg-hover); }
+.tb:active { background: var(--bg-active); }
+.tb[aria-pressed="true"] { background: var(--bg-active); color: var(--text-strong); }
+.tb[aria-disabled="true"] { color: var(--text-faint); cursor: default; background: transparent; }
+.tb svg { width: var(--icon-md); height: var(--icon-md); }
+.tb.labeled svg { width: var(--icon-sm); height: var(--icon-sm); }
+
+/* 三栏 */
+.body { flex: 1; min-height: 0; display: flex; }
+.side {
+  flex: none; min-height: 0; overflow-y: auto;
+  background: var(--bg-chrome);
+}
+.side.left { width: var(--sidebar-left-w); border-right: 1px solid var(--line-strong); padding: var(--sp-2) 0; }
+.side.right { width: var(--sidebar-right-w); border-left: 1px solid var(--line-strong); }
+.side[hidden] { display: none; }
+.center { flex: 1; min-width: 0; min-height: 0; position: relative; display: flex; flex-direction: column; }
+.reader { flex: 1; min-height: 0; overflow-y: auto; }
+.page {
+  max-width: calc(var(--content-max) + var(--content-pad-x) * 2);
+  margin: 0 auto;
+  padding: var(--content-pad-top) var(--content-pad-x) 40vh;
+}
+
+/* 文件树 */
+.tree { list-style: none; margin: 0; padding: 0; font-size: var(--ui-sm); }
+.tree ul { list-style: none; margin: 0; padding: 0; }
+.ti {
+  height: var(--tree-row-h); display: flex; align-items: center; gap: 6px;
+  margin: 0 var(--sp-2); padding-right: var(--sp-2);
+  border-radius: var(--r-sm); color: var(--text); cursor: default; white-space: nowrap;
+}
+.ti:hover { background: var(--bg-hover); }
+.ti .chev { width: var(--icon-sm); height: var(--icon-sm); flex: none; color: var(--text-muted); transition: transform var(--dur-fast) var(--ease); }
+.ti .chev.open { transform: rotate(90deg); }
+.ti .chev-pad { width: var(--icon-sm); flex: none; }
+.ti .ico { width: var(--icon-sm); height: var(--icon-sm); flex: none; color: var(--text-muted); }
+.ti .nm { overflow: hidden; text-overflow: ellipsis; }
+.ti.root { font-weight: 600; color: var(--text-strong); margin-bottom: var(--sp-1); }
+.ti.sel { background: var(--bg-selected); color: var(--accent); font-weight: 600; }
+.ti.sel .ico { color: var(--accent); }
+.ti.focus { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.d1 { padding-left: calc(var(--sp-1) + var(--tree-indent) * 0); }
+.d2 { padding-left: calc(var(--sp-1) + var(--tree-indent) * 1); }
+.d3 { padding-left: calc(var(--sp-1) + var(--tree-indent) * 2); }
+.d4 { padding-left: calc(var(--sp-1) + var(--tree-indent) * 3); }
+
+/* 右侧预留栏 */
+.reserve-head {
+  height: 36px; display: flex; align-items: center; justify-content: space-between;
+  padding: 0 var(--sp-2) 0 var(--sp-3);
+  font-size: var(--ui-xs); color: var(--text-muted);
+}
+.reserve-head .tb { min-width: 28px; height: 28px; }
+.reserve-head .tb svg { width: var(--icon-sm); height: var(--icon-sm); }
+
+/* 状态栏 */
+.statusbar {
+  flex: none; height: var(--statusbar-h);
+  display: flex; align-items: center; gap: var(--sp-4);
+  padding: 0 var(--sp-3);
+  background: var(--bg-chrome); border-top: 1px solid var(--line);
+  font-size: var(--ui-xs); line-height: var(--ui-xs-lh); color: var(--text-muted);
+  white-space: nowrap;
+}
+.statusbar .grow { flex: 1; }
+.statusbar .item { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.statusbar svg { width: 12px; height: 12px; }
+.badge-ro {
+  display: inline-flex; align-items: center; gap: var(--sp-1);
+  height: 18px; padding: 0 var(--sp-2); border-radius: var(--r-pill);
+  background: var(--info-bg); color: var(--info); font-weight: 600;
+}
+.st-warn { color: var(--warn); }
+.st-ok { color: var(--ok); }
+
+/* ==========================================================
+   Markdown 正文排版（markdown.css）
+   ========================================================== */
+.md { font-family: var(--font-reading); font-size: var(--read-size); line-height: 1.75; color: var(--text); }
+.md > :first-child { margin-top: 0; }
+.md p { margin: 0 0 1em; }
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { font-family: var(--font-heading); font-weight: 600; color: var(--text-strong); }
+.md h1 { font-size: 2em; line-height: 1.3; margin: 0.8em 0 0.6em; padding-bottom: 0.3em; border-bottom: 1px solid var(--line); }
+.md h2 { font-size: 1.5em; line-height: 1.35; margin: 1.4em 0 0.6em; padding-bottom: 0.3em; border-bottom: 1px solid var(--line); }
+.md h3 { font-size: 1.25em; line-height: 1.4; margin: 1.3em 0 0.5em; }
+.md h4 { font-size: 1.0625em; line-height: 1.5; margin: 1.2em 0 0.5em; }
+.md a { color: var(--accent); text-decoration: none; }
+.md a:hover { color: var(--accent-hover); text-decoration: underline; }
+.md a .ext { width: 12px; height: 12px; margin-left: 2px; vertical-align: -1px; }
+.md strong { color: var(--text-strong); font-weight: 600; }
+.md blockquote { margin: 0 0 1em; padding: 0 0 0 var(--sp-4); border-left: 3px solid var(--quote-bar); color: var(--text-soft); }
+.md blockquote p:last-child { margin-bottom: 0; }
+.md ul, .md ol { margin: 0 0 1em; padding-left: 1.75em; }
+.md li { margin: 0.25em 0; }
+.md li.task { list-style: none; margin-left: -1.5em; display: flex; align-items: flex-start; gap: 0.5em; }
+.md .cb {
+  flex: none; width: 15px; height: 15px; margin-top: 0.42em;
+  border: 1.5px solid var(--line-input); border-radius: var(--r-xs);
+  display: grid; place-items: center; cursor: default;
+}
+.md .cb.on { background: var(--accent); border-color: var(--accent); color: var(--text-on-accent); }
+.md .cb svg { width: 11px; height: 11px; }
+.md li.task.done > span { color: var(--text-muted); }
+.md code { font-family: var(--font-mono); font-size: 0.875em; background: var(--bg-inline-code); padding: 0.1em 0.35em; border-radius: var(--r-xs); }
+.md hr { border: 0; border-top: 1px solid var(--line); margin: 1.5em 0; }
+.md mark.hl { background: var(--mark); color: inherit; border-radius: 2px; }
+.md mark.hl.cur { background: var(--mark-current); color: var(--text-strong); }
+
+/* 代码块 */
+.code {
+  position: relative; margin: 0 0 1em;
+  background: var(--bg-sunken); border-radius: var(--r-md);
+}
+.code .lang { position: absolute; top: var(--sp-1); left: var(--sp-3); font: var(--ui-xs)/var(--ui-xs-lh) var(--font-ui); color: var(--text-muted); }
+.code .copy {
+  position: absolute; top: var(--sp-1); right: var(--sp-1);
+  display: inline-flex; align-items: center; gap: var(--sp-1);
+  height: 24px; padding: 0 var(--sp-2); border: 0; border-radius: var(--r-sm);
+  background: transparent; color: var(--text-muted); font: var(--ui-xs) var(--font-ui); cursor: pointer;
+}
+.code .copy:hover { background: var(--bg-hover); color: var(--text); }
+.code .copy svg { width: 12px; height: 12px; }
+.code pre { margin: 0; padding: 28px var(--sp-4) var(--sp-3); overflow-x: auto; font: 0.875em/1.6 var(--font-mono); color: var(--text); }
+.k { color: var(--syn-keyword); } .s { color: var(--syn-string); } .c { color: var(--syn-comment); font-style: italic; }
+.f { color: var(--syn-function); } .n { color: var(--syn-number); } .t { color: var(--syn-type); }
+
+/* 表格 */
+.tbl { overflow-x: auto; margin: 0 0 1em; }
+.md table { border-collapse: collapse; font-size: 0.9375em; line-height: 1.6; min-width: 100%; }
+.md th, .md td { border: 1px solid var(--line); padding: 6px 12px; text-align: left; vertical-align: top; }
+.md th { background: var(--bg-sunken); font-weight: 600; color: var(--text-strong); }
+
+/* front matter */
+.fm { margin: 0 0 1.25em; }
+.fm-toggle {
+  display: inline-flex; align-items: center; gap: var(--sp-1);
+  height: 24px; padding: 0 var(--sp-2) 0 var(--sp-1); border: 0; border-radius: var(--r-sm);
+  background: transparent; color: var(--text-muted); font: var(--ui-sm) var(--font-ui); cursor: pointer;
+}
+.fm-toggle:hover { background: var(--bg-hover); }
+.fm-toggle svg { width: var(--icon-sm); height: var(--icon-sm); }
+
+/* 数学公式（设计稿模拟 KaTeX 观感） */
+.math { font-family: var(--font-math); font-size: 1.08em; white-space: nowrap; }
+.math i { font-style: italic; }
+.math-block { margin: 0 0 1em; padding: 0.5em 0; text-align: center; overflow-x: auto; }
+.frac { display: inline-flex; flex-direction: column; vertical-align: middle; text-align: center; margin: 0 0.15em; }
+.frac > span { padding: 0 0.2em; line-height: 1.25; }
+.frac > span:first-child { border-bottom: 1px solid currentColor; }
+.big { font-size: 1.7em; vertical-align: -0.28em; line-height: 1; }
+.lim { display: inline-flex; flex-direction: column; align-items: center; vertical-align: middle; line-height: 1; margin-right: 0.2em; }
+.lim small { font-size: 0.62em; }
+
+/* Mermaid（设计稿用内联 SVG 模拟渲染结果） */
+.diagram { position: relative; margin: 0 0 1em; padding: var(--sp-3) 0; overflow-x: auto; text-align: center; }
+.diagram svg text { font-family: var(--font-ui); font-size: 13px; fill: var(--diagram-text); }
+.diagram .node { fill: var(--diagram-node); stroke: var(--diagram-stroke); stroke-width: 1.2; }
+.diagram .node.alt { fill: var(--diagram-accent); }
+.diagram .edge { stroke: var(--diagram-stroke); stroke-width: 1.2; fill: none; }
+.diagram .arrow { fill: var(--diagram-stroke); }
+.diagram .elabel { font-size: 12px; fill: var(--text-muted); }
+.diagram-tools { position: absolute; top: 0; right: 0; display: flex; gap: var(--sp-1); }
+.mini {
+  display: inline-flex; align-items: center; gap: var(--sp-1);
+  height: 24px; padding: 0 var(--sp-2); border: 0; border-radius: var(--r-sm);
+  background: transparent; color: var(--text-muted); font: var(--ui-xs) var(--font-ui); cursor: pointer;
+}
+.mini:hover { background: var(--bg-hover); color: var(--text); }
+.mini svg { width: 12px; height: 12px; }
+
+/* 局部降级占位块 §8.6 */
+.degrade {
+  margin: 0 0 1em; padding: var(--sp-3) var(--sp-4);
+  background: var(--bg-sunken); border: 1px dashed var(--line-strong); border-radius: var(--r-md);
+  font-family: var(--font-ui);
+}
+.degrade .why { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--ui-sm); line-height: var(--ui-sm-lh); color: var(--text-soft); }
+.degrade .why svg { width: var(--icon-sm); height: var(--icon-sm); flex: none; color: var(--text-muted); }
+.degrade .src { margin: var(--sp-2) 0 0; font: var(--ui-xs)/var(--ui-xs-lh) var(--font-mono); color: var(--text-muted); white-space: pre-wrap; }
+
+/* 查找条 §8.5 */
+.findbar {
+  position: absolute; top: var(--sp-3); right: var(--sp-4); z-index: var(--z-popover);
+  width: 360px; height: 40px; display: flex; align-items: center; gap: var(--sp-1);
+  padding: 0 var(--sp-1) 0 var(--sp-3);
+  background: var(--bg-raised); border-radius: var(--r-lg); box-shadow: var(--shadow-1);
+}
+.findbar[hidden] { display: none; }
+.findbar svg.lead { width: var(--icon-sm); height: var(--icon-sm); color: var(--text-muted); flex: none; }
+.findbar input {
+  flex: 1; min-width: 0; height: 28px; border: 0; outline: 0; background: transparent;
+  color: var(--text); font: var(--ui-base) var(--font-ui);
+}
+.findbar .count { font-size: var(--ui-xs); color: var(--text-muted); white-space: nowrap; padding: 0 var(--sp-1); }
+.findbar .count.none { color: var(--danger); }
+.findbar .tb { min-width: 28px; height: 28px; padding: 0; }
+.findbar .tb svg { width: var(--icon-sm); height: var(--icon-sm); }
+
+/* 提示条 §8.7 */
+.banner {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4);
+  border-radius: var(--r-md); font-size: var(--ui-sm); line-height: var(--ui-sm-lh);
+}
+.banner svg { width: var(--icon-sm); height: var(--icon-sm); flex: none; }
+.banner .msg { flex: 1; }
+.banner .msg b { font-weight: 600; }
+.banner.warn { background: var(--warn-bg); color: var(--warn); }
+.banner.danger { background: var(--danger-bg); color: var(--danger); }
+.banner.ok { background: var(--ok-bg); color: var(--ok); }
+.banner .btn { height: 28px; }
+.banner.compact { padding: var(--sp-1) var(--sp-2); font-size: var(--ui-xs); line-height: var(--ui-xs-lh); gap: var(--sp-1); margin: 0 var(--sp-2) var(--sp-2); }
+.banner.compact svg { width: 14px; height: 14px; }
+.banner .link { border: 0; background: none; padding: 0; color: inherit; font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
+.page-banner { margin: 0 0 var(--sp-6); }
+
+/* 按钮 §8.11 */
+.btn {
+  height: var(--control-h); display: inline-flex; align-items: center; gap: var(--sp-2);
+  padding: 0 var(--sp-3); border-radius: var(--r-sm);
+  font: var(--ui-base) var(--font-ui); cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.btn svg { width: var(--icon-sm); height: var(--icon-sm); }
+.btn.primary { border: 0; background: var(--accent); color: var(--text-on-accent); font-weight: 600; }
+.btn.primary:hover { background: var(--accent-hover); }
+.btn.primary .kbd { opacity: 0.8; color: var(--text-on-accent); }
+.btn.secondary { border: 1px solid var(--line-strong); background: transparent; color: var(--text); }
+.btn.secondary:hover { background: var(--bg-hover); }
+.btn.text { border: 0; background: transparent; color: var(--accent); padding: 0 var(--sp-1); }
+.btn.text:hover { text-decoration: underline; }
+.btn.focus { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.btn:disabled { background: var(--bg-active); color: var(--text-faint); cursor: default; }
+.kbd { font-size: var(--ui-xs); color: var(--text-muted); font-weight: 400; }
+
+/* 空白页 §8.9 */
+.start-wrap { height: 100%; display: grid; place-items: center; padding: var(--sp-8); }
+.start { width: 100%; max-width: 480px; }
+.start h2 { margin: 0 0 var(--sp-2); font: 600 var(--ui-xl)/var(--ui-xl-lh) var(--font-heading); color: var(--text-strong); }
+.start p { margin: 0 0 var(--sp-6); color: var(--text-muted); }
+.start .actions { display: flex; gap: var(--sp-3); margin-bottom: var(--sp-8); }
+.recent-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--sp-2); font-size: var(--ui-sm); font-weight: 600; color: var(--text-soft); }
+.recent { list-style: none; margin: 0; padding: 0; }
+.recent li {
+  display: flex; align-items: center; gap: var(--sp-3);
+  height: 44px; padding: 0 var(--sp-2); border-radius: var(--r-sm); cursor: default;
+}
+.recent li:hover { background: var(--bg-hover); }
+.recent svg { width: var(--icon-sm); height: var(--icon-sm); color: var(--text-muted); flex: none; }
+.recent .nm { font-size: var(--ui-sm); color: var(--text); }
+.recent .path { font-size: var(--ui-xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent .txt { min-width: 0; display: flex; flex-direction: column; line-height: 18px; }
+
+/* 中间区空状态 */
+.empty { height: 100%; display: grid; place-items: center; text-align: center; color: var(--text-muted); padding: var(--sp-8); }
+.empty .ic { width: 32px; height: 32px; margin: 0 auto var(--sp-3); color: var(--text-faint); }
+.empty h3 { margin: 0 0 var(--sp-2); font: 600 var(--ui-lg)/var(--ui-lg-lh) var(--font-heading); color: var(--text-strong); }
+.empty p { margin: 0 0 var(--sp-4); }
+.empty .row { display: flex; gap: var(--sp-3); justify-content: center; }
+.empty.error .ic { color: var(--danger); }
+
+/* 组件画廊 */
+.gallery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-6); max-width: 1280px; }
+.gallery .full { grid-column: 1 / -1; }
+.panel { background: var(--bg-app); border: 1px solid var(--line-strong); border-radius: var(--r-lg); padding: var(--sp-6); }
+.panel > h3 { margin: 0 0 var(--sp-4); font: 600 var(--ui-base)/var(--ui-base-lh) var(--font-ui); color: var(--text-strong); }
+.panel .lbl { margin: var(--sp-4) 0 var(--sp-2); font-size: var(--ui-xs); color: var(--text-muted); }
+.panel .lbl:first-of-type { margin-top: 0; }
+.row-gap { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; }
+.stack { display: grid; gap: var(--sp-3); }
+.mini-tree { width: 240px; background: var(--bg-chrome); border-radius: var(--r-md); padding: var(--sp-2) 0; }
+
+/* 对话框 §8.12 */
+.dialog-stage {
+  position: relative; height: 340px; border-radius: var(--r-md); overflow: hidden;
+  background: var(--bg-app); display: grid; place-items: center;
+  border: 1px solid var(--line);
+}
+.dialog-stage .overlay { position: absolute; inset: 0; background: var(--bg-overlay); z-index: var(--z-overlay); }
+.dialog {
+  position: relative; z-index: var(--z-dialog);
+  width: 440px; background: var(--bg-raised); border-radius: var(--r-lg); box-shadow: var(--shadow-2);
+  padding: var(--sp-6);
+}
+.dialog.wide { width: 560px; padding: 0; display: flex; flex-direction: column; }
+.dialog h4 { margin: 0 0 var(--sp-2); font: 600 var(--ui-lg)/var(--ui-lg-lh) var(--font-ui); color: var(--text-strong); }
+.dialog p { margin: 0 0 var(--sp-3); color: var(--text-soft); }
+.dialog .url {
+  display: block; padding: var(--sp-2) var(--sp-3); margin-bottom: var(--sp-6);
+  background: var(--bg-sunken); border-radius: var(--r-sm);
+  font: var(--ui-sm)/var(--ui-sm-lh) var(--font-mono); color: var(--text); word-break: break-all; user-select: all;
+}
+.dialog .foot { display: flex; justify-content: flex-end; gap: var(--sp-2); }
+.settings { display: flex; min-height: 0; }
+.settings nav { width: 140px; padding: var(--sp-4) var(--sp-2); background: var(--bg-chrome); border-right: 1px solid var(--line); border-radius: var(--r-lg) 0 0 0; }
+.settings nav span { display: block; height: 32px; line-height: 32px; padding: 0 var(--sp-3); border-radius: var(--r-sm); font-size: var(--ui-sm); }
+.settings nav span.on { background: var(--bg-selected); color: var(--accent); font-weight: 600; }
+.settings .content { flex: 1; padding: var(--sp-6); }
+.settings h5 { margin: 0 0 var(--sp-3); font: 600 var(--ui-sm)/var(--ui-sm-lh) var(--font-ui); color: var(--text-strong); }
+.radio { display: flex; gap: var(--sp-3); padding: var(--sp-2) 0; cursor: pointer; }
+.radio .dot { flex: none; width: 16px; height: 16px; margin-top: 2px; border-radius: 50%; border: 1.5px solid var(--line-input); display: grid; place-items: center; }
+.radio.on .dot { border-color: var(--accent); }
+.radio.on .dot::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.radio .t { display: block; color: var(--text); }
+.radio .d { display: block; font-size: var(--ui-xs); line-height: var(--ui-xs-lh); color: var(--text-muted); }
+.dialog.wide .foot { padding: var(--sp-4) var(--sp-6); border-top: 1px solid var(--line); }
+.dialog.wide .banner { margin: 0 var(--sp-6) 0; }
+
+/* toast */
+.toast {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4); border-radius: var(--r-lg);
+  background: var(--bg-raised); box-shadow: var(--shadow-1); font-size: var(--ui-sm); color: var(--text);
+}
+.toast svg { width: var(--icon-sm); height: var(--icon-sm); }
+
+/* 令牌色板 */
+.swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--sp-3); }
+.sw { display: flex; align-items: center; gap: var(--sp-3); }
+.sw i { width: 36px; height: 36px; flex: none; border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.sw b { display: block; font: 600 var(--ui-xs)/var(--ui-xs-lh) var(--font-mono); color: var(--text); }
+.sw span { display: block; font: var(--ui-xs)/var(--ui-xs-lh) var(--font-mono); color: var(--text-muted); }
+
+/* 通用焦点 */
+:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.ti:focus-visible { outline-offset: -2px; }
+::selection { background: var(--bg-selected); }
+svg.i { fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+</style>
+</head>
+<body>
+
+<!-- 图标：Lucide 线性图标（线宽 1.75），实现时用 lucide-react -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
+  <symbol id="i-folder-open" viewBox="0 0 24 24"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+  <symbol id="i-window" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 4v4"/><path d="M2 8h20"/><path d="M6 4v4"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-panel-left" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></symbol>
+  <symbol id="i-panel-right" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/></symbol>
+  <symbol id="i-chev-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-chev-up" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol>
+  <symbol id="i-chev-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-circle-x" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></symbol>
+  <symbol id="i-circle-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+  <symbol id="i-image-off" viewBox="0 0 24 24"><path d="M2 2l20 20"/><path d="M10.41 10.41a2 2 0 1 1-2.83-2.83"/><path d="M13.5 13.5 6 21"/><path d="M18 12l3 3"/><path d="M3.59 3.59A1.99 1.99 0 0 0 3 5v14a2 2 0 0 0 2 2h14c.55 0 1.05-.22 1.41-.59"/><path d="M21 15V5a2 2 0 0 0-2-2H9"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></symbol>
+  <symbol id="i-sigma" viewBox="0 0 24 24"><path d="M18 7V5a1 1 0 0 0-1-1H6.5a.5.5 0 0 0-.4.8l4.5 6a2 2 0 0 1 0 2.4l-4.5 6a.5.5 0 0 0 .4.8H17a1 1 0 0 0 1-1v-2"/></symbol>
+  <symbol id="i-workflow" viewBox="0 0 24 24"><rect width="8" height="8" x="3" y="3" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect width="8" height="8" x="13" y="13" rx="2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></symbol>
+  <symbol id="i-file-x" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m14.5 12.5-5 5"/><path d="m9.5 12.5 5 5"/></symbol>
+  <symbol id="i-logo" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M7.5 16V8l3 4 3-4v8"/><path d="M16.5 10v6"/></symbol>
+</svg>
+
+<header class="draft-head">
+  <h1>Mile Typora 设计稿 v1.0</h1>
+  <nav aria-label="画板">
+    <a href="#f-read">目录阅读</a>
+    <a href="#f-start">空白窗口</a>
+    <a href="#f-narrow">单文件与窄窗口</a>
+    <a href="#f-parts">组件与状态</a>
+    <a href="#f-tokens">令牌色板</a>
+  </nav>
+  <div class="seg" role="group" aria-label="主题">
+    <button type="button" data-pref="light"><svg class="i" width="14" height="14"><use href="#i-sun"/></svg>浅色</button>
+    <button type="button" data-pref="dark"><svg class="i" width="14" height="14"><use href="#i-moon"/></svg>深色</button>
+    <button type="button" data-pref="system"><svg class="i" width="14" height="14"><use href="#i-monitor"/></svg>跟随系统</button>
+  </div>
+</header>
+
+<main class="draft-main">
+
+<!-- ======================= 画板 1：目录阅读 ======================= -->
+<section id="f-read">
+  <h2 class="frame-title">1. 目录阅读中</h2>
+  <p class="frame-desc">1280 × 800 客户区。左侧文件树已选中文件，中间展示 CommonMark / GFM、公式、Mermaid、代码高亮与局部降级，右上角为查找条（Ctrl+F），右侧为空白预留栏。工具栏的两个侧栏开关可点击切换。</p>
+  <div class="frame-scroll">
+  <div class="win" id="win-read">
+    <div class="titlebar">
+      <svg class="i app-ico"><use href="#i-logo"/></svg>
+      <span>架构说明.md - Mile Typora</span>
+      <span class="native-tag">原生标题栏（系统绘制，仅示意）</span>
+      <div class="caps" aria-hidden="true">
+        <span><svg width="10" height="10"><path d="M0 5h10" stroke="currentColor"/></svg></span>
+        <span><svg width="10" height="10"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor"/></svg></span>
+        <span><svg width="10" height="10"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor"/></svg></span>
+      </div>
+    </div>
+
+    <div class="toolbar" role="toolbar" aria-label="工具栏">
+      <button class="tb labeled" type="button" title="打开文件 (Ctrl+O)"><svg class="i"><use href="#i-file"/></svg>打开文件</button>
+      <button class="tb labeled" type="button" title="打开目录 (Ctrl+Shift+O)"><svg class="i"><use href="#i-folder-open"/></svg>打开目录</button>
+      <button class="tb" type="button" aria-label="新建窗口" title="新建窗口 (Ctrl+Shift+N)"><svg class="i"><use href="#i-window"/></svg></button>
+      <span class="sep"></span>
+      <button class="tb" type="button" aria-label="刷新" title="刷新 (F5)"><svg class="i"><use href="#i-refresh"/></svg></button>
+      <button class="tb" type="button" aria-label="查找" title="查找 (Ctrl+F)" aria-pressed="true" data-toggle="find"><svg class="i"><use href="#i-search"/></svg></button>
+      <span class="spacer"></span>
+      <button class="tb" type="button" aria-label="左侧栏" title="显示 / 隐藏左侧栏" aria-pressed="true" data-toggle="left"><svg class="i"><use href="#i-panel-left"/></svg></button>
+      <button class="tb" type="button" aria-label="预留侧栏" title="显示 / 隐藏预留侧栏" aria-pressed="true" data-toggle="right"><svg class="i"><use href="#i-panel-right"/></svg></button>
+      <button class="tb" type="button" aria-label="设置" title="设置 (Ctrl+,)"><svg class="i"><use href="#i-settings"/></svg></button>
+    </div>
+
+    <div class="body">
+      <aside class="side left" data-side="left" aria-label="文件树">
+        <ul class="tree" role="tree" aria-label="Mile-Typora">
+          <li role="treeitem" aria-expanded="true">
+            <div class="ti root d1" title="E:\WebApp\Mile-Project\Mile-Typora"><svg class="i chev open"><use href="#i-chev-right"/></svg><svg class="i ico"><use href="#i-folder"/></svg><span class="nm">Mile-Typora</span></div>
+            <ul role="group">
+              <li role="treeitem" aria-expanded="true">
+                <div class="ti d2"><svg class="i chev open"><use href="#i-chev-right"/></svg><svg class="i ico"><use href="#i-folder"/></svg><span class="nm">docs</span></div>
+                <ul role="group">
+                  <li role="treeitem" aria-expanded="false"><div class="ti d3"><svg class="i chev"><use href="#i-chev-right"/></svg><svg class="i ico"><use href="#i-folder"/></svg><span class="nm">design</span></div></li>
+                  <li role="treeitem" aria-expanded="true">
+                    <div class="ti d3"><svg class="i chev open"><use href="#i-chev-right"/></svg><svg class="i ico"><use href="#i-folder"/></svg><span class="nm">develop</span></div>
+                    <ul role="group">
+                      <li role="treeitem" aria-selected="true"><div class="ti d4 sel focus" title="docs\develop\架构说明.md"><span class="chev-pad"></span><svg class="i ico"><use href="#i-file"/></svg><span class="nm">架构说明.md</span></div></li>
+                      <li role="treeitem"><div class="ti d4"><span class="chev-pad"></span><svg class="i ico"><use href="#i-file"/></svg><span class="nm">渲染管线.md</span></div></li>
+                      <li role="treeitem"><div class="ti d4"><span class="chev-pad"></span><svg class="i ico"><use href="#i-file"/></svg><span class="nm">窗口与事件路由.markdown</span></div></li>
+                    </ul>
+                  </li>
+                  <li role="treeitem"><div class="ti d3"><span class="chev-pad"></span><svg class="i ico"><use href="#i-file"/></svg><span class="nm">PRD.md</span></div></li>
+                  <li role="treeitem"><div class="ti d3"><span class="chev-pad"></span><svg class="i ico"><use href="#i-file"/></svg><span class="nm">decisions.md</span></div></li>
+                </ul>
+              </li>
+              <li role="treeitem" aria-expanded="false"><div class="ti d2"><svg class="i chev"><use href="#i-chev-right"/></svg><svg class="i ico"><use href="#i-folder"/></svg><span class="nm">.claude</span></div></li>
+              <li role="treeitem"><div class="ti d2"><span class="chev-pad"></span><svg class="i ico"><use href="#i-file"/></svg><span class="nm">CLAUDE.md</span></div></li>
+              <li role="treeitem"><div class="ti d2"><span class="chev-pad"></span><svg class="i ico"><use href="#i-file"/></svg><span class="nm">DESIGN.md</span></div></li>
+              <li role="treeitem"><div class="ti d2"><span class="chev-pad"></span><svg class="i ico"><use href="#i-file"/></svg><span class="nm">PRODUCT.md</span></div></li>
+              <li role="treeitem"><div class="ti d2"><span class="chev-pad"></span><svg class="i ico"><use href="#i-file"/></svg><span class="nm">README.md</span></div></li>
+            </ul>
+          </li>
+        </ul>
+      </aside>
+
+      <div class="center">
+        <div class="findbar" data-panel="find" role="search">
+          <svg class="i lead"><use href="#i-search"/></svg>
+          <input type="text" value="窗口" aria-label="在当前文档中查找">
+          <span class="count">2 / 7</span>
+          <button class="tb" type="button" aria-label="上一个 (Shift+Enter)"><svg class="i"><use href="#i-chev-up"/></svg></button>
+          <button class="tb" type="button" aria-label="下一个 (Enter)"><svg class="i"><use href="#i-chev-down"/></svg></button>
+          <button class="tb" type="button" aria-label="关闭查找 (Esc)" data-toggle="find"><svg class="i"><use href="#i-x"/></svg></button>
+        </div>
+
+        <div class="reader">
+          <article class="page md">
+            <div class="fm">
+              <button class="fm-toggle" type="button" aria-expanded="false"><svg class="i"><use href="#i-chev-right"/></svg>元信息 · 4 项</button>
+            </div>
+
+            <h1>架构说明</h1>
+            <p>Mile Typora 是一个只读的本地 Markdown 阅读器。一个进程管理多个原生<mark class="hl">窗口</mark>，每个<mark class="hl cur">窗口</mark>维护自己的阅读上下文，文件变更事件按<mark class="hl">窗口</mark>精确投递。更多背景见 <a href="#">产品需求文档</a> 与 <a href="#">mygo 官方文档<svg class="i ext"><use href="#i-ext"/></svg></a>。</p>
+
+            <blockquote><p>只读即只读：P0 阶段不修改源文件的任何字节，也不在工作区写入元数据。</p></blockquote>
+
+            <h2>分层</h2>
+            <ul>
+              <li><strong>Go 原生层</strong>：系统对话框、<mark class="hl">窗口</mark>生命周期、路径授权、目录扫描与变更监听。</li>
+              <li><strong>绑定传输层</strong>：类型化请求响应，使用 <code>EmitPage</code> 按页面定向推送。</li>
+              <li><strong>React 界面层</strong>：文件树、正文渲染、查找与局部状态反馈。</li>
+            </ul>
+
+            <h3>本期进度</h3>
+            <ul>
+              <li class="task done"><span class="cb on" role="checkbox" aria-checked="true" aria-readonly="true"><svg class="i"><use href="#i-check"/></svg></span><span>核对 mygo v0.9.0 多<mark class="hl">窗口</mark> API</span></li>
+              <li class="task done"><span class="cb on" role="checkbox" aria-checked="true" aria-readonly="true"><svg class="i"><use href="#i-check"/></svg></span><span>锁定渲染库与安全配置</span></li>
+              <li class="task"><span class="cb" role="checkbox" aria-checked="false" aria-readonly="true"></span><span>真实 Windows 11 窗口验收</span></li>
+            </ul>
+
+            <h2>渲染管线</h2>
+            <p>Go 侧解析 Markdown 并清理 HTML，前端只负责公式与图表。单次渲染的期望耗时满足 <span class="math"><i>t</i> ≤ <span class="frac"><span>1.5</span><span>s</span></span></span>，P95 统计口径为：</p>
+            <div class="math-block"><span class="math"><i>P</i><sub>95</sub> = <span class="lim"><small>min</small><i>x</i></span> { <i>x</i> : <span class="frac"><span>1</span><span><i>n</i></span></span> <span class="lim"><small><i>n</i></small><span class="big">&#8721;</span><small><i>i</i>=1</small></span> <b style="font-weight:400">1</b>(<i>t</i><sub><i>i</i></sub> ≤ <i>x</i>) ≥ 0.95 }</span></div>
+
+            <div class="code">
+              <span class="lang">go</span>
+              <button class="copy" type="button"><svg class="i"><use href="#i-copy"/></svg>复制</button>
+<pre><span class="c">// Render 在后台 goroutine 中执行，窗口关闭时 ctx 被取消</span>
+<span class="k">func</span> (<span class="t">DocService</span>) <span class="f">Render</span>(ctx context.<span class="t">Context</span>, req contract.<span class="t">RenderRequest</span>) (contract.<span class="t">RenderResult</span>, <span class="t">error</span>) {
+    <span class="k">if</span> req.Size &gt; <span class="n">10</span> &lt;&lt; <span class="n">20</span> {
+        <span class="k">return</span> contract.<span class="t">RenderResult</span>{}, contract.<span class="f">ErrTooLarge</span>(<span class="s">"单个文件最大 10 MiB"</span>)
+    }
+    <span class="k">return</span> render.<span class="f">Document</span>(ctx, req)
+}</pre>
+            </div>
+
+            <div class="diagram">
+              <div class="diagram-tools">
+                <button class="mini" type="button"><svg class="i"><use href="#i-code"/></svg>查看源码</button>
+                <button class="mini" type="button"><svg class="i"><use href="#i-copy"/></svg>复制源码</button>
+              </div>
+              <svg width="700" height="150" viewBox="0 0 700 150" role="img" aria-label="流程图：打开目录到渲染正文">
+                <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0 0L10 5L0 10z"/></marker></defs>
+                <rect class="node" x="10" y="52" width="110" height="40" rx="4"/><text x="65" y="77" text-anchor="middle">打开目录</text>
+                <rect class="node" x="170" y="52" width="120" height="40" rx="4"/><text x="230" y="77" text-anchor="middle">扫描文件树</text>
+                <polygon class="node alt" points="400,32 460,72 400,112 340,72"/><text x="400" y="77" text-anchor="middle">选中文件?</text>
+                <rect class="node" x="540" y="12" width="140" height="40" rx="4"/><text x="610" y="37" text-anchor="middle">渲染正文</text>
+                <rect class="node" x="540" y="92" width="140" height="40" rx="4"/><text x="610" y="117" text-anchor="middle">显示选择提示</text>
+                <path class="edge" d="M120 72H168" marker-end="url(#ar)"/>
+                <path class="edge" d="M290 72H338" marker-end="url(#ar)"/>
+                <path class="edge" d="M460 72H500V32H538" marker-end="url(#ar)"/>
+                <path class="edge" d="M460 72H500V112H538" marker-end="url(#ar)"/>
+                <text class="elabel" x="512" y="26">是</text>
+                <text class="elabel" x="512" y="128">否</text>
+              </svg>
+            </div>
+
+            <h2>容量边界</h2>
+            <div class="tbl">
+              <table>
+                <thead><tr><th>项目</th><th>上限</th><th>超限行为</th></tr></thead>
+                <tbody>
+                  <tr><td>单个 Markdown</td><td>10 MiB</td><td>拒绝读取并提示实际大小</td></tr>
+                  <tr><td>目录扫描</td><td>5 万条目 / 1 万份 Markdown</td><td>停止遍历，标注结果不完整</td></tr>
+                  <tr><td>单个 Mermaid 块</td><td>64 KiB / 3 秒</td><td>降级为源码并说明原因</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="degrade" role="note">
+              <div class="why"><svg class="i"><use href="#i-image-off"/></svg>远程图片未加载：当前版本不请求网络资源</div>
+              <div class="src">![架构总览](https://example.com/arch.png)</div>
+            </div>
+
+            <hr>
+            <p>最后更新于 2026-11-16。</p>
+          </article>
+        </div>
+      </div>
+
+      <aside class="side right" data-side="right" aria-label="预留侧栏">
+        <div class="reserve-head">
+          <span>预留侧栏</span>
+          <button class="tb" type="button" aria-label="收起预留侧栏" data-toggle="right"><svg class="i"><use href="#i-panel-right"/></svg></button>
+        </div>
+      </aside>
+    </div>
+
+    <footer class="statusbar">
+      <span class="badge-ro"><svg class="i"><use href="#i-lock"/></svg>只读</span>
+      <span class="item" title="E:\WebApp\Mile-Project\Mile-Typora\docs\develop\架构说明.md">docs\develop\架构说明.md</span>
+      <span class="grow"></span>
+      <span class="item st-warn"><svg class="i"><use href="#i-alert"/></svg>远程图片 1 处未加载</span>
+      <span class="item">已更新 14:32</span>
+      <span class="item">UTF-8</span>
+      <span class="item">CRLF</span>
+    </footer>
+  </div>
+  </div>
+</section>
+
+<!-- ======================= 画板 2：空白窗口 ======================= -->
+<section id="f-start">
+  <h2 class="frame-title">2. 空白窗口与最近打开</h2>
+  <p class="frame-desc">新建窗口或"打开新的空白页"启动模式下的初始状态。左侧为空状态；中间提供打开入口和最近记录（文件与目录图标不同）；不创建任何磁盘文件。</p>
+  <div class="frame-scroll">
+  <div class="win start">
+    <div class="titlebar">
+      <svg class="i app-ico"><use href="#i-logo"/></svg><span>Mile Typora</span>
+      <div class="caps" aria-hidden="true">
+        <span><svg width="10" height="10"><path d="M0 5h10" stroke="currentColor"/></svg></span>
+        <span><svg width="10" height="10"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor"/></svg></span>
+        <span><svg width="10" height="10"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor"/></svg></span>
+      </div>
+    </div>
+    <div class="toolbar" role="toolbar" aria-label="工具栏">
+      <button class="tb labeled" type="button"><svg class="i"><use href="#i-file"/></svg>打开文件</button>
+      <button class="tb labeled" type="button"><svg class="i"><use href="#i-folder-open"/></svg>打开目录</button>
+      <button class="tb" type="button" aria-label="新建窗口"><svg class="i"><use href="#i-window"/></svg></button>
+      <span class="sep"></span>
+      <button class="tb" type="button" aria-label="刷新" aria-disabled="true"><svg class="i"><use href="#i-refresh"/></svg></button>
+      <button class="tb" type="button" aria-label="查找" aria-disabled="true"><svg class="i"><use href="#i-search"/></svg></button>
+      <span class="spacer"></span>
+      <button class="tb" type="button" aria-label="左侧栏" aria-pressed="true"><svg class="i"><use href="#i-panel-left"/></svg></button>
+      <button class="tb" type="button" aria-label="预留侧栏" aria-pressed="true"><svg class="i"><use href="#i-panel-right"/></svg></button>
+      <button class="tb" type="button" aria-label="设置"><svg class="i"><use href="#i-settings"/></svg></button>
+    </div>
+    <div class="body">
+      <aside class="side left" aria-label="文件树">
+        <div class="empty"><div><p style="margin:0">尚未打开文件或目录</p></div></div>
+      </aside>
+      <div class="center">
+        <div class="start-wrap">
+          <div class="start">
+            <h2>开始阅读</h2>
+            <p>打开一个 Markdown 文件，或打开一个目录浏览其中的文档。</p>
+            <div class="actions">
+              <button class="btn primary" type="button"><svg class="i"><use href="#i-file"/></svg>打开文件<span class="kbd">Ctrl+O</span></button>
+              <button class="btn secondary" type="button"><svg class="i"><use href="#i-folder-open"/></svg>打开目录<span class="kbd">Ctrl+Shift+O</span></button>
+            </div>
+            <div class="recent-head"><span>最近打开</span><button class="btn text" type="button">清空记录</button></div>
+            <ul class="recent">
+              <li><svg class="i"><use href="#i-folder"/></svg><span class="txt"><span class="nm">Mile-Typora</span><span class="path">E:\WebApp\Mile-Project\Mile-Typora</span></span></li>
+              <li><svg class="i"><use href="#i-file"/></svg><span class="txt"><span class="nm">架构说明.md</span><span class="path">E:\WebApp\Mile-Project\Mile-Typora\docs\develop\架构说明.md</span></span></li>
+              <li><svg class="i"><use href="#i-file"/></svg><span class="txt"><span class="nm">读书笔记 2026.md</span><span class="path">D:\Notes\读书笔记 2026.md</span></span></li>
+              <li><svg class="i"><use href="#i-folder"/></svg><span class="txt"><span class="nm">知识库</span><span class="path">D:\Notes\知识库</span></span></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <aside class="side right" aria-label="预留侧栏">
+        <div class="reserve-head"><span>预留侧栏</span><button class="tb" type="button" aria-label="收起预留侧栏"><svg class="i"><use href="#i-panel-right"/></svg></button></div>
+      </aside>
+    </div>
+    <footer class="statusbar"><span class="item">未打开文档</span></footer>
+  </div>
+  </div>
+</section>
+
+<!-- ======================= 画板 3：单文件 + 窄窗口 ======================= -->
+<section id="f-narrow">
+  <h2 class="frame-title">3. 单文件模式 · 窗口宽度 1000（右栏自动收起）</h2>
+  <p class="frame-desc">窗口宽度低于 1200 时右栏自动收起，工具栏开关显示为未按下。单文件模式的左栏只列出当前文件。正文顶部为"内容可能已过期"提示条（文件被外部删除后保留最后成功内容）。</p>
+  <div class="frame-scroll">
+  <div class="win narrow">
+    <div class="titlebar">
+      <svg class="i app-ico"><use href="#i-logo"/></svg><span>读书笔记 2026.md - Mile Typora</span>
+      <div class="caps" aria-hidden="true">
+        <span><svg width="10" height="10"><path d="M0 5h10" stroke="currentColor"/></svg></span>
+        <span><svg width="10" height="10"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor"/></svg></span>
+        <span><svg width="10" height="10"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor"/></svg></span>
+      </div>
+    </div>
+    <div class="toolbar" role="toolbar" aria-label="工具栏">
+      <button class="tb labeled" type="button"><svg class="i"><use href="#i-file"/></svg>打开文件</button>
+      <button class="tb labeled" type="button"><svg class="i"><use href="#i-folder-open"/></svg>打开目录</button>
+      <button class="tb" type="button" aria-label="新建窗口"><svg class="i"><use href="#i-window"/></svg></button>
+      <span class="sep"></span>
+      <button class="tb" type="button" aria-label="刷新"><svg class="i"><use href="#i-refresh"/></svg></button>
+      <button class="tb" type="button" aria-label="查找"><svg class="i"><use href="#i-search"/></svg></button>
+      <span class="spacer"></span>
+      <button class="tb" type="button" aria-label="左侧栏" aria-pressed="true"><svg class="i"><use href="#i-panel-left"/></svg></button>
+      <button class="tb" type="button" aria-label="预留侧栏" aria-pressed="false"><svg class="i"><use href="#i-panel-right"/></svg></button>
+      <button class="tb" type="button" aria-label="设置"><svg class="i"><use href="#i-settings"/></svg></button>
+    </div>
+    <div class="body">
+      <aside class="side left" aria-label="文件树">
+        <ul class="tree" role="tree">
+          <li role="treeitem" aria-selected="true"><div class="ti d1 sel" title="D:\Notes\读书笔记 2026.md"><svg class="i ico"><use href="#i-file"/></svg><span class="nm">读书笔记 2026.md</span></div></li>
+        </ul>
+      </aside>
+      <div class="center">
+        <div class="reader">
+          <article class="page md">
+            <div class="banner warn page-banner" role="status">
+              <svg class="i"><use href="#i-alert"/></svg>
+              <span class="msg"><b>文件已不存在</b>，当前显示的是最后一次成功读取的内容，可能已过期。</span>
+              <button class="btn secondary" type="button">重试</button>
+              <button class="btn secondary" type="button">关闭当前文档</button>
+            </div>
+            <h1>读书笔记 2026</h1>
+            <p>这份笔记记录今年读过的技术书。阅读器在外部编辑器保存后会自动刷新，并尽量保留当前阅读位置。</p>
+            <h2>一月</h2>
+            <p>《设计数据密集型应用》第五章讨论了复制，重点是 <code>leader</code> 与 <code>follower</code> 之间的复制延迟。</p>
+            <div class="degrade" role="note">
+              <div class="why"><svg class="i"><use href="#i-sigma"/></svg>公式语法错误：Undefined control sequence \lagg</div>
+              <div class="src">$$ \lagg = t_{follower} - t_{leader} $$</div>
+            </div>
+            <div class="degrade" role="note">
+              <div class="why"><svg class="i"><use href="#i-workflow"/></svg>不支持的图表类型：mindmap（当前支持流程图、时序图、类图、状态图、实体关系图、甘特图）</div>
+              <div class="src">mindmap
+  root((复制))
+    单主
+    多主</div>
+            </div>
+          </article>
+        </div>
+      </div>
+      <aside class="side right" hidden aria-label="预留侧栏"></aside>
+    </div>
+    <footer class="statusbar">
+      <span class="badge-ro"><svg class="i"><use href="#i-lock"/></svg>只读</span>
+      <span class="item">D:\Notes\读书笔记 2026.md</span>
+      <span class="grow"></span>
+      <span class="item st-warn"><svg class="i"><use href="#i-alert"/></svg>内容可能已过期</span>
+      <span class="item">公式 1 处、图表 1 处渲染受限</span>
+      <span class="item">UTF-8</span>
+      <span class="item">LF</span>
+    </footer>
+  </div>
+  </div>
+</section>
+
+<!-- ======================= 画板 4：组件与状态 ======================= -->
+<section id="f-parts">
+  <h2 class="frame-title">4. 组件与状态</h2>
+  <p class="frame-desc">按钮、文件树状态、提示条、空状态、对话框与设置。所有状态都同时有图标和文字，不只靠颜色区分。</p>
+  <div class="gallery">
+
+    <div class="panel">
+      <h3>按钮</h3>
+      <p class="lbl">主按钮 / 次按钮 / 文字按钮 / 停用 / 键盘焦点</p>
+      <div class="row-gap">
+        <button class="btn primary" type="button">在浏览器中打开</button>
+        <button class="btn secondary" type="button">取消</button>
+        <button class="btn text" type="button">清空记录</button>
+        <button class="btn primary" type="button" disabled>保存</button>
+        <button class="btn secondary focus" type="button">重试</button>
+      </div>
+      <p class="lbl">工具栏按钮：常态 / 按下（侧栏打开） / 停用</p>
+      <div class="row-gap" style="background:var(--bg-chrome);padding:var(--sp-2);border-radius:var(--r-md)">
+        <button class="tb" type="button" aria-label="刷新"><svg class="i"><use href="#i-refresh"/></svg></button>
+        <button class="tb" type="button" aria-label="左侧栏" aria-pressed="true"><svg class="i"><use href="#i-panel-left"/></svg></button>
+        <button class="tb" type="button" aria-label="查找" aria-disabled="true"><svg class="i"><use href="#i-search"/></svg></button>
+      </div>
+      <p class="lbl">通知（toast）</p>
+      <div class="row-gap">
+        <span class="toast" role="status"><svg class="i" style="color:var(--ok)"><use href="#i-circle-check"/></svg>设置已保存</span>
+        <span class="toast" role="status"><svg class="i" style="color:var(--info)"><use href="#i-info"/></svg>当前版本仅支持阅读</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>文件树状态</h3>
+      <div class="row-gap" style="align-items:flex-start">
+        <div class="mini-tree">
+          <div class="banner warn compact" role="status"><svg class="i"><use href="#i-alert"/></svg><span class="msg">部分目录无法访问</span><button class="link" type="button">重试</button></div>
+          <ul class="tree" role="tree">
+            <li><div class="ti root d1"><svg class="i chev open"><use href="#i-chev-right"/></svg><svg class="i ico"><use href="#i-folder"/></svg><span class="nm">知识库</span></div></li>
+            <li><div class="ti d2"><span class="chev-pad"></span><svg class="i ico"><use href="#i-file"/></svg><span class="nm">悬停态.md</span></div></li>
+            <li><div class="ti d2 sel"><span class="chev-pad"></span><svg class="i ico"><use href="#i-file"/></svg><span class="nm">选中态.md</span></div></li>
+            <li><div class="ti d2 focus"><span class="chev-pad"></span><svg class="i ico"><use href="#i-file"/></svg><span class="nm">键盘焦点.md</span></div></li>
+            <li><div class="ti d2"><span class="chev-pad"></span><svg class="i ico"><use href="#i-file"/></svg><span class="nm">一个很长很长的文件名会单行省略.md</span></div></li>
+          </ul>
+        </div>
+        <div class="mini-tree">
+          <div class="banner warn compact" role="status"><svg class="i"><use href="#i-alert"/></svg><span class="msg">结果不完整，请打开更小的子目录</span></div>
+          <div class="banner compact" style="color:var(--text-muted)"><svg class="i"><use href="#i-refresh"/></svg><span class="msg">正在扫描… 已发现 1 280 份</span></div>
+          <ul class="tree" role="tree">
+            <li><div class="ti root d1"><svg class="i chev open"><use href="#i-chev-right"/></svg><svg class="i ico"><use href="#i-folder"/></svg><span class="nm">monorepo</span></div></li>
+            <li><div class="ti d2"><svg class="i chev"><use href="#i-chev-right"/></svg><svg class="i ico"><use href="#i-folder"/></svg><span class="nm">packages</span></div></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel full">
+      <h3>正文提示条与局部降级</h3>
+      <div class="stack">
+        <div class="banner warn" role="status"><svg class="i"><use href="#i-alert"/></svg><span class="msg"><b>刷新失败：</b>文件超过 10 MiB 上限（实际 12.4 MiB），当前显示的是上一次成功读取的内容。</span><button class="btn secondary" type="button">重试</button></div>
+        <div class="banner danger" role="alert"><svg class="i"><use href="#i-circle-x"/></svg><span class="msg"><b>目录不可用：</b>根目录已被移除或磁盘已断开。</span><button class="btn secondary" type="button">重试</button><button class="btn secondary" type="button">重新选择目录</button></div>
+        <div class="degrade"><div class="why"><svg class="i"><use href="#i-image-off"/></svg>图片已阻止：路径超出当前目录授权范围</div><div class="src">![](../../secret/photo.png)</div></div>
+        <div class="degrade"><div class="why"><svg class="i"><use href="#i-workflow"/></svg>图表超出限制：本文档前 20 个 Mermaid 图表已渲染，其余以源码显示</div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>首次加载失败</h3>
+      <div class="dialog-stage" style="height:260px">
+        <div class="empty error"><div>
+          <svg class="i ic"><use href="#i-circle-x"/></svg>
+          <h3>暂不支持此文件编码</h3>
+          <p>请将文件转换为 UTF-8 后重试。</p>
+          <div class="row"><button class="btn primary" type="button">重试</button><button class="btn secondary" type="button">重新选择</button></div>
+        </div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>空状态</h3>
+      <div class="dialog-stage" style="height:260px">
+        <div class="empty"><div>
+          <svg class="i ic"><use href="#i-file"/></svg>
+          <h3>这是一个空 Markdown 文件</h3>
+          <p>文件已成功打开，但没有任何内容。</p>
+        </div></div>
+      </div>
+      <p class="lbl" style="margin-top:var(--sp-4)">其他空状态文案：请从左侧选择 Markdown 文件 / 此目录下未找到 Markdown 文件</p>
+    </div>
+
+    <div class="panel">
+      <h3>外部链接确认</h3>
+      <div class="dialog-stage">
+        <div class="overlay"></div>
+        <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg1">
+          <h4 id="dlg1">即将访问外部站点</h4>
+          <p>链接将在系统默认浏览器中打开。本窗口内对该站点不再重复询问。</p>
+          <span class="url">https://mygo.egoist.dev/docs/windows</span>
+          <div class="foot"><button class="btn secondary" type="button">取消</button><button class="btn primary" type="button">在浏览器中打开</button></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>设置 · 启动行为（保存失败态）</h3>
+      <div class="dialog-stage">
+        <div class="overlay"></div>
+        <div class="dialog wide" role="dialog" aria-modal="true" aria-labelledby="dlg2">
+          <div class="settings">
+            <nav aria-label="设置分组"><span class="on">常规</span></nav>
+            <div class="content">
+              <h4 id="dlg2">常规</h4>
+              <h5>启动时</h5>
+              <div class="radio on" role="radio" aria-checked="true"><span class="dot"></span><span><span class="t">恢复上一份文档</span><span class="d">只恢复最近一次在前台阅读的文档</span></span></div>
+              <div class="radio" role="radio" aria-checked="false"><span class="dot"></span><span><span class="t">打开新的空白页</span><span class="d">显示打开入口，不自动加载历史文档</span></span></div>
+            </div>
+          </div>
+          <div class="banner danger" role="alert"><svg class="i"><use href="#i-circle-x"/></svg><span class="msg">本次设置未保存：无法写入应用数据目录</span><button class="link" type="button">重试</button></div>
+          <div class="foot"><button class="btn secondary" type="button">取消</button><button class="btn primary" type="button">保存</button></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ======================= 画板 5：令牌色板 ======================= -->
+<section id="f-tokens">
+  <h2 class="frame-title">5. 令牌色板（当前主题）</h2>
+  <p class="frame-desc">数值从当前主题的 CSS 变量实时读取，切换顶部主题可对照深浅两套。权威数值见 DESIGN.md §2。</p>
+  <div class="panel" style="max-width:1280px"><div class="swatches" id="swatches"></div></div>
+</section>
+
+</main>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var mq = matchMedia('(prefers-color-scheme: dark)');
+  var tokens = ['--bg-app','--bg-chrome','--bg-sunken','--bg-inline-code','--bg-raised','--bg-hover','--bg-active','--bg-selected',
+    '--line','--line-strong','--line-input','--quote-bar','--text','--text-strong','--text-soft','--text-muted','--text-faint','--text-on-accent',
+    '--accent','--accent-hover','--focus-ring','--warn','--warn-bg','--danger','--danger-bg','--ok','--ok-bg','--info','--info-bg',
+    '--mark','--mark-current','--syn-keyword','--syn-string','--syn-comment','--syn-function','--syn-number','--syn-type',
+    '--diagram-node','--diagram-stroke','--diagram-text','--diagram-accent'];
+
+  function renderSwatches() {
+    var cs = getComputedStyle(root);
+    var box = document.getElementById('swatches');
+    box.innerHTML = '';
+    tokens.forEach(function (t) {
+      var v = cs.getPropertyValue(t).trim();
+      var el = document.createElement('div');
+      el.className = 'sw';
+      var chip = document.createElement('i');
+      chip.style.background = 'var(' + t + ')';
+      var txt = document.createElement('div');
+      var b = document.createElement('b'); b.textContent = t;
+      var s = document.createElement('span'); s.textContent = v;
+      txt.appendChild(b); txt.appendChild(s);
+      el.appendChild(chip); el.appendChild(txt);
+      box.appendChild(el);
+    });
+  }
+
+  function apply(pref) {
+    var dark = pref === 'dark' || (pref === 'system' && mq.matches);
+    root.setAttribute('data-theme', dark ? 'dark' : 'light');
+    document.querySelectorAll('.seg button').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.dataset.pref === pref));
+    });
+    renderSwatches();
+  }
+
+  var pref = localStorage.getItem('mt-design-theme') || 'system';
+  document.querySelectorAll('.seg button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      pref = b.dataset.pref;
+      localStorage.setItem('mt-design-theme', pref);
+      apply(pref);
+    });
+  });
+  mq.addEventListener('change', function () { if (pref === 'system') apply(pref); });
+  apply(pref);
+
+  // 画板 1 的侧栏与查找条开关
+  var win = document.getElementById('win-read');
+  win.querySelectorAll('[data-toggle]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var key = btn.dataset.toggle;
+      var target = key === 'find' ? win.querySelector('[data-panel="find"]') : win.querySelector('[data-side="' + key + '"]');
+      var show = target.hasAttribute('hidden');
+      if (show) target.removeAttribute('hidden'); else target.setAttribute('hidden', '');
+      win.querySelectorAll('.toolbar [data-toggle="' + key + '"]').forEach(function (b) { b.setAttribute('aria-pressed', String(show)); });
+    });
+  });
+})();
+</script>
+</body>
+</html>

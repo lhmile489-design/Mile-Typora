@@ -1,0 +1,23 @@
+{
+  "skill_name": "mygo-web-app",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Mile Typora 里，用户在一个已经打开目录的窗口里点“打开文件”，选了一个 md 文件。帮我写 WindowService.OpenFileDialog 和对应的前端调用，注意新窗口刚创建时页面还没加载好。",
+      "expected_output": "用 CallerWindow(ctx) 定位发起窗口并作为对话框 Parent；Dialog.Open 带 Markdown 过滤器且单选；取消时不建窗不写最近记录；按 FR-02 矩阵判断非空白窗口要新开；新窗口先登记上下文与打开意图再 NewWindow；意图进有界 FIFO 队列，页面订阅后调 Ready() 才按序 EmitPage；不用 Broadcast；返回值里的 failure 承载可预期失败。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Markdown 里有 ![](../img/a.png) 和 ![](https://example.com/b.png)，还有 ![](%2e%2e/%2e%2e/secret.png)。阅读器要怎么加载这些图片？",
+      "expected_output": "远程图片不请求，显示占位；相对图片以当前文档目录为基准，只解码一次，Canon 后逐级 Lstat 检查重解析点并用 filepath.Rel 判断授权范围；编码的越界路径被拒绝；通过的图片改写成 mtres 协议 token，经 Protocol.Handle 在建窗前注册的处理器按 CallerWindow(r.Context()) 再次校验，只服务 PNG/JPEG/GIF/WebP，拒绝 SVG；Windows 地址是 http://mtres.localhost。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "生产包里按 F5 整个页面被 WebView 重载了，状态全丢；按 Ctrl+P 还弹出了打印对话框。怎么修？",
+      "expected_output": "指出生产构建应设 PageOptions.DevTools = DevToolsDisabled，它同时关掉 WebView2 的浏览器默认按键（F5、Ctrl+R、Ctrl+P、Ctrl+F、缩放）；F5、Ctrl+F 等由前端快捷键模块实现并 preventDefault；页面重载时就绪状态要撤销（OnWillNavigate 不覆盖重载，需在 OnDidNavigate/OnDOMReady 处理）；不注册全局快捷键。",
+      "files": []
+    }
+  ]
+}

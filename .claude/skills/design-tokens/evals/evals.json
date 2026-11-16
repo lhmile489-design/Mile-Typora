@@ -1,0 +1,23 @@
+{
+  "skill_name": "design-tokens",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "状态栏里的“已更新 14:32”我想换成浅一点的灰色，比如 #9A9EA6，直接在 StatusBar.css 里改可以吗？",
+      "expected_output": "不能在组件里写色值；#9A9EA6 是 --text-faint，只用于占位与停用态，对 --bg-chrome 只有约 2.49:1，不满足 4.5；状态栏应保持 --text-muted；若确需新层级，先改 DESIGN.md 并算深浅两套对比度再同步 tokens.css。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "用户切到深色后，Mermaid 流程图还是白底黑字，公式倒是正常。怎么回事？",
+      "expected_output": "KaTeX 继承 currentColor 所以正常；Mermaid 的 SVG 在渲染时写死了颜色，需要主题切换时用新的 --diagram-* 令牌重新 initialize themeVariables 并重新渲染当前文档图表；渲染结果仍经 DOMPurify。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "冷启动深色模式时窗口先闪一下白再变深，怎么修？",
+      "expected_output": "窗口 BackgroundColor 用 light-dark(#FFFFFF, #1C1D20) 与 --bg-app 一致；Go 建窗前 Theme.SetSource；index.html 引入独立 theme-init.js（CSP 禁止内联脚本）在挂载前写 data-theme 与 color-scheme。",
+      "files": []
+    }
+  ]
+}
