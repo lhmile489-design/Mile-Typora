@@ -22,6 +22,21 @@ beforeAll(() => {
 
   // jsdom has no scrolling; the page scrolls anchors, so give it a no-op
   // that tests can replace.
+  // CodeMirror measures text with Range rectangles; jsdom has none.
+  if (typeof Range !== "undefined") {
+    Object.defineProperty(Range.prototype, "getClientRects", {
+      configurable: true,
+      value: () => [],
+    });
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0, x: 0, y: 0,
+        toJSON: () => ({}),
+      }),
+    });
+  }
+
   Object.defineProperty(Element.prototype, "scrollIntoView", {
     configurable: true,
     writable: true,

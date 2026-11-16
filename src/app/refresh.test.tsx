@@ -51,6 +51,11 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     refresh: async () => ({ kind: "loaded" as const, doc: changedDoc }),
     closeDocument: async () => ({ ok: true as const, value: undefined }),
     closeWindow: async () => ({ ok: true as const, value: undefined }),
+    renderSource: async (text: string) => ({
+      kind: "ok" as const,
+      html: `<h1>${text.replace(/^#+\s*/, "")}</h1>`,
+      counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
+    }),
     scan: () => ({ abort: () => {}, done: Promise.resolve() }),
     ...overrides,
   };

@@ -33,6 +33,11 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     refresh: async () => ({ kind: "cancelled" as const }),
     closeDocument: async () => ({ ok: true as const, value: undefined }),
     closeWindow: async () => ({ ok: true as const, value: undefined }),
+    renderSource: async (text: string) => ({
+      kind: "ok" as const,
+      html: `<h1>${text.replace(/^#+\s*/, "")}</h1>`,
+      counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
+    }),
     scan: () => ({ abort: () => {}, done: Promise.resolve() }),
     ...overrides,
   };
@@ -319,6 +324,46 @@ describe("keyboard commands", () => {
 
     fireEvent.keyDown(input, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("search")).toBeNull());
+  });
+
+  it("toggles source editing and preview with Ctrl+/", async () => {
+    const doc = {
+      name: "笔记.md",
+      path: "E:/notes/笔记.md",
+      size: 32,
+      hasBom: false,
+      lineEnding: "LF",
+      text: "# 标题",
+      html: "<h1>标题</h1>",
+      counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
+    };
+    const renderSource = vi.fn(async (text: string) => ({
+      kind: "ok" as const,
+      html: `<h1>${text.replace(/^#+\s*/, "")}</h1>`,
+      counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
+    }));
+    render(
+      <App
+        transport={fakeTransport({
+          openFile: async () => ({ kind: "loaded" as const, doc }),
+          renderSource,
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    expect(await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 })).toBeTruthy();
+    expect(screen.getByText("编辑中")).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    await waitFor(() => expect(renderSource).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("heading", { name: "标题" })).toBeTruthy();
+    expect(screen.getByText("预览")).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    await waitFor(() => expect(screen.queryByText("预览")).toBeNull());
   });
 
   it("closes the find bar with Escape before anything else", async () => {

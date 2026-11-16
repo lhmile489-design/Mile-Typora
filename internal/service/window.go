@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/egoist/mygo"
 
@@ -151,6 +152,12 @@ func NewWindowService(d Deps) *WindowService {
 // document's own directory, only the formats the app serves, each under a
 // fresh token (PRD FR-06).
 func (s *WindowService) imageResolver(window int, dir string) markdown.ImageResolver {
+	return s.imageResolverKind(window, dir, resource.KindRead)
+}
+
+// imageResolverKind answers for one kind of view: reading and preview tokens
+// are separate, so rendering the edited buffer keeps the reading images.
+func (s *WindowService) imageResolverKind(window int, dir string, kind string) markdown.ImageResolver {
 	return func(ref string) (string, string) {
 		trimmed := strings.TrimSpace(ref)
 		if trimmed == "" {
@@ -198,7 +205,7 @@ func (s *WindowService) imageResolver(window int, dir string) markdown.ImageReso
 		if reason := resource.Check(real); reason != "" {
 			return "", reason
 		}
-		return resourceURL(s.resources.Add(window, real)), ""
+		return resourceURL(s.resources.AddKind(window, kind, real)), ""
 	}
 }
 
@@ -722,6 +729,58 @@ func (s *WindowService) RemoveRecent(ctx context.Context, path string) error {
 		return err
 	}
 	return nil
+}
+
+// RenderSource renders the page's editing buffer with the same renderer as a
+// file, without writing or reading the disk. Preview images use their own
+// tokens so the reading view keeps its own (PRD 10.1, M4-1).
+func (s *WindowService) RenderSource(ctx context.Context, text string) (contract.RenderSourceResult, error) {
+	w, err := s.callerWindow(ctx)
+	if err != nil {
+		return contract.RenderSourceResult{}, err
+	}
+	if !utf8.ValidString(text) {
+		return contract.RenderSourceResult{Failure: &contract.Failure{
+			Code:   "encoding",
+			Detail: "编辑内容不是有效的 UTF-8",
+		}}, nil
+	}
+	if len(text) > docread.MaxBytes {
+		return contract.RenderSourceResult{Failure: &contract.Failure{
+			Code:   "too_large",
+			Detail: "文档超过读取上限",
+			Size:   int64(len(text)),
+			Limit:  docread.MaxBytes,
+		}}, nil
+	}
+	dir := ""
+	if path, ok := w.OpenFile(); ok {
+		dir = filepath.Dir(path)
+	}
+	var images markdown.ImageResolver
+	if dir == "" {
+		images = func(string) (string, string) {
+			return "", "尚未保存的文档不能显示本地图片"
+		}
+	} else {
+		images = s.imageResolverKind(w.ID(), dir, resource.KindPreview)
+	}
+	s.resources.ForgetKind(w.ID(), resource.KindPreview)
+	rendered, failure := s.render.Render(ctx, []byte(text), images)
+	if failure != nil {
+		return contract.RenderSourceResult{Failure: &contract.Failure{
+			Code: failure.Code, Detail: failure.Detail,
+		}}, nil
+	}
+	return contract.RenderSourceResult{
+		HTML: rendered.HTML,
+		Counts: contract.Counts{
+			Math:           rendered.Counts.Math,
+			MathLimited:    rendered.Counts.MathLimited,
+			Mermaid:        rendered.Counts.Mermaid,
+			MermaidLimited: rendered.Counts.MermaidLimited,
+		},
+	}, nil
 }
 
 // CloseWindow closes the calling window (PRD FR-09, Ctrl+W). The last window

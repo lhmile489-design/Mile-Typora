@@ -2,11 +2,11 @@
 
 > 给 AI 的项目级说明。优先级：用户当次指令 > 本文 > `docs/PRD.md` > `DESIGN.md` / `docs/decisions.md` > 项目 skills > 全局 `~/.claude/CLAUDE.md` > 通用经验。
 > 全局规范（UTF-8、不编造、无 emoji、破坏性操作先确认、没有证据不算完成）照常生效，本文只写本项目特有的内容。
-> 最后更新：2026-11-16（PRD v0.4；P0 完成，P1 需求已通过门禁 G5，下一步 M4-1 编辑器内核）
+> 最后更新：2026-11-16（PRD v0.4；P0 完成，P1 需求已冻结；M4-1 编辑器内核完成，下一步 M4-2 保存与未保存保护）
 
 ## 0. 先读这几条
 
-1. **P0 已完成（G4，29/29），P1 需求已冻结（G5，2026-11-16）。** 按 [docs/P1-编辑需求.md](docs/P1-编辑需求.md) 实现 M4-1 起的基础编辑；编辑器内核在 M4-1 前定稿并记入 decisions。碰到 [docs/开发计划.md](docs/开发计划.md) §1.5 的门禁就停下来让用户决策。
+1. **P0 已完成（G4，29/29），P1 需求已冻结（G5，2026-11-16），M4-1 编辑器内核已完成。** 按 [docs/P1-编辑需求.md](docs/P1-编辑需求.md) 继续 M4-2 起的基础编辑；M4-1 期间编辑中拦截打开/刷新/关窗只是临时措施，M4-2 必须换成保存 / 放弃 / 取消。碰到 [docs/开发计划.md](docs/开发计划.md) §1.5 的门禁就停下来让用户决策。
 2. **需求以 [docs/PRD.md](docs/PRD.md) 为准**，[PRODUCT.md](PRODUCT.md) 是精简版。PRD 区分"已确认项"（C-01 至 C-12）和"建议默认项"（D-01 至 D-11、性能与容量数值），不能把建议项说成用户已确认。
 3. **P0 是只读阅读器。** 任何写用户文件、写工作区目录的代码在 P0 都是缺陷。
 4. **视觉以 [DESIGN.md](DESIGN.md) 为准**，组件不硬编码颜色、字号、间距。
@@ -61,7 +61,7 @@ Git：远程 `https://github.com/lhmile489-design/Mile-Typora.git`，分支 `mai
 | --- | --- |
 | 桌面框架 | egoist/mygo **v0.9.0**（web 模板，WebView2）；npm `mygo-runtime` / `mygo-cli` 钉在 0.9.0（精确版本）。项目内用 `bun run dev/build/generate` 调本地 CLI，不用全局 `mygo`（本机全局是 0.8.3） |
 | Go | 1.27.3；goldmark v1.8.7（含 GFM）、passthrough v0.6.0（公式定界）、goldmark frontmatter v0.3.0、chroma v2.27.0、bluemonday v1.0.27；文件监听用 mygo 自带 `WatchFiles` |
-| 前端 | React 19.3.1、Vite 8.3.8、TypeScript 7.0.2、Bun 1.3.13；KaTeX 0.19.1、mermaid 12.3.0（按需加载）、DOMPurify 3.4.18、lucide-react 1.73.0、@tanstack/react-virtual 3.14.26 |
+| 前端 | React 19.3.1、Vite 8.3.8、TypeScript 7.0.2、Bun 1.3.13；KaTeX 0.19.1、mermaid 12.3.0（按需加载）、DOMPurify 3.4.18、lucide-react 1.73.0、@tanstack/react-virtual 3.14.26；CodeMirror 6.7.6 / 6.43.15 / 6.11.1 / 6.13.1 / 6.5.2（编辑模式按需加载） |
 | 状态管理 | React 内置 `useReducer` + Context，每窗口一个 store |
 | 测试 | Go `testing`（含 fuzz、race）；Vitest 5.1.0 + Testing Library 16.3.3 + jsdom 31.0.1 |
 | 字体 | 系统字体：Segoe UI Variable、微软雅黑 UI、Cascadia Mono |

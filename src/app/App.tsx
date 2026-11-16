@@ -3,12 +3,14 @@ import {
   CircleAlert,
   CircleCheck,
   CircleX,
+  Eye,
   FileText,
   Folder,
   FolderOpen,
   Lock,
   PanelLeft,
   PanelRight,
+  Pencil,
   RefreshCw,
   Search,
   Settings,
@@ -29,6 +31,7 @@ import { failureMessage, failureText, formatBytes } from "../lib/errors";
 import { FileTree } from "../components/FileTree";
 import { SettingsDialog } from "../components/SettingsDialog";
 import { FindBar } from "../components/FindBar";
+import { SourceEditor } from "../components/SourceEditor";
 import { advance, clearHighlights, collectRanges, paint, scrollToRange } from "../render/find";
 import { capture, metricsOf, restore, type Position } from "../render/position";
 import { renderMath } from "../render/math";
@@ -41,6 +44,7 @@ type ReadyState =
   | { kind: "failed"; message: string };
 
 type LoadError = { code: string; message: string; kind: "file" | "folder" };
+type ViewMode = "reading" | "editing" | "preview";
 
 /**
  * The window shell, laid out after artboard 2 of the design draft
@@ -53,6 +57,10 @@ export function App({ transport }: { transport: Transport }) {
   const [requests, setRequests] = useState<OpenRequest[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [doc, setDoc] = useState<OpenedDoc | null>(null);
+  // M4-1: one buffer per window; preview renders the same string through Go.
+  const [mode, setMode] = useState<ViewMode>("reading");
+  const [buffer, setBuffer] = useState("");
+  const [preview, setPreview] = useState<{ html: string; counts: OpenedDoc["counts"] } | null>(null);
   const [loadError, setLoadError] = useState<LoadError | null>(null);
   // stale is why the content on screen may no longer match its file; the
   // document stays until a refresh succeeds (PRD FR-07.5, FR-07.11).
@@ -102,6 +110,7 @@ export function App({ transport }: { transport: Transport }) {
   // The last tree rows on screen; a failed rescan keeps them (PRD §7.1).
   const treeRows = useRef<TreeEntry[]>([]);
   const docRef = useRef<OpenedDoc | null>(null);
+  const modeRef = useRef<ViewMode>("reading");
   const refreshingRef = useRef(false);
   // The newest document update applied; an older one arrives too late.
   const updateSeq = useRef(0);
@@ -210,6 +219,10 @@ export function App({ transport }: { transport: Transport }) {
   }, [doc]);
 
   useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
+
+  useEffect(() => {
     return transport.onNotice((notice) => setNotice(notice.text));
   }, [transport]);
 
@@ -219,6 +232,10 @@ export function App({ transport }: { transport: Transport }) {
     return transport.onDocUpdated((update: DocUpdate) => {
       if (update.seq <= updateSeq.current) return;
       updateSeq.current = update.seq;
+      if (modeRef.current !== "reading") {
+        setNotice("编辑中，外部修改暂未应用");
+        return;
+      }
       if (update.failure) {
         if (!docRef.current) return;
         setStale(failureText(update.failure));
@@ -270,6 +287,9 @@ export function App({ transport }: { transport: Transport }) {
         case "file":
           rememberHere();
           setDoc(result.doc);
+          setMode("reading");
+          setBuffer(result.doc.text);
+          setPreview(null);
           void loadSettings();
           setLoadError(null);
           setStale(null);
@@ -307,18 +327,28 @@ export function App({ transport }: { transport: Transport }) {
     [applyFolder, rememberHere, startScan],
   );
 
+  // M4-1 has no save yet, so an open that would replace the buffer is held
+  // back until M4-2 brings the save/discard prompt.
+  const blockWhileEditing = useCallback(() => {
+    if (modeRef.current === "reading") return false;
+    setNotice("编辑中：保存与文档切换保护在 M4-2 提供，请保持当前文档");
+    return true;
+  }, []);
+
   // Opening what a request names: a double-clicked file, a command-line
   // argument, or another instance's request (PRD FR-02.8, docs/踩坑记录.md).
   const openRequested = useCallback(
     async (seq: number) => {
+      if (blockWhileEditing()) return;
       applyOutcome(await transport.openRequested(seq));
     },
-    [applyOutcome, transport],
+    [applyOutcome, blockWhileEditing, transport],
   );
 
   // A click in the tree opens the file here; its arrow opens it elsewhere.
   const openRecent = useCallback(
     async (entry: RecentEntry) => {
+      if (blockWhileEditing()) return;
       const result = await transport.openRecent(entry.path);
       if (result.kind === "failed") {
         setNotice(`${entry.name} 不可用：${result.message}`);
@@ -332,15 +362,16 @@ export function App({ transport }: { transport: Transport }) {
       }
       applyOutcome(result);
     },
-    [applyOutcome, transport],
+    [applyOutcome, blockWhileEditing, transport],
   );
 
   const openTreeFile = useCallback(
     async (entry: TreeEntry, newWindow: boolean) => {
+      if (blockWhileEditing()) return;
       setSelected(entry.path);
       applyOutcome(await transport.openTreeFile(entry.path, newWindow));
     },
-    [applyOutcome, transport],
+    [applyOutcome, blockWhileEditing, transport],
   );
 
   // A link in the document: Go decides, the page scrolls or opens.
@@ -407,10 +438,14 @@ export function App({ transport }: { transport: Transport }) {
 
   // Opening a file replaces what the window shows; cancelling changes nothing.
   const openFile = useCallback(async () => {
+    if (blockWhileEditing()) return;
     setNotice(null);
     const result = await transport.openFile();
     if (result.kind === "loaded") {
       setDoc(result.doc);
+      setMode("reading");
+      setBuffer(result.doc.text);
+      setPreview(null);
       setLoadError(null);
       setStale(null);
       setUpdatedAt(nowHM());
@@ -418,10 +453,11 @@ export function App({ transport }: { transport: Transport }) {
       if (docRef.current || folderRef.current) setNotice(result.message);
       else setLoadError({ code: result.code, message: result.message, kind: "file" });
     }
-  }, [transport]);
+  }, [blockWhileEditing, transport]);
 
   // Opening a folder replaces the tree, dropping any scan still running.
   const openFolder = useCallback(async () => {
+    if (blockWhileEditing()) return;
     setNotice(null);
     const result = await transport.openFolder();
     if (result.kind === "failed") {
@@ -431,7 +467,7 @@ export function App({ transport }: { transport: Transport }) {
     }
     if (result.kind !== "opened") return;
     startScan(result.root, result.name);
-  }, [startScan, transport]);
+  }, [blockWhileEditing, startScan, transport]);
 
   useEffect(() => () => scanRef.current?.abort(), []);
 
@@ -456,6 +492,7 @@ export function App({ transport }: { transport: Transport }) {
   // F5 and the toolbar refresh the reading context: the tree as well in a
   // folder window (PRD FR-07.8). A failure keeps what is on screen.
   const refresh = useCallback(async () => {
+    if (blockWhileEditing()) return;
     if (refreshingRef.current) return;
     const openFolder = folderRef.current;
     const hasDoc = docRef.current !== null;
@@ -477,11 +514,12 @@ export function App({ transport }: { transport: Transport }) {
     } else if (result.kind === "failed") {
       setStale(result.message);
     }
-  }, [captureHere, startScan, transport]);
+  }, [blockWhileEditing, captureHere, startScan, transport]);
 
   // Closing the document returns the window to its start state; the file
   // tree stays when a folder is open (PRD FR-07.5).
   const closeDocument = useCallback(async () => {
+    if (blockWhileEditing()) return;
     const result = await transport.closeDocument();
     if (!result.ok) {
       setNotice(result.message);
@@ -498,7 +536,9 @@ export function App({ transport }: { transport: Transport }) {
     setFindQuery("");
     setFindIndex(0);
     clearHighlights();
-  }, [transport]);
+    setMode("reading");
+    setPreview(null);
+  }, [blockWhileEditing, transport]);
 
   const saveSettings = useCallback(async () => {
     setSettingsSaving(true);
@@ -527,9 +567,46 @@ export function App({ transport }: { transport: Transport }) {
 
   // Ctrl+W closes this window; the app quits with its last window (PRD FR-09).
   const closeWindow = useCallback(async () => {
+    if (blockWhileEditing()) return;
     const result = await transport.closeWindow();
     if (!result.ok) setNotice(result.message);
-  }, [transport]);
+  }, [blockWhileEditing, transport]);
+
+  // M4-1: Ctrl+/ enters source editing, shows the preview, or returns to the
+  // source. The buffer stays in the window; no file is written (M4-2 saves).
+  const toggleSource = useCallback(async () => {
+    const current = docRef.current;
+    if (!current) return;
+    if (modeRef.current === "reading") {
+      setBuffer(current.text);
+      setPreview(null);
+      setFindOpen(false);
+      clearHighlights();
+      setMode("editing");
+      return;
+    }
+    if (modeRef.current === "editing") {
+      const result = await transport.renderSource(buffer);
+      if (result.kind === "failed") {
+        setNotice(result.message);
+        return;
+      }
+      setPreview({ html: result.html, counts: result.counts });
+      setMode("preview");
+      return;
+    }
+    setMode("editing");
+  }, [buffer, transport]);
+
+  // Links in the preview do not replace the buffer before M4-2's protection.
+  const handlePreviewLink = useCallback((href: string) => {
+    if (href.startsWith("#")) {
+      const id = decodeURIComponent(href.slice(1));
+      document.getElementById(id)?.scrollIntoView({ block: "start" });
+      return;
+    }
+    setNotice("编辑预览中暂不打开链接");
+  }, []);
 
   // The reserved pane's switch has three states in effect: shown, hidden by
   // the user, and hidden because the window is narrow. Pressing it while
@@ -637,6 +714,10 @@ export function App({ transport }: { transport: Transport }) {
           return;
         case "find":
           e.preventDefault();
+          if (modeRef.current === "editing") {
+            setNotice("查找在预览或阅读模式可用");
+            return;
+          }
           setFindOpen(true);
           // Ctrl+F again returns to the open bar; opening it already focuses
           // the input through the bar's own mount effect.
@@ -659,10 +740,19 @@ export function App({ transport }: { transport: Transport }) {
           e.preventDefault();
           setShowLeft((value) => !value);
           return;
-        case "save-blocked":
-          // P0 reads; the web view would otherwise offer to save the page.
+        case "toggle-source":
           e.preventDefault();
-          setNotice("当前版本仅支持阅读，不会保存文件");
+          void toggleSource();
+          return;
+        case "save-blocked":
+          e.preventDefault();
+          // M4-1 edits in memory; M4-2 brings the real save. In reading the
+          // web view would otherwise offer to save the page.
+          setNotice(
+            modeRef.current === "reading"
+              ? "当前版本仅支持阅读，不会保存文件"
+              : "保存将在 M4-2 提供，当前修改还没有写入磁盘",
+          );
           return;
       }
     };
@@ -678,6 +768,7 @@ export function App({ transport }: { transport: Transport }) {
     openFolder,
     refresh,
     settingsOpen,
+    toggleSource,
   ]);
 
   return (
@@ -763,7 +854,7 @@ export function App({ transport }: { transport: Transport }) {
           </aside>
         )}
         <main className="center">
-          {findOpen && doc && (
+          {findOpen && doc && mode !== "editing" && (
             <FindBar
               query={findQuery}
               count={findCount}
@@ -773,7 +864,7 @@ export function App({ transport }: { transport: Transport }) {
               onClose={closeFind}
             />
           )}
-          {doc && stale && (
+          {doc && stale && mode === "reading" && (
             <div className="stale-banner" role="alert">
               <CircleAlert aria-hidden="true" />
               <span className="txt">{stale}</span>
@@ -785,7 +876,15 @@ export function App({ transport }: { transport: Transport }) {
               </button>
             </div>
           )}
-          {loadError ? (
+          {mode === "editing" && doc ? (
+            <SourceEditor value={buffer} onChange={setBuffer} />
+          ) : mode === "preview" && doc && preview ? (
+            <Reader
+              doc={{ ...doc, html: preview.html, text: buffer, counts: preview.counts }}
+              scrollerRef={readerRef}
+              onLink={handlePreviewLink}
+            />
+          ) : loadError ? (
             <LoadFailure
               error={loadError}
               onRetry={() => (loadError.kind === "folder" ? void openFolder() : void openFile())}
@@ -853,12 +952,29 @@ export function App({ transport }: { transport: Transport }) {
         {doc ? (
           <>
             <span className="badge-ro">
-              <Lock aria-hidden="true" />
-              只读
+              {mode === "reading" ? (
+                <>
+                  <Lock aria-hidden="true" />
+                  只读
+                </>
+              ) : mode === "editing" ? (
+                <>
+                  <Pencil aria-hidden="true" />
+                  编辑中
+                </>
+              ) : (
+                <>
+                  <Eye aria-hidden="true" />
+                  预览
+                </>
+              )}
             </span>
             <span className="item" title={doc.path}>
               {doc.name}
             </span>
+            {mode !== "reading" && (
+              <span className="item">{mode === "editing" ? "Ctrl+/ 预览" : "Ctrl+/ 返回编辑"}</span>
+            )}
             <span className="grow" />
             {refreshing ? (
               <span className="item">

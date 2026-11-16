@@ -12,6 +12,7 @@ export type Command =
   | "close-window"
   | "settings"
   | "toggle-left"
+  | "toggle-source"
   | "save-blocked"
   | "dismiss";
 
@@ -56,6 +57,7 @@ export function commandFor(e: KeyPress): Command | null {
   if (!shift && key === "f") return "find";
   if (!shift && key === "w") return "close-window";
   if (!shift && key === "s") return "save-blocked";
+  if (!shift && key === "/") return "toggle-source";
   if (!shift && key === ",") return "settings";
   if (shift && key === "l") return "toggle-left";
   return null;
@@ -71,5 +73,6 @@ export const SHORTCUT_HINT: Partial<Record<Command, string>> = {
   "close-window": "Ctrl+W",
   settings: "Ctrl+,",
   "toggle-left": "Ctrl+Shift+L",
+  "toggle-source": "Ctrl+/",
   "save-blocked": "Ctrl+S",
 };

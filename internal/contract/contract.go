@@ -136,6 +136,14 @@ type LinkTarget struct {
 	Reason string `json:"reason,omitempty"`
 }
 
+// RenderSourceResult is the preview of an edited buffer. The renderer is the
+// same one that renders files, so preview and reading cannot drift apart.
+type RenderSourceResult struct {
+	HTML    string   `json:"html,omitempty"`
+	Counts  Counts   `json:"counts"`
+	Failure *Failure `json:"failure,omitempty"`
+}
+
 // Notice is a short message a window shows in its status bar: something the
 // app refused or could not do, said without blocking (PRD §7.3, §9.2.4).
 type Notice struct {

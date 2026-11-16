@@ -27,32 +27,44 @@ type Item struct {
 	Window int
 }
 
+// Kinds of token a window can hold. Reading and preview tokens are separate
+// so rendering an edited buffer never invalidates the reading view's images.
+const (
+	KindRead    = "read"
+	KindPreview = "preview"
+)
+
 // Store maps tokens to files. A token is 128 random bits, so a document
 // cannot name a file it was not given a token for.
 type Store struct {
 	mu       sync.RWMutex
 	byToken  map[string]Item
-	byWindow map[int]map[string]struct{}
+	byWindow map[int]map[string]string // token -> kind
 }
 
 // New returns an empty store.
 func New() *Store {
 	return &Store{
 		byToken:  make(map[string]Item),
-		byWindow: make(map[int]map[string]struct{}),
+		byWindow: make(map[int]map[string]string),
 	}
 }
 
-// Add registers path for window and returns its token.
+// Add registers path for window's reading view and returns its token.
 func (s *Store) Add(window int, path string) string {
+	return s.AddKind(window, KindRead, path)
+}
+
+// AddKind registers path under a kind of window token and returns it.
+func (s *Store) AddKind(window int, kind, path string) string {
 	token := newToken()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.byToken[token] = Item{Path: path, Window: window}
 	if s.byWindow[window] == nil {
-		s.byWindow[window] = make(map[string]struct{})
+		s.byWindow[window] = make(map[string]string)
 	}
-	s.byWindow[window][token] = struct{}{}
+	s.byWindow[window][token] = kind
 	return token
 }
 
@@ -72,6 +84,23 @@ func (s *Store) ForgetWindow(window int) {
 		delete(s.byToken, token)
 	}
 	delete(s.byWindow, window)
+}
+
+// ForgetKind drops the tokens of one kind for a window, as each preview
+// render does before registering its own images.
+func (s *Store) ForgetKind(window int, kind string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for token, tokenKind := range s.byWindow[window] {
+		if tokenKind != kind {
+			continue
+		}
+		delete(s.byToken, token)
+		delete(s.byWindow[window], token)
+	}
+	if len(s.byWindow[window]) == 0 {
+		delete(s.byWindow, window)
+	}
 }
 
 func newToken() string {

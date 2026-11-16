@@ -169,6 +169,16 @@ export interface RecentEntry {
   isDir: boolean;
 }
 
+/**
+ * RenderSourceResult is the preview of an edited buffer. The renderer is the
+ * same one that renders files, so preview and reading cannot drift apart.
+ */
+export interface RenderSourceResult {
+  html?: string;
+  counts: Counts;
+  failure?: Failure;
+}
+
 /** SaveOutcome answers a settings write. Failure is set when nothing was saved. */
 export interface SaveOutcome {
   failure?: Failure;
@@ -359,6 +369,14 @@ export const WindowService = {
    */
   removeRecent(path: string): Promise<void> {
     return call("WindowService.RemoveRecent", path);
+  },
+  /**
+   * RenderSource renders the page's editing buffer with the same renderer as a
+   * file, without writing or reading the disk. Preview images use their own
+   * tokens so the reading view keeps its own (PRD 10.1, M4-1).
+   */
+  renderSource(text: string): Promise<RenderSourceResult> {
+    return call("WindowService.RenderSource", text);
   },
   /**
    * SaveSettings writes the settings the page edited. A failed write keeps the

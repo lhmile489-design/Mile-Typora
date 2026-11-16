@@ -24,6 +24,7 @@ describe("the P0 shortcut table", () => {
     ["w", { ctrlKey: true }, "close-window"],
     [",", { ctrlKey: true }, "settings"],
     ["l", { ctrlKey: true, shiftKey: true }, "toggle-left"],
+    ["/", { ctrlKey: true }, "toggle-source"],
     ["s", { ctrlKey: true }, "save-blocked"],
     ["Escape", {}, "dismiss"],
   ] as const)("%s with %o runs %s", (key, mods, command) => {

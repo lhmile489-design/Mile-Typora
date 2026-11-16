@@ -304,3 +304,7 @@ body {
   font-size: var(--ui-sm);
 }
 .dialog-actions { display: flex; justify-content: flex-end; gap: var(--sp-3); margin-top: var(--sp-6); }
+
+/* 源码编辑（M4-1）：CodeMirror 只在编辑时加载，颜色全部来自令牌 */
+.source-editor { flex: 1; min-height: 0; overflow: hidden; background: var(--bg-app); }
+.source-editor .cm-editor { height: 100%; }

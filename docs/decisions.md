@@ -323,3 +323,11 @@ M1 需验证：mermaid 12 的 `securityLevel: "strict"` 与 `%%{init}%%` 指令�
 - P1 的只读边界调整为“除显式保存 / 另存为 / 保存全部外不写用户文件”；`Ctrl+S` 改为真实保存，`Ctrl+W` 在脏缓冲时先三选一。
 - 用户 2026-11-16 确认冻结该文档与 21 条 P1-AC，门禁 G5 通过；编辑器内核（CodeMirror 6 或原生 textarea + 自管撤销）在 M4-1 前单独定稿并记入 decisions。
 - 本次审查工作流确认的缺口（EDIT-04 菜单、焦点作用域、视图菜单不提前含 P2、外部删除衔接、根目录不可用另存为、干净缓冲外部重载、保存全部同文件冲突）已在文档中补齐。
+
+### D-T39 · M4-1 编辑器内核：CodeMirror 6、按需加载、预览 token 隔离
+
+- 用户选择 CodeMirror 6。钉住版本：`@codemirror/state` 6.7.6、`@codemirror/view` 6.43.15、`@codemirror/commands` 6.11.1、`@codemirror/language` 6.13.1、`@codemirror/lang-markdown` 6.5.2；`bun.lock` 同步。理由：撤销分组、选区、行操作成熟，原生 textarea 需要自写这些且难达 P1 验收。
+- 编辑器在进入编辑模式时动态导入，阅读首包不增加 CodeMirror；组件卸载销毁 EditorView。`defaultKeymap` 中的 `Mod-/` 被过滤，否则 Ctrl+/ 会被编辑器当作注释切换，无法触发预览；主题颜色全部走 CSS 变量。
+- 同一窗口一份缓冲；`Ctrl+/` 在 reading → editing → preview → editing 间切换。M4-1 还没有保存，因此编辑中暂时阻止打开文件/目录、最近记录、树内文件、外部打开请求、刷新与关窗，只给状态栏说明；M4-2 用保存 / 放弃 / 取消替换这些临时拦截。OS 标题栏关闭仍可能丢失缓冲，这是 M4-1 的已知边界，M4-2 修。
+- 预览由新的 `RenderSource` 绑定用 P0 的 goldmark + bluemonday 管线渲染内存文本，不读盘不写盘；超过 10 MiB 或非法 UTF-8 直接失败。图片 token 分 `read` 与 `preview` 两种，预览只清理自己的，因此渲染编辑缓冲不会让阅读视图图片失效。
+- 原生验证：进入编辑后 CodeMirror 显示原文，插入文本后预览显示新内容，切回源码缓冲仍在；Ctrl+O 被拦截且无对话框；gfm.md 字节未变（git 无差异）。

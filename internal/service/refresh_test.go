@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -364,5 +365,73 @@ func TestTheFolderWatchEndingMarksTheDocumentStale(t *testing.T) {
 	update := waitUpdate(t, h)
 	if update.Failure == nil || update.Failure.Code != "not_found" {
 		t.Fatalf("update = %+v, want not_found after the folder ended", update)
+	}
+}
+
+// tokenOf pulls the first mtres token out of rendered HTML.
+func tokenOf(t *testing.T, html string) string {
+	t.Helper()
+	const prefix = "http://mtres.localhost/"
+	at := strings.Index(html, prefix)
+	if at < 0 {
+		t.Fatalf("no token URL in %q", html)
+	}
+	rest := html[at+len(prefix):]
+	end := strings.IndexAny(rest, `"'< `)
+	if end < 0 {
+		end = len(rest)
+	}
+	return rest[:end]
+}
+
+func TestRenderSourceUsesTheFileRenderer(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.png"), tinyPNG(t), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	docPath := writeSample(t, dir, "note.md", []byte("# 文件\n\n![图](a.png)\n"))
+	h := newRefreshHarness(t, 40)
+
+	opened, _ := h.service.openPath(context.Background(), h.window, docPath)
+	if opened.Failure != nil {
+		t.Fatalf("openPath: %+v", opened.Failure)
+	}
+	readingToken := tokenOf(t, opened.Doc.HTML)
+
+	got, err := h.service.RenderSource(context.Background(), "# 预览\n\n![图](a.png)\n")
+	if err != nil || got.Failure != nil {
+		t.Fatalf("RenderSource = %+v, %v", got, err)
+	}
+	if !strings.Contains(got.HTML, `id="预览"`) {
+		t.Fatalf("html = %s, want the edited heading", got.HTML)
+	}
+	previewToken := tokenOf(t, got.HTML)
+	if previewToken == readingToken {
+		t.Fatal("preview reused the reading token")
+	}
+	if _, ok := h.service.resources.Lookup(readingToken); !ok {
+		t.Fatal("rendering the preview dropped the reading token")
+	}
+	if _, ok := h.service.resources.Lookup(previewToken); !ok {
+		t.Fatal("the preview image was not registered")
+	}
+
+	// A later preview replaces only its own tokens.
+	_, _ = h.service.RenderSource(context.Background(), "# 第二次\n")
+	if _, ok := h.service.resources.Lookup(previewToken); ok {
+		t.Fatal("an old preview token was kept")
+	}
+	if _, ok := h.service.resources.Lookup(readingToken); !ok {
+		t.Fatal("the second preview dropped the reading token")
+	}
+}
+
+func TestRenderSourceEnforcesLimits(t *testing.T) {
+	h := newRefreshHarness(t, 41)
+	if got, _ := h.service.RenderSource(context.Background(), strings.Repeat("x", 10<<20+1)); got.Failure == nil || got.Failure.Code != "too_large" {
+		t.Fatalf("too large = %+v", got.Failure)
+	}
+	if got, _ := h.service.RenderSource(context.Background(), "\xff"); got.Failure == nil || got.Failure.Code != "encoding" {
+		t.Fatalf("invalid UTF-8 = %+v", got.Failure)
 	}
 }

@@ -15,6 +15,7 @@ import {
   type Notice,
   type OpenRequestResult,
   type RecentEntry,
+  type RenderSourceResult,
   type SettingsResult,
   type SettingsView,
   type ScanFrame,
@@ -56,6 +57,11 @@ export type OpenFolderResult =
   | { kind: "cancelled" }
   | { kind: "opened"; root: string; name: string }
   | { kind: "handedOff" }
+  | { kind: "failed"; code: string; message: string };
+
+/** What rendering an edited buffer produced. */
+export type SourcePreview =
+  | { kind: "ok"; html: string; counts: RenderSourceResult["counts"] }
   | { kind: "failed"; code: string; message: string };
 
 /** What opening a file produced: a document, a cancellation, or a problem. */
@@ -102,6 +108,11 @@ export interface Transport {
   onNotice(listener: (notice: Notice) => void): () => void;
   /** Reads the window's document again (F5, or the stale banner's retry). */
   refresh(): Promise<OpenFileResult>;
+  /**
+   * Renders an editing buffer with the same renderer as a file, without
+   * writing it (PRD 10.1, P1 preview).
+   */
+  renderSource(text: string): Promise<SourcePreview>;
   /** Drops the window's document, leaving its folder open (PRD FR-07.5). */
   closeDocument(): Promise<Outcome<void>>;
   /** Closes this window; the last window quits the app (PRD FR-09, Ctrl+W). */
@@ -207,6 +218,28 @@ export const mygoTransport: Transport = {
   onTreeChanged: (listener) => subscribe(() => events.treeChanged.on(() => listener())),
   onNotice: (listener) => subscribe(() => events.appNotice.on(listener)),
   refresh: async () => openResult(() => WindowService.refresh()),
+  renderSource: async (text) => {
+    try {
+      const result = await WindowService.renderSource(text);
+      if (result.failure) {
+        return {
+          kind: "failed",
+          code: result.failure.code,
+          message: failureText(result.failure),
+        };
+      }
+      return { kind: "ok", html: result.html ?? "", counts: result.counts };
+    } catch (err) {
+      return {
+        kind: "failed",
+        code: "unknown",
+        message: failureText({
+          code: "unknown",
+          detail: err instanceof Error ? err.message : "",
+        }),
+      };
+    }
+  },
   closeDocument: () =>
     wrap(async () => {
       await WindowService.closeDocument();
