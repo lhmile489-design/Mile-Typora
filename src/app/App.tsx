@@ -134,6 +134,33 @@ export function App({ transport }: { transport: Transport }) {
     [applyOutcome, transport],
   );
 
+  // A link in the document: Go decides, the page scrolls or opens.
+  const handleLink = useCallback(
+    async (href: string) => {
+      const result = await transport.openLink(href);
+      switch (result.kind) {
+        case "anchor": {
+          const id = decodeURIComponent(result.anchor);
+          const target = id ? document.getElementById(id) : null;
+          target?.scrollIntoView({ block: "start" });
+          return;
+        }
+        case "document": {
+          const name = result.rel.split("/").pop() ?? result.rel;
+          await openTreeFile({ path: result.rel, name, isDir: false }, false);
+          return;
+        }
+        case "notice":
+          setNotice(result.reason);
+          return;
+        case "none":
+          return;
+      }
+    },
+    [openTreeFile, transport],
+  );
+
+
   // Requests live in the Go-side queue until acknowledged, so subscribing
   // before the handshake and fetching what is pending loses nothing: a
   // remount gets the same requests again. Seq keeps order and drops repeats.
@@ -268,7 +295,7 @@ export function App({ transport }: { transport: Transport }) {
           {loadError ? (
             <LoadFailure error={loadError} onRetry={() => void openFile()} />
           ) : doc ? (
-            <Reader doc={doc} />
+            <Reader doc={doc} onLink={(href) => void handleLink(href)} />
           ) : (
             <div className="start-wrap">
               <div className="start">
@@ -323,20 +350,30 @@ export function App({ transport }: { transport: Transport }) {
  * The reader shows the HTML Go rendered and cleaned (decisions.md D-T02):
  * whatever the document contains, only whitelisted markup arrives here.
  */
-function Reader({ doc }: { doc: OpenedDoc }) {
+function Reader({ doc, onLink }: { doc: OpenedDoc; onLink: (href: string) => void }) {
   const ref = useRef<HTMLElement>(null);
 
   // One pass per document: formulas and diagrams are the page's job (D-T02).
   useEffect(() => {
     const root = ref.current;
     if (!root) return;
+    // Links never navigate the page: Go decides what a click means (FR-06).
+    const onClick = (event: MouseEvent) => {
+      const anchor = (event.target as Element | null)?.closest?.("a");
+      if (!anchor) return;
+      event.preventDefault();
+      const href = anchor.getAttribute("href");
+      if (href) onLink(href);
+    };
+    root.addEventListener("click", onClick);
     // Task list boxes show state and take no input (PRD FR-04).
     for (const box of root.querySelectorAll('input[type="checkbox"]')) {
       box.setAttribute("aria-readonly", "true");
     }
     renderMath(root);
     void renderDiagrams(root);
-  }, [doc.html]);
+    return () => root.removeEventListener("click", onClick);
+  }, [doc.html, onLink]);
 
   if (doc.text === "") {
     return (

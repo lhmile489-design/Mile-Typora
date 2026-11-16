@@ -52,6 +52,10 @@ type Deps struct {
 	PickFolder Picker
 	Resources  *resource.Store
 	Watch      WatchFunc
+	// Confirm asks the user a yes/no question with the reason spelled out.
+	Confirm func(ctx context.Context, title, message, detail string) bool
+	// External opens a URL with the system browser.
+	External func(url string) error
 }
 
 type WindowService struct {
@@ -65,6 +69,8 @@ type WindowService struct {
 	render    *markdown.Renderer
 	resources *resource.Store
 	watch     WatchFunc
+	confirm   func(ctx context.Context, title, message, detail string) bool
+	external  func(url string) error
 }
 
 // NewWindowService returns a WindowService over the open windows. resources is
@@ -75,6 +81,12 @@ func NewWindowService(d Deps) *WindowService {
 	}
 	if d.PickFolder == nil {
 		d.PickFolder = PickFolder
+	}
+	if d.Confirm == nil {
+		d.Confirm = ConfirmNative
+	}
+	if d.External == nil {
+		d.External = mygo.Shell.OpenExternal
 	}
 	return &WindowService{
 		caller: func(ctx context.Context) (int, bool) {
@@ -92,6 +104,8 @@ func NewWindowService(d Deps) *WindowService {
 		render:    markdown.New(),
 		resources: d.Resources,
 		watch:     d.Watch,
+		confirm:   d.Confirm,
+		external:  d.External,
 	}
 }
 

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App } from "./App";
 import type { Transport } from "../lib/transport";
 
@@ -16,6 +16,7 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     openFolder: async () => ({ kind: "cancelled" }),
     openRequested: async () => ({ kind: "handedOff" }),
     openTreeFile: async () => ({ kind: "handedOff" }),
+    openLink: async () => ({ kind: "none" }),
     scan: () => ({ abort: () => {}, done: Promise.resolve() }),
     ...overrides,
   };
@@ -299,5 +300,52 @@ describe("the window matrix", () => {
     render(<App transport={fakeTransport({ pending, openRequested, scan })} />);
     expect(await screen.findByRole("tree", { name: "文件树" })).toBeTruthy();
     expect(scan).toHaveBeenCalled();
+  });
+});
+
+describe("links in a document", () => {
+  const doc = {
+    kind: "loaded" as const,
+    doc: {
+      ...loadedDoc.doc,
+      html: '<p><a href="https://example.com/x">外链</a> <a href="#安装步骤">锚点</a> <a href="x.png">附件</a></p><h2 id="安装步骤">安装步骤</h2>',
+    },
+  };
+
+  it("asks Go about a click instead of navigating", async () => {
+    const openLink = vi.fn(async () => ({ kind: "none" as const }));
+    render(<App transport={fakeTransport({ openFile: async () => doc, openLink })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    const link = await screen.findByText("外链");
+    fireEvent.click(link);
+    expect(openLink).toHaveBeenCalledWith("https://example.com/x");
+  });
+
+  it("scrolls to an anchor", async () => {
+    const scrolled: string[] = [];
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      writable: true,
+      value: function scroll(this: Element) {
+        scrolled.push(this.id);
+      },
+    });
+    const openLink = vi.fn(async () => ({ kind: "anchor" as const, anchor: encodeURIComponent("安装步骤") }));
+    render(<App transport={fakeTransport({ openFile: async () => doc, openLink })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    const link = await screen.findByText("锚点");
+    fireEvent.click(link);
+    expect(openLink).toHaveBeenCalledWith("#安装步骤");
+    expect(document.getElementById("安装步骤")).toBeTruthy();
+    // The handler answers asynchronously: wait for the scroll.
+    await waitFor(() => expect(scrolled).toContain("安装步骤"));
+  });
+
+  it("shows why an attachment does not open", async () => {
+    const openLink = async () => ({ kind: "notice" as const, reason: "暂不支持打开此类附件" });
+    render(<App transport={fakeTransport({ openFile: async () => doc, openLink })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    fireEvent.click(await screen.findByText("附件"));
+    expect(await screen.findByText(/暂不支持打开此类附件/)).toBeTruthy();
   });
 });

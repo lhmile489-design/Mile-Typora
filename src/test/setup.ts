@@ -15,6 +15,13 @@ beforeAll(() => {
     (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = ResizeObserverStub;
   }
 
+  // jsdom has no scrolling; the page scrolls anchors, so give it a no-op
+  // that tests can replace.
+  Object.defineProperty(Element.prototype, "scrollIntoView", {
+    configurable: true,
+    writable: true,
+    value: () => {},
+  });
   Object.defineProperty(HTMLElement.prototype, "clientHeight", {
     configurable: true,
     get: () => 600,

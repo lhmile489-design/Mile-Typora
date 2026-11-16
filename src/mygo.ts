@@ -51,6 +51,24 @@ export interface FolderInfo {
 }
 
 /**
+ * LinkTarget says what a link click means. The page scrolls an anchor, opens
+ * a document from the tree, or says why nothing opened (PRD FR-06).
+ */
+export interface LinkTarget {
+  /**
+   * Kind is "anchor", "document", "attachment", "blocked", "handled" or
+   * "cancelled".
+   */
+  kind: string;
+  /** Anchor is the fragment of an "anchor" link, without the "#". */
+  anchor?: string;
+  /** Rel is the path of a "document" link, relative to the window's folder. */
+  rel?: string;
+  /** Reason explains an "attachment" or "blocked" link to the user. */
+  reason?: string;
+}
+
+/**
  * LoadResult answers an open request. Doc is nil when Failure is set or when
  * the user cancelled the dialog, which both fields nil also mark.
  */
@@ -163,6 +181,14 @@ export const WindowService = {
    */
   openFolderDialog(): Promise<OpenFolderResult> {
     return call("WindowService.OpenFolderDialog");
+  },
+  /**
+   * OpenLink decides what a link in a document means and does the part only Go
+   * can do: a confirmation before leaving the app, the browser, another window.
+   * The page scrolls anchors and opens documents from the tree (PRD FR-06).
+   */
+  openLink(href: string): Promise<LinkTarget> {
+    return call("WindowService.OpenLink", href);
   },
   /**
    * OpenRequested opens what a queued request names: a file association, a

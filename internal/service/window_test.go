@@ -32,6 +32,8 @@ func newTestService(callerID int, registered bool) (*WindowService, *winctx.Regi
 		pickDir:   func(context.Context) (string, error) { return "", nil },
 		render:    markdown.New(),
 		resources: resource.New(),
+		confirm:   func(context.Context, string, string, string) bool { return false },
+		external:  func(string) error { return nil },
 	}, reg
 }
 
@@ -593,5 +595,109 @@ func TestOpenTreeFileInANewWindow(t *testing.T) {
 	// The original window keeps its folder.
 	if r, ok := w.Root(); !ok || r != root {
 		t.Fatalf("root = %q, %v; want %q kept", r, ok, root)
+	}
+}
+
+func TestOpenLinkAnchor(t *testing.T) {
+	s, _ := newTestService(1, true)
+	got, err := s.OpenLink(context.Background(), "#安装步骤")
+	if err != nil {
+		t.Fatalf("OpenLink: %v", err)
+	}
+	if got.Kind != "anchor" || got.Anchor != "安装步骤" {
+		t.Fatalf("target = %+v, want the anchor", got)
+	}
+}
+
+func TestOpenLinkExternalNeedsConfirmation(t *testing.T) {
+	s, _ := newTestService(1, true)
+	opened := ""
+	s.external = func(url string) error { opened = url; return nil }
+
+	// Declining leaves the browser alone.
+	s.confirm = func(context.Context, string, string, string) bool { return false }
+	if got, _ := s.OpenLink(context.Background(), "https://example.com/a"); got.Kind != "cancelled" {
+		t.Fatalf("target = %+v, want cancelled", got)
+	}
+	if opened != "" {
+		t.Fatal("the browser was opened without confirmation")
+	}
+
+	s.confirm = func(context.Context, string, string, string) bool { return true }
+	if got, _ := s.OpenLink(context.Background(), "https://example.com/a"); got.Kind != "handled" {
+		t.Fatalf("target = %+v, want handled", got)
+	}
+	if opened != "https://example.com/a" {
+		t.Fatalf("opened %q, want the link", opened)
+	}
+}
+
+func TestOpenLinkRefusesDangerousSchemes(t *testing.T) {
+	s, _ := newTestService(1, true)
+	confirmed := false
+	s.confirm = func(context.Context, string, string, string) bool { confirmed = true; return true }
+	for _, href := range []string{"javascript:alert(1)", "data:text/html,x", "file:///C:/a.md", "mtres://localhost/x"} {
+		got, _ := s.OpenLink(context.Background(), href)
+		if got.Kind != "blocked" {
+			t.Errorf("OpenLink(%q) = %+v, want blocked", href, got)
+		}
+	}
+	if confirmed {
+		t.Fatal("a dangerous link asked for confirmation")
+	}
+}
+
+func TestOpenLinkDocumentInsideTheFolder(t *testing.T) {
+	root := t.TempDir()
+	writeSample(t, root, "a b.md", []byte("# a\n"))
+	s, reg := newTestService(1, true)
+	w, _ := reg.Get(1)
+	w.SetRoot(root)
+
+	got, err := s.OpenLink(context.Background(), "a%20b.md")
+	if err != nil {
+		t.Fatalf("OpenLink: %v", err)
+	}
+	if got.Kind != "document" || got.Rel != "a b.md" {
+		t.Fatalf("target = %+v, want the document's relative path", got)
+	}
+}
+
+func TestOpenLinkAttachment(t *testing.T) {
+	root := t.TempDir()
+	writeSample(t, root, "x.png", []byte("png"))
+	s, reg := newTestService(1, true)
+	w, _ := reg.Get(1)
+	w.SetRoot(root)
+
+	got, _ := s.OpenLink(context.Background(), "x.png")
+	if got.Kind != "attachment" || got.Reason == "" {
+		t.Fatalf("target = %+v, want an attachment note", got)
+	}
+}
+
+func TestOpenLinkMissingDocument(t *testing.T) {
+	root := t.TempDir()
+	s, reg := newTestService(1, true)
+	w, _ := reg.Get(1)
+	w.SetRoot(root)
+
+	if got, _ := s.OpenLink(context.Background(), "gone.md"); got.Kind != "blocked" {
+		t.Fatalf("target = %+v, want blocked", got)
+	}
+}
+
+func TestOpenLinkOutsideTheFolderNeedsConfirmation(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	target := writeSample(t, outside, "other.md", []byte("# o\n"))
+	_ = target
+	s, reg := newTestService(1, true)
+	w, _ := reg.Get(1)
+	w.SetRoot(root)
+
+	// The path climbs out of the folder, so it is refused outright.
+	if got, _ := s.OpenLink(context.Background(), "../other.md"); got.Kind != "blocked" {
+		t.Fatalf("target = %+v, want blocked for a climbing link", got)
 	}
 }

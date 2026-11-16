@@ -9,6 +9,7 @@ import {
   type Doc,
   type OpenRequest,
   type ReadyInfo,
+  type LinkTarget,
   type LoadResult,
   type OpenRequestResult,
   type ScanFrame,
@@ -27,6 +28,15 @@ export type RequestedOutcome =
   | { kind: "folder"; root: string; name: string }
   | { kind: "handedOff" }
   | { kind: "failed"; code: string; message: string };
+
+/** What a link click means once Go has looked at it. */
+export type LinkOutcome =
+  | { kind: "anchor"; anchor: string }
+  | { kind: "document"; rel: string }
+  /** Nothing to open: the reason belongs in the status bar. */
+  | { kind: "notice"; reason: string }
+  /** Go handled it already, or the user cancelled. */
+  | { kind: "none" };
 
 /** What opening a folder produced. */
 export type OpenFolderResult =
@@ -64,6 +74,8 @@ export interface Transport {
    * argument, or another instance's request.
    */
   openRequested(seq: number): Promise<RequestedOutcome>;
+  /** Asks Go what a link means and lets it do the part the page cannot. */
+  openLink(href: string): Promise<LinkOutcome>;
   /**
    * Opens a file the tree names, relative to the window's folder, here or in
    * a new window (PRD FR-02, AC-06).
@@ -136,6 +148,7 @@ export const mygoTransport: Transport = {
   },
   openFile: async () => openResult(() => WindowService.openFileDialog()),
   openRequested: async (seq) => requestedOutcome(() => WindowService.openRequested(seq)),
+  openLink: async (href) => linkOutcome(() => WindowService.openLink(href)),
   openTreeFile: async (rel, newWindow) => requestedOutcome(() => WindowService.openTreeFile(rel, newWindow)),
 };
 
@@ -186,5 +199,25 @@ async function requestedOutcome(call: () => Promise<OpenRequestResult>): Promise
       code: "unknown",
       message: failureMessage("unknown", err instanceof Error ? err.message : ""),
     };
+  }
+}
+
+/** linkOutcome turns Go's answer about a link into what the page does. */
+async function linkOutcome(call: () => Promise<LinkTarget>): Promise<LinkOutcome> {
+  try {
+    const target = await call();
+    switch (target.kind) {
+      case "anchor":
+        return { kind: "anchor", anchor: target.anchor ?? "" };
+      case "document":
+        return { kind: "document", rel: target.rel ?? "" };
+      case "attachment":
+      case "blocked":
+        return { kind: "notice", reason: target.reason ?? "无法打开此链接" };
+      default:
+        return { kind: "none" };
+    }
+  } catch {
+    return { kind: "notice", reason: "无法打开此链接" };
   }
 }

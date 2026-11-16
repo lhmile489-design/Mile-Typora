@@ -112,3 +112,17 @@ type OpenRequestResult struct {
 	Folder  *FolderInfo `json:"folder,omitempty"`
 	Failure *Failure    `json:"failure,omitempty"`
 }
+
+// LinkTarget says what a link click means. The page scrolls an anchor, opens
+// a document from the tree, or says why nothing opened (PRD FR-06).
+type LinkTarget struct {
+	// Kind is "anchor", "document", "attachment", "blocked", "handled" or
+	// "cancelled".
+	Kind string `json:"kind"`
+	// Anchor is the fragment of an "anchor" link, without the "#".
+	Anchor string `json:"anchor,omitempty"`
+	// Rel is the path of a "document" link, relative to the window's folder.
+	Rel string `json:"rel,omitempty"`
+	// Reason explains an "attachment" or "blocked" link to the user.
+	Reason string `json:"reason,omitempty"`
+}
