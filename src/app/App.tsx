@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   CircleAlert,
   FileText,
@@ -25,6 +25,7 @@ type ReadyState =
  */
 export function App({ transport }: { transport: Transport }) {
   const [ready, setReady] = useState<ReadyState>({ kind: "waiting" });
+  const [notice, setNotice] = useState<string | null>(null);
   const [showLeft, setShowLeft] = useState(true);
   const [showRight, setShowRight] = useState(true);
 
@@ -39,12 +40,32 @@ export function App({ transport }: { transport: Transport }) {
     };
   }, [transport]);
 
+  // FR-09: the window shortcuts act on the app, so the page would otherwise
+  // keep the keystroke.
+  const newWindow = useCallback(async () => {
+    setNotice(null);
+    const r = await transport.newWindow();
+    // A failure belongs in the window that asked (PRD §7.2).
+    if (!r.ok) setNotice(r.message);
+  }, [transport]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === "N" || e.key === "n")) {
+        e.preventDefault();
+        void newWindow();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [newWindow]);
+
   return (
     <div className="win">
       <div className="toolbar" role="toolbar" aria-label="工具栏">
         <ToolButton label="打开文件" icon={<FileText />} labeled disabled />
         <ToolButton label="打开目录" icon={<FolderOpen />} labeled disabled />
-        <ToolButton label="新建窗口" icon={<SquarePlus />} disabled />
+        <ToolButton label="新建窗口" icon={<SquarePlus />} onClick={() => void newWindow()} />
         <span className="sep" aria-hidden="true" />
         <ToolButton label="刷新" icon={<RefreshCw />} disabled />
         <ToolButton label="查找" icon={<Search />} disabled />
@@ -89,6 +110,12 @@ export function App({ transport }: { transport: Transport }) {
       </div>
       <footer className="statusbar" role="status">
         <span className="item grow">未打开文档</span>
+        {notice && (
+          <span className="item st-danger">
+            <CircleAlert aria-hidden="true" />
+            {notice}
+          </span>
+        )}
         <ReadyBadge state={ready} />
       </footer>
     </div>

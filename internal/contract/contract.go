@@ -17,3 +17,10 @@ type ReadyInfo struct {
 	WindowID int    `json:"windowId"`
 	Version  string `json:"version"`
 }
+
+// NewWindowResult answers a request for another window. WindowID is zero when
+// Failure is set.
+type NewWindowResult struct {
+	WindowID int      `json:"windowId"`
+	Failure  *Failure `json:"failure,omitempty"`
+}

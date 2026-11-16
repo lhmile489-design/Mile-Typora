@@ -112,3 +112,12 @@ M1 需验证：mermaid 12 的 `securityLevel: "strict"` 与 `%%{init}%%` 指令�
   - `public/icon.png`（256）：页面 favicon
 - 依据 mygo v0.9.0 `cmd/mygo/config.go`：`icon` 默认取 `resources/icon.png`，同名的 `icon-dev.png` 给开发版。没有在 `mygo.config.ts` 里写 `icon` 字段，用默认值。
 - 托盘：P0 没有托盘功能（PRD 未列），暂不需要托盘图标；以后加入托盘时复用 `resources/icon.png`。
+
+### D-T14 · M1-1 的验证方式与本机限制
+
+- 本机没有 C 编译器（`gcc` 不存在，`CGO_ENABLED=1` 也编不了 `runtime/cgo`），所以 `go test -race` 跑不了。M1-1 起用并发测试（`internal/winctx` 里有 32 个 goroutine 同时增删查）加人工审查替代；装好 MinGW-w64 后补跑 `go test -race ./internal/...` 并把结果记进本文件。
+- 原生多窗口用 PowerShell 调 `EnumWindows` 按进程统计可见顶层窗口来验证，不依赖人工数窗口：
+  - 启动第二个实例 → 第一个实例收到参数并新开窗口，进程数仍为 1，窗口数 2
+  - `PostMessage WM_CLOSE` 关一个窗口 → 另一个存活，进程仍在
+  - 关最后一个窗口 → 进程退出，`mygo dev` 以 0 退出
+- 新增 `@types/node@22.20.5`（开发依赖）与 `tsconfig.json` 的 `types` 加 `"node"`，因为 `src/styles/tokens.test.ts` 用 `node:fs` 读取设计稿做令牌比对。

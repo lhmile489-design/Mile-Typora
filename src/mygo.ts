@@ -4,6 +4,26 @@ import { call } from "mygo-runtime";
 
 // ---- Types ----
 
+/**
+ * Failure is an expected, user-facing failure. Detail never contains
+ * document text or unauthorized paths.
+ */
+export interface Failure {
+  code: string;
+  detail: string;
+  size?: number;
+  limit?: number;
+}
+
+/**
+ * NewWindowResult answers a request for another window. WindowID is zero when
+ * Failure is set.
+ */
+export interface NewWindowResult {
+  windowId: number;
+  failure?: Failure;
+}
+
 /** ReadyInfo answers the page's ready handshake. */
 export interface ReadyInfo {
   windowId: number;
@@ -15,8 +35,16 @@ export interface ReadyInfo {
 /** WindowService manages the windows of the app. */
 export const WindowService = {
   /**
-   * Ready is the page's handshake: it identifies the calling window. Later
-   * stages deliver the window's queued open requests from here.
+   * NewWindow opens another window (PRD FR-02). The reuse matrix of M2-2 decides
+   * whether a blank window is taken over instead; the toolbar's "新建窗口" always
+   * opens one.
+   */
+  newWindow(): Promise<NewWindowResult> {
+    return call("WindowService.NewWindow");
+  },
+  /**
+   * Ready is the page's handshake: it identifies the calling window. M1-2 adds
+   * the open requests queued before the page was ready.
    */
   ready(): Promise<ReadyInfo> {
     return call("WindowService.Ready");
