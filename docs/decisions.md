@@ -256,3 +256,11 @@ M1 需验证：mermaid 12 的 `securityLevel: "strict"` 与 `%%{init}%%` 指令�
 - 启动说明对整个进程有效，每次 `Ready` 都返回：React StrictMode 的首次挂载会被丢弃，说明不能只发一次。
 - 页面按序打开请求（promise 链）：目录请求先于其中的文档请求，否则文件先到、目录后到会把树清掉。`applyOutcome` 通过 `folderRef` 读当前目录，避免排队的回调拿到旧闭包。
 - 设置文件容忍 UTF-8 BOM：别的编辑器（含 PowerShell 5.1 的 `-Encoding utf8`）写出来会带 BOM，把它当"损坏"对用户不友好。BOM 在解析前剥掉，解析失败才按损坏处理。
+
+### D-T32 · 外观：一处保存、全窗口生效、首帧就正确（M3-3）
+
+- 偏好在设置对话框里改，选中即应用（当前窗口立刻变），保存成功后 Go 向**所有**窗口逐个 `Emit` `theme-change`，并 `Theme.SetSource` 让原生控件与窗口底色跟上。失败时对话框不关，当前窗口保持用户所选（他只会在本窗口看到，重开即回旧值），不误报成功。
+- 防白闪：显式偏好（浅色/深色）在 `PageOptions.PreloadScript` 里于页面脚本之前写入 `data-theme`；`theme-init.js` 发现已有主题就直接返回，只在"跟随系统"时用媒体查询决定首帧。`data-theme-pinned` 标记显式选择，系统媒体变化时不覆盖。
+- Mermaid 的 SVG 自带颜色，切换外观后按 `data-source` 重新渲染（`rerenderDiagrams`）；KaTeX 继承 `currentColor`，无需处理。
+- 新建窗口读的是已保存的偏好（preload），所以未保存的选择不会"传染"给新窗口；保存之后才全窗口同步——这是有意的，避免未确认的改动扩散。
+- 原生验证：切深色立即生效（背景 #1C1D20，6 个图表仍在）；两个窗口保存后同时变深；重启首帧即深色（`data-theme=pinned`）。

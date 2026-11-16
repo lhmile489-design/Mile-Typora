@@ -182,6 +182,15 @@ export interface SettingsView {
   recent: RecentEntry[];
 }
 
+/**
+ * ThemeChange tells every window that the appearance preference changed
+ * (PRD FR-10.12: all windows switch at once).
+ */
+export interface ThemeChange {
+  /** Appearance is "system", "light" or "dark". */
+  appearance: string;
+}
+
 /** TreeEntry is one row of the file tree: a folder or a Markdown file. */
 export interface TreeEntry {
   /** Path is relative to the folder's root, separated by slashes. */
@@ -309,6 +318,8 @@ export const WindowService = {
 
 /** Events sent by the Go side. Subscribe with `events.name.on(listener)`. */
 export const events = {
+  /** themeChange tells every window that the appearance preference changed. */
+  themeChange: event<ThemeChange>("theme-change"),
   /**
    * openRequest tells one window to open something after its page is ready.
    * Only the target window receives it (CLAUDE.md §5, decisions.md D-T01).

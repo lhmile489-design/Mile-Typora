@@ -133,6 +133,13 @@ type LinkTarget struct {
 	Reason string `json:"reason,omitempty"`
 }
 
+// ThemeChange tells every window that the appearance preference changed
+// (PRD FR-10.12: all windows switch at once).
+type ThemeChange struct {
+	// Appearance is "system", "light" or "dark".
+	Appearance string `json:"appearance"`
+}
+
 // RecentEntry is one row of the start page's recent list.
 type RecentEntry struct {
 	Path string `json:"path"`

@@ -71,6 +71,10 @@ func (s *WindowService) SaveSettings(ctx context.Context, view contract.Settings
 			Detail: "本次设置未保存",
 		}}, nil
 	}
+	// Every open window follows the new appearance at once (PRD FR-10.12).
+	if s.themeChanged != nil && view.Appearance != current.Appearance {
+		s.themeChanged(view.Appearance)
+	}
 	return contract.SaveOutcome{}, nil
 }
 

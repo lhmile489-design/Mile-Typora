@@ -16,6 +16,7 @@ import {
   type SettingsResult,
   type SettingsView,
   type ScanFrame,
+  type ThemeChange,
 } from "../mygo";
 import { failureMessage } from "./errors";
 
@@ -86,6 +87,8 @@ export interface Transport {
   openRequested(seq: number): Promise<RequestedOutcome>;
   /** Asks Go what a link means and lets it do the part the page cannot. */
   openLink(href: string): Promise<LinkOutcome>;
+  /** Subscribes to appearance changes made in any window. */
+  onThemeChange(listener: (change: ThemeChange) => void): () => void;
   /** Reads the settings and the recent list. */
   getSettings(): Promise<SettingsOutcome>;
   /** Writes the settings the page edited. */
@@ -167,6 +170,7 @@ export const mygoTransport: Transport = {
   openFile: async () => openResult(() => WindowService.openFileDialog()),
   openRequested: async (seq) => requestedOutcome(() => WindowService.openRequested(seq)),
   openLink: async (href) => linkOutcome(() => WindowService.openLink(href)),
+  onThemeChange: (listener) => events.themeChange.on(listener),
   getSettings: async () => {
     try {
       const result = await WindowService.getSettings();

@@ -118,12 +118,29 @@ export async function renderDiagrams(root: ParentNode, timeoutMs = RENDER_TIMEOU
       });
       const holder = document.createElement("div");
       holder.className = "diagram";
+      // The source stays with the diagram: a theme change renders it again.
+      holder.dataset.source = source;
       holder.innerHTML = clean;
       node.replaceWith(holder);
     } catch (err) {
       degrade(node, err instanceof Error ? err.message : String(err));
     }
   }
+}
+
+/** rerenderDiagrams draws every diagram again, as a theme change needs: the
+ * SVG keeps its own colours (DESIGN.md §8.4). */
+export async function rerenderDiagrams(root: ParentNode, timeoutMs = RENDER_TIMEOUT_MS): Promise<void> {
+  const holders = Array.from(root.querySelectorAll<HTMLElement>(".diagram[data-source]"));
+  if (holders.length === 0) return;
+  for (const holder of holders) {
+    const pre = document.createElement("pre");
+    pre.className = "mermaid-src";
+    pre.dataset.lang = "mermaid";
+    pre.textContent = holder.dataset.source ?? "";
+    holder.replaceWith(pre);
+  }
+  await renderDiagrams(root, timeoutMs);
 }
 
 /** degrade leaves the source visible with the reason (DESIGN.md §8.6). */

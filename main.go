@@ -18,6 +18,9 @@ import (
 	"github.com/lhmile489-design/mile-typora/internal/winctx"
 )
 
+// appState is the settings store, for the window-time helpers.
+var appState *appstate.Store
+
 // windowsService is the service the window hooks talk to; main sets it once.
 var windowsService *service.WindowService
 
@@ -66,6 +69,9 @@ func startupTarget(state *appstate.Store) ([]startupRequest, string) {
 // registered as it is created and forgotten when it closes.
 var windows = winctx.NewRegistry()
 
+// themeChange tells every window that the appearance preference changed.
+var themeChange = mygo.NewEvent[contract.ThemeChange]("theme-change")
+
 // openRequest tells one window to open something after its page is ready.
 // Only the target window receives it (CLAUDE.md §5, decisions.md D-T01).
 var openRequest = mygo.NewEvent[contract.OpenRequest]("open-request")
@@ -80,10 +86,6 @@ func main() {
 		routeOpenRequests(args)
 	})
 
-	// Set before the first window so its first frame has the right
-	// appearance. M3-3 reads the saved preference instead.
-	mygo.Theme.SetSource(mygo.ThemeSystem)
-
 	// Settings live in the app's own data directory, never next to the
 	// documents (CLAUDE.md §5.7). Without them the app still reads.
 	var state *appstate.Store
@@ -94,6 +96,15 @@ func main() {
 	} else {
 		state = opened
 	}
+	appState = state
+
+	// The saved preference decides the native appearance before the first
+	// window exists (PRD FR-10.12).
+	appearance := appstate.AppearanceSystem
+	if state != nil {
+		appearance = state.Get().Appearance
+	}
+	applyAppearance(appearance)
 
 	// Images load through the app's own protocol, registered before any
 	// window exists (decisions.md D-T01). Only registered files are served.
@@ -117,6 +128,7 @@ func main() {
 		Watch:         watch.Start,
 		State:         state,
 		StartupNotice: notice,
+		ThemeChanged:  applyAppearance,
 	})
 	windowsService = windowsSvc
 	mygo.Bind(windowsSvc)
@@ -158,7 +170,8 @@ func newWindow() *mygo.Window {
 		Page: mygo.PageOptions{
 			// The inspector is off in builds, and with it the web view's
 			// browser keys (decisions.md D-T01).
-			DevTools: mygo.DevToolsAuto,
+			DevTools:      mygo.DevToolsAuto,
+			PreloadScript: preloadTheme(),
 		},
 	})
 	id := w.ID()
@@ -243,6 +256,39 @@ func focusedWindow() *mygo.Window {
 
 // enqueue adds open requests to a window's queue. A full queue is reported to
 // the user rather than dropping the request silently (PRD §9.2.3).
+// applyAppearance switches every open window at once: the native controls
+// through Theme.SetSource, and each page through an event (PRD FR-10.12).
+func applyAppearance(appearance string) {
+	switch appearance {
+	case appstate.AppearanceLight:
+		mygo.Theme.SetSource(mygo.ThemeLight)
+	case appstate.AppearanceDark:
+		mygo.Theme.SetSource(mygo.ThemeDark)
+	default:
+		mygo.Theme.SetSource(mygo.ThemeSystem)
+	}
+	for _, w := range mygo.Windows() {
+		_ = themeChange.Emit(w, contract.ThemeChange{Appearance: appearance})
+	}
+}
+
+// preloadTheme sets the theme before the page's first paint when the user
+// chose one, so an explicit light or dark preference never flashes the other
+// (DESIGN.md §1). With "system" the page's own script follows the desktop.
+func preloadTheme() string {
+	if appState == nil {
+		return ""
+	}
+	switch appState.Get().Appearance {
+	case appstate.AppearanceLight:
+		return `document.documentElement.dataset.theme = "light";`
+	case appstate.AppearanceDark:
+		return `document.documentElement.dataset.theme = "dark";`
+	default:
+		return ""
+	}
+}
+
 // enqueueKind adds one open request of a kind to a window.
 func enqueueKind(id int, kind, path string) {
 	w, ok := windows.Get(id)

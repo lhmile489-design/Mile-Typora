@@ -58,6 +58,8 @@ type Deps struct {
 	State *appstate.Store
 	// StartupNotice tells the first page why no document was restored.
 	StartupNotice string
+	// ThemeChanged tells every window the appearance preference changed.
+	ThemeChanged func(appearance string)
 	// Confirm asks the user a yes/no question with the reason spelled out.
 	Confirm func(ctx context.Context, title, message, detail string) bool
 	// External opens a URL with the system browser.
@@ -78,6 +80,7 @@ type WindowService struct {
 	state     *appstate.Store
 	// startupNotice is handed to the first page once.
 	startupNotice string
+	themeChanged  func(appearance string)
 	confirm       func(ctx context.Context, title, message, detail string) bool
 	external      func(url string) error
 }
@@ -115,6 +118,7 @@ func NewWindowService(d Deps) *WindowService {
 		watch:         d.Watch,
 		state:         d.State,
 		startupNotice: d.StartupNotice,
+		themeChanged:  d.ThemeChanged,
 		confirm:       d.Confirm,
 		external:      d.External,
 	}

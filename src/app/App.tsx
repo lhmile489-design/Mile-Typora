@@ -30,7 +30,7 @@ import { FindBar } from "../components/FindBar";
 import { advance, clearHighlights, collectRanges, paint, scrollToRange } from "../render/find";
 import { capture, metricsOf, restore, type Position } from "../render/position";
 import { renderMath } from "../render/math";
-import { renderDiagrams } from "../render/mermaid";
+import { renderDiagrams, rerenderDiagrams } from "../render/mermaid";
 
 type ReadyState =
   | { kind: "waiting" }
@@ -120,6 +120,28 @@ export function App({ transport }: { transport: Transport }) {
     [applyFolder, transport],
   );
 
+  // The appearance preference decides the theme for every window at once;
+  // diagrams are redrawn because their SVG keeps its own colours
+  // (PRD FR-10.12, DESIGN.md §1).
+  const applyTheme = useCallback((preference: string) => {
+    const root = document.documentElement;
+    const dark =
+      preference === "dark" ||
+      (preference === "system" &&
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(prefers-color-scheme: dark)").matches);
+    root.setAttribute("data-theme", dark ? "dark" : "light");
+    root.style.colorScheme = dark ? "dark" : "light";
+    if (preference === "system") root.removeAttribute("data-theme-pinned");
+    else root.setAttribute("data-theme-pinned", "1");
+    const article = readerRef.current?.querySelector(".markdown");
+    if (article?.querySelector(".diagram")) void rerenderDiagrams(article);
+  }, []);
+
+  useEffect(() => {
+    return transport.onThemeChange((change) => applyTheme(change.appearance));
+  }, [applyTheme, transport]);
+
   // The settings and the recent list (PRD FR-08, FR-10).
   const loadSettings = useCallback(async () => {
     const result = await transport.getSettings();
@@ -129,8 +151,9 @@ export function App({ transport }: { transport: Transport }) {
     }
     setRecent(result.settings.recent ?? []);
     setSettings({ startup: result.settings.startup, appearance: result.settings.appearance });
+    applyTheme(result.settings.appearance);
     if (result.notice) setNotice(result.notice);
-  }, [transport]);
+  }, [applyTheme, transport]);
 
   useEffect(() => {
     void loadSettings();
@@ -573,6 +596,11 @@ export function App({ transport }: { transport: Transport }) {
         <SettingsDialog
           startup={settings.startup}
           onChangeStartup={(startup) => setSettings({ ...settings, startup })}
+          appearance={settings.appearance}
+          onChangeAppearance={(appearance) => {
+            setSettings({ ...settings, appearance });
+            applyTheme(appearance);
+          }}
           onCancel={() => setSettingsOpen(false)}
           onSave={() => void saveSettings()}
           saving={settingsSaving}

@@ -25,6 +25,7 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     saveSettings: async () => ({ ok: true as const, value: undefined }),
     clearRecent: async () => ({ ok: true as const, value: undefined }),
     openRecent: async () => ({ kind: "handedOff" as const }),
+    onThemeChange: () => () => {},
     scan: () => ({ abort: () => {}, done: Promise.resolve() }),
     ...overrides,
   };
@@ -490,5 +491,41 @@ describe("the settings dialog", () => {
     });
     render(<App transport={fakeTransport({ ready })} />);
     expect(await screen.findByText(/上次阅读的内容已不存在/)).toBeTruthy();
+  });
+});
+
+describe("the appearance preference", () => {
+  it("applies the saved preference once the settings load", async () => {
+    const settings = {
+      kind: "ok" as const,
+      settings: { startup: "blank", appearance: "dark", recent: [] },
+      corrupt: false,
+    };
+    render(<App transport={fakeTransport({ getSettings: async () => settings })} />);
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe("dark"));
+  });
+
+  it("follows a change made in any window", async () => {
+    let push: (change: { appearance: string }) => void = () => {};
+    const onThemeChange = (listener: (change: { appearance: string }) => void) => {
+      push = listener;
+      return () => {};
+    };
+    render(<App transport={fakeTransport({ onThemeChange })} />);
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe("light"));
+    act(() => push({ appearance: "dark" }));
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(document.documentElement.style.colorScheme).toBe("dark");
+  });
+
+  it("saves the appearance chosen in the dialog", async () => {
+    const saveSettings = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    render(<App transport={fakeTransport({ saveSettings })} />);
+    fireEvent.keyDown(window, { key: ",", ctrlKey: true });
+    fireEvent.click(await screen.findByRole("radio", { name: /深色/ }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({ appearance: "dark" }));
+    // The window shows the choice before the save even answers.
+    expect(document.documentElement.dataset.theme).toBe("dark");
   });
 });

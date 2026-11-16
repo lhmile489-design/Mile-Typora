@@ -37,6 +37,7 @@
 - 根元素声明 `color-scheme: light` 或 `color-scheme: dark`，让滚动条、表单控件和 WebView 默认控件跟随主题。
 - 防白闪：`index.html` 引入独立的 `public/theme-init.js`（生产 CSP 禁止内联脚本），在 React 挂载前按 `prefers-color-scheme` 写好 `data-theme`；Go 在建窗前调用 `mygo.Theme.SetSource`。设计稿 HTML 是静态文件，内联脚本只用于演示。原生窗口 `BackgroundColor` 取当前主题的 `--bg-app`（浅 `#FFFFFF`，深 `#1C1D20`）。
 - 渲染后的 Mermaid SVG 颜色写死在 SVG 里，切换主题时要用新的令牌值重新渲染该文档的图表。KaTeX 继承 `currentColor`，不用重新渲染。
+- 显式偏好（浅色或深色）由 Go 在建窗时通过 `PageOptions.PreloadScript` 在首帧前写入 `data-theme`，`theme-init.js` 检测到已有主题就不再按系统覆盖；跟随系统时才由媒体查询决定首帧。应用内改外观后，所有窗口收到 `theme-change` 事件即时切换，Mermaid 按保留的源码重绘。
 - 发布范围：P0 开放三种外观，设置里可选跟随系统、浅色、深色，首次默认跟随系统（PRD C-12、FR-10.12、AC-29）。P2 的“主题”菜单复用同一设置，可再增加内置主题。
 
 ## 2. 颜色令牌

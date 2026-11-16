@@ -4,12 +4,21 @@ type Props = {
   /** "resume" or "blank" (PRD FR-10.1). */
   startup: string;
   onChangeStartup: (startup: string) => void;
+  /** "system", "light" or "dark" (PRD FR-10.12). */
+  appearance: string;
+  onChangeAppearance: (appearance: string) => void;
   onCancel: () => void;
   onSave: () => void;
   saving?: boolean;
   /** "本次设置未保存" and the like, shown above the buttons. */
   error?: string | null;
 };
+
+const APPEARANCES = [
+  { value: "system", label: "跟随系统", hint: "跟着 Windows 的外观切换。" },
+  { value: "light", label: "浅色", hint: "始终使用浅色阅读界面。" },
+  { value: "dark", label: "深色", hint: "始终使用深色阅读界面。" },
+];
 
 const OPTIONS = [
   {
@@ -29,7 +38,16 @@ const OPTIONS = [
  * P0, the startup choice, and buttons that never claim success they did not
  * get. Escape cancels, focus goes in and comes back.
  */
-export function SettingsDialog({ startup, onChangeStartup, onCancel, onSave, saving, error }: Props) {
+export function SettingsDialog({
+  startup,
+  onChangeStartup,
+  appearance,
+  onChangeAppearance,
+  onCancel,
+  onSave,
+  saving,
+  error,
+}: Props) {
   const panel = useRef<HTMLDivElement>(null);
   const first = useRef<HTMLInputElement>(null);
 
@@ -78,6 +96,24 @@ export function SettingsDialog({ startup, onChangeStartup, onCancel, onSave, sav
                     value={option.value}
                     checked={startup === option.value}
                     onChange={() => onChangeStartup(option.value)}
+                  />
+                  <span className="txt">
+                    <span className="label">{option.label}</span>
+                    <span className="hint">{option.hint}</span>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+            <fieldset className="settings-group">
+              <legend>外观</legend>
+              {APPEARANCES.map((option) => (
+                <label key={option.value} className="radio-row">
+                  <input
+                    type="radio"
+                    name="appearance"
+                    value={option.value}
+                    checked={appearance === option.value}
+                    onChange={() => onChangeAppearance(option.value)}
                   />
                   <span className="txt">
                     <span className="label">{option.label}</span>
