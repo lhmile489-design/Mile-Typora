@@ -118,6 +118,7 @@ const loadedDoc = {
     lineEnding: "LF",
     text: "# 标题\n\n正文",
     html: "<h1>标题</h1>\n<p>正文</p>",
+    counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
   },
 };
 

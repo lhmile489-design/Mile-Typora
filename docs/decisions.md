@@ -149,3 +149,16 @@ M1 需验证：mermaid 12 的 `securityLevel: "strict"` 与 `%%{init}%%` 指令�
 - 渲染放在 goroutine 里，`select` 等 8 秒；goldmark 不接受 ctx，超时只是放弃结果，不会真正中断计算（与 Mermaid 的 `Promise.race` 同性质）。病态输入是否需要预检，留到 M1-5 与 Mermaid 一起实测。
 - 安全断言不用子串匹配：转义后的文本本身就会出现 `<script>`、`onerror=` 这些字样。测试用 `x/net/html` 的 token 流遍历输出，断言没有危险元素、事件属性、`style` 和危险协议；token 流没有 512 层嵌套限制，模糊测试发现的深层嵌套输入不会让断言本身崩掉。
 - 模糊测试 60 秒、约 240 万次执行，无 panic、无危险输出。时间上限与深层嵌套的界面观感仍待 M3-7 性能阶段评估。
+
+### D-T19 · 公式与图表：D-T11 三项实测结论
+
+在真实 Chromium（WebView2 同源）里用临时探针页测得，mermaid 12.3.0：
+
+1. **`%%{init}%%` 指令**：文档里的 init 改不动安全相关的配置。渲染后 `securityLevel` 仍是 `strict`，init 里的 `themeVariables`（试过 `primaryColor: #ff0000`）不生效；`maxEdges` 这类安全项在报错里也明确说只能通过 `mermaid.initialize` 设置。产品侧仍然在渲染前拒绝带 init 的图表：多一道防线，也避免让用户以为指令生效了。
+2. **超时能否真正中断**：不能，和 KaTeX 一样是"放弃等待"。好在 mermaid 自己有上限：600 条边的流程图被 `maxEdges`（500）直接拒绝，用时 466 ms，主线程最大延迟 0 ms。因此 3 秒 `Promise.race` 只是兜底，真正拦住病态输入的是 mermaid 的安全配置和我们的 64 KiB / 20 块上限。M3-7 压测时若发现长时间阻塞，再考虑 Worker 预检。
+3. **产物体积**（`bun run build:web`，未压缩）：主包 516 KB；katex 单独 chunk 256 KB，KaTeX 字体 woff2 合计约 292 KB；mermaid 走动态导入，首次渲染图表时另拉 elk 1.5 MB、cytoscape 432 KB 等分块。没有图表的文档不加载 mermaid。dist 总计 6.9 MB，符合离线随包的预期，M3-7 再记录安装包体积。
+
+另外两点实现决定：
+
+- **图表 SVG 里的 `<img>` 一律去掉**：实测 mermaid 在 strict 模式下会保留标签里的 `<img src=x>`（只剥掉 `onerror`），那会让文档指向的地址被请求。DOMPurify 清理时 `FORBID_TAGS: ["img"]`，图表不需要图片。
+- **块级公式改用预处理**：goldmark 的块解析器把 `$$…$$` 之间的行吞成了节点子节点，拿不到原文；passthrough v0.6.0 的块级形式也从未产出块节点。现在在解析前把 `$$`/`\[` 块改写成 `mtmath` 围栏（围栏长度按内容里的反引号数量计算），由我们自己的围栏渲染器处理，代码围栏内的 `$$` 不受影响。

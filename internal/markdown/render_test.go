@@ -12,11 +12,11 @@ import (
 
 func render(t *testing.T, src string) string {
 	t.Helper()
-	out, failure := New().Render(context.Background(), []byte(src))
+	res, failure := New().Render(context.Background(), []byte(src))
 	if failure != nil {
 		t.Fatalf("Render: %+v", failure)
 	}
-	return out
+	return res.HTML
 }
 
 func renderFile(t *testing.T, path string) string {
@@ -183,7 +183,8 @@ func FuzzRender(f *testing.F) {
 
 	renderer := New()
 	f.Fuzz(func(t *testing.T, src []byte) {
-		out, failure := renderer.Render(context.Background(), src)
+		res, failure := renderer.Render(context.Background(), src)
+		out := res.HTML
 		if failure != nil {
 			// A timeout or a refused render is an answer; what matters is that
 			// it is reported instead of crashing.
@@ -191,4 +192,113 @@ func FuzzRender(f *testing.F) {
 		}
 		assertSafe(t, "fuzz", out)
 	})
+}
+
+func renderResult(t *testing.T, src string) Result {
+	t.Helper()
+	res, failure := New().Render(context.Background(), []byte(src))
+	if failure != nil {
+		t.Fatalf("Render: %+v", failure)
+	}
+	return res
+}
+
+func TestMathDelimiters(t *testing.T) {
+	res := renderResult(t, string(mustRead(t, "../../testdata/render/math.md")))
+	if got := strings.Count(res.HTML, `data-display="false"`); got != 3 {
+		t.Errorf("inline formulas = %d, want 3\n%s", got, res.HTML)
+	}
+	if got := strings.Count(res.HTML, `data-display="true"`); got != 2 {
+		t.Errorf("block formulas = %d, want 2\n%s", got, res.HTML)
+	}
+	for _, want := range []string{"E = mc^2", "a^2 + b^2 = c^2", "begin{pmatrix}", "begin{aligned}", "a_i"} {
+		if !strings.Contains(res.HTML, want) {
+			t.Errorf("output lacks %q\n%s", want, res.HTML)
+		}
+	}
+	if res.Counts.Math != 5 {
+		t.Errorf("Counts.Math = %d, want 5", res.Counts.Math)
+	}
+}
+
+func TestEscapedDollarAndCodeStayLiteral(t *testing.T) {
+	res := renderResult(t, string(mustRead(t, "../../testdata/render/math.md")))
+	if !strings.Contains(res.HTML, "$5") {
+		t.Fatalf("the escaped dollar lost its text\n%s", res.HTML)
+	}
+	// The two code samples keep their dollars without becoming formulas.
+	if strings.Count(res.HTML, `class="math"`) != 5 {
+		t.Fatalf("a code sample turned into a formula\n%s", res.HTML)
+	}
+	assertSafe(t, "math.md", res.HTML)
+}
+
+func TestMermaidFencesKeepTheirSource(t *testing.T) {
+	res := renderResult(t, string(mustRead(t, "../../testdata/render/mermaid.md")))
+	if got := strings.Count(res.HTML, `class="mermaid-src"`); got != 8 {
+		t.Fatalf("mermaid blocks = %d, want 8\n%s", got, res.HTML)
+	}
+	if res.Counts.Mermaid != 8 {
+		t.Errorf("Counts.Mermaid = %d, want 8", res.Counts.Mermaid)
+	}
+	for _, want := range []string{"flowchart TD", "sequenceDiagram", "classDiagram", "stateDiagram-v2", "erDiagram", "gantt", "pie"} {
+		if !strings.Contains(res.HTML, want) {
+			t.Errorf("output lacks %q", want)
+		}
+	}
+	// The configuration directive travels as text; the page refuses it.
+	if !strings.Contains(res.HTML, "%%{init:") {
+		t.Error("the init directive is missing from the source text")
+	}
+	assertSafe(t, "mermaid.md", res.HTML)
+}
+
+func TestMathCountLimit(t *testing.T) {
+	var b strings.Builder
+	for range MaxMathBlocks + 1 {
+		b.WriteString("$x$\n\n")
+	}
+	res := renderResult(t, b.String())
+	if res.Counts.Math != MaxMathBlocks+1 || res.Counts.MathLimited != 1 {
+		t.Fatalf("counts = %+v, want %d formulas and 1 limited", res.Counts, MaxMathBlocks+1)
+	}
+	if !strings.Contains(res.HTML, `class="limited"`) {
+		t.Fatal("the over-limit formula is not marked")
+	}
+}
+
+func TestMathSizeLimit(t *testing.T) {
+	big := "$" + strings.Repeat("a", MaxMathBytes+16) + "$"
+	res := renderResult(t, big)
+	if res.Counts.MathLimited != 1 {
+		t.Fatalf("counts = %+v, want one limited formula", res.Counts)
+	}
+	if !strings.Contains(res.HTML, "超过单块上限") {
+		t.Fatalf("reason missing\n%.200s", res.HTML)
+	}
+}
+
+func TestMermaidLimits(t *testing.T) {
+	var b strings.Builder
+	for i := range MaxMermaidBlocks + 1 {
+		b.WriteString("```mermaid\nflowchart TD\n  A" + string(rune('a'+i%26)) + " --> B\n```\n\n")
+	}
+	res := renderResult(t, b.String())
+	if res.Counts.MermaidLimited != 1 {
+		t.Fatalf("counts = %+v, want one limited diagram", res.Counts)
+	}
+
+	huge := "```mermaid\n" + strings.Repeat("A --> B\n", MaxMermaidBytes/8+2) + "```\n"
+	if res := renderResult(t, huge); res.Counts.MermaidLimited != 1 {
+		t.Fatalf("counts = %+v, want the oversized diagram limited", res.Counts)
+	}
+}
+
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	src, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return src
 }

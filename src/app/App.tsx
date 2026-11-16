@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   CircleAlert,
   CircleX,
@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import type { OpenedDoc, OpenRequest, ReadyInfo, Transport } from "../lib/transport";
 import { formatBytes } from "../lib/errors";
+import { renderMath } from "../render/math";
+import { renderDiagrams } from "../render/mermaid";
 
 type ReadyState =
   | { kind: "waiting" }
@@ -194,6 +196,16 @@ export function App({ transport }: { transport: Transport }) {
  * whatever the document contains, only whitelisted markup arrives here.
  */
 function Reader({ doc }: { doc: OpenedDoc }) {
+  const ref = useRef<HTMLElement>(null);
+
+  // One pass per document: formulas and diagrams are the page's job (D-T02).
+  useEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+    renderMath(root);
+    void renderDiagrams(root);
+  }, [doc.html]);
+
   if (doc.text === "") {
     return (
       <div className="empty">
@@ -203,7 +215,7 @@ function Reader({ doc }: { doc: OpenedDoc }) {
   }
   return (
     <div className="reader">
-      <article className="markdown" dangerouslySetInnerHTML={{ __html: doc.html }} />
+      <article ref={ref} className="markdown" dangerouslySetInnerHTML={{ __html: doc.html }} />
     </div>
   );
 }

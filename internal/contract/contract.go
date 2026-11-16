@@ -44,6 +44,17 @@ type Doc struct {
 	Text string `json:"text"`
 	// HTML is the rendered, whitelisted markup the page shows.
 	HTML string `json:"html"`
+	// Counts tells the page how much was enhanced and how much stayed
+	// source because of a limit (PRD §8.3).
+	Counts Counts `json:"counts"`
+}
+
+// Counts are a document's formula and diagram totals.
+type Counts struct {
+	Math           int `json:"math"`
+	MathLimited    int `json:"mathLimited"`
+	Mermaid        int `json:"mermaid"`
+	MermaidLimited int `json:"mermaidLimited"`
 }
 
 // LoadResult answers an open request. Doc is nil when Failure is set or when

@@ -4,6 +4,14 @@ import { call, event } from "mygo-runtime";
 
 // ---- Types ----
 
+/** Counts are a document's formula and diagram totals. */
+export interface Counts {
+  math: number;
+  mathLimited: number;
+  mermaid: number;
+  mermaidLimited: number;
+}
+
 /**
  * Doc is one opened Markdown file, as text. From M1-4 the text becomes
  * rendered HTML.
@@ -18,6 +26,11 @@ export interface Doc {
   text: string;
   /** HTML is the rendered, whitelisted markup the page shows. */
   html: string;
+  /**
+   * Counts tells the page how much was enhanced and how much stayed
+   * source because of a limit (PRD §8.3).
+   */
+  counts: Counts;
 }
 
 /**

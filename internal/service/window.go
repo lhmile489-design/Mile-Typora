@@ -119,7 +119,7 @@ func (s *WindowService) OpenFileDialog(ctx context.Context) (contract.LoadResult
 			Limit:  readFailure.Limit,
 		}}, nil
 	}
-	html, renderFailure := s.render.Render(ctx, []byte(doc.Text))
+	rendered, renderFailure := s.render.Render(ctx, []byte(doc.Text))
 	if renderFailure != nil {
 		return contract.LoadResult{Failure: &contract.Failure{
 			Code: renderFailure.Code, Detail: renderFailure.Detail,
@@ -133,7 +133,13 @@ func (s *WindowService) OpenFileDialog(ctx context.Context) (contract.LoadResult
 		HasBOM:     doc.HasBOM,
 		LineEnding: doc.LineEnding,
 		Text:       doc.Text,
-		HTML:       html,
+		HTML:       rendered.HTML,
+		Counts: contract.Counts{
+			Math:           rendered.Counts.Math,
+			MathLimited:    rendered.Counts.MathLimited,
+			Mermaid:        rendered.Counts.Mermaid,
+			MermaidLimited: rendered.Counts.MermaidLimited,
+		},
 	}}, nil
 }
 

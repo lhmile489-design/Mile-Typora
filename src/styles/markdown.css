@@ -114,3 +114,65 @@
 .markdown img { max-width: 100%; height: auto; }
 
 .markdown ::selection { background: var(--bg-selected); }
+
+/* 公式（DESIGN.md §8.4）：行内随基线，块级居中，宽公式横向滚动 */
+.markdown .math[data-display="true"] {
+  margin: 1em 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.markdown .math-error {
+  display: block;
+  margin: 1em 0;
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--bg-sunken);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-md);
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  color: var(--text-soft);
+  white-space: pre-wrap;
+}
+.markdown .math-error::before {
+  content: "公式语法错误：" attr(data-reason);
+  display: block;
+  margin-bottom: var(--sp-1);
+  color: var(--text-muted);
+}
+
+/* 图表（§8.4）与降级（§8.6） */
+.markdown .diagram { margin: 1em 0; text-align: center; overflow-x: auto; }
+.markdown .diagram svg { max-width: 100%; height: auto; }
+.markdown .mermaid-src.diagram-error {
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-md);
+  color: var(--text-soft);
+}
+.markdown .mermaid-src.diagram-error::before {
+  content: attr(data-reason);
+  display: block;
+  margin-bottom: var(--sp-1);
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+}
+
+/* 超限块（§8.6）：源文照常可读，只多一行原因 */
+.markdown .limited {
+  margin: 0 0 1em;
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--bg-sunken);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-md);
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  color: var(--text-soft);
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+.markdown .limited::before {
+  content: attr(data-reason);
+  display: block;
+  margin-bottom: var(--sp-1);
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+}
