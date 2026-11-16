@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/lhmile489-design/mile-typora/internal/markdown"
 	"github.com/lhmile489-design/mile-typora/internal/pathguard"
 	"github.com/lhmile489-design/mile-typora/internal/resource"
+	"github.com/lhmile489-design/mile-typora/internal/scan"
 	"github.com/lhmile489-design/mile-typora/internal/watch"
 	"github.com/lhmile489-design/mile-typora/internal/winctx"
 )
@@ -41,6 +43,17 @@ type WatchFunc func(ctx context.Context, path string, onEvent func(watch.Event))
 type Picker func(ctx context.Context) (string, error)
 
 // WindowService manages the windows of the app.
+// Deps are what a WindowService needs from its host. main supplies the real
+// ones; tests supply their own.
+type Deps struct {
+	Windows    *winctx.Registry
+	Open       Opener
+	PickFile   Picker
+	PickFolder Picker
+	Resources  *resource.Store
+	Watch      WatchFunc
+}
+
 type WindowService struct {
 	// caller finds the calling window's ID; tests replace it.
 	caller    func(ctx context.Context) (int, bool)
@@ -48,6 +61,7 @@ type WindowService struct {
 	windows   *winctx.Registry
 	open      Opener
 	pick      Picker
+	pickDir   Picker
 	render    *markdown.Renderer
 	resources *resource.Store
 	watch     WatchFunc
@@ -55,9 +69,12 @@ type WindowService struct {
 
 // NewWindowService returns a WindowService over the open windows. resources is
 // the store the mtres protocol serves from; main registers that handler.
-func NewWindowService(windows *winctx.Registry, open Opener, pick Picker, resources *resource.Store, watchFn WatchFunc) *WindowService {
-	if pick == nil {
-		pick = PickMarkdown
+func NewWindowService(d Deps) *WindowService {
+	if d.PickFile == nil {
+		d.PickFile = PickMarkdown
+	}
+	if d.PickFolder == nil {
+		d.PickFolder = PickFolder
 	}
 	return &WindowService{
 		caller: func(ctx context.Context) (int, bool) {
@@ -68,12 +85,13 @@ func NewWindowService(windows *winctx.Registry, open Opener, pick Picker, resour
 			return w.ID(), true
 		},
 		version:   mygo.App.Version,
-		windows:   windows,
-		open:      open,
-		pick:      pick,
+		windows:   d.Windows,
+		open:      d.Open,
+		pick:      d.PickFile,
+		pickDir:   d.PickFolder,
 		render:    markdown.New(),
-		resources: resources,
-		watch:     watchFn,
+		resources: d.Resources,
+		watch:     d.Watch,
 	}
 }
 
@@ -171,6 +189,117 @@ func PickMarkdown(ctx context.Context) (string, error) {
 		return "", nil
 	}
 	return paths[0], nil
+}
+
+// PickFolder asks the system for one folder. Choosing it is the authorization
+// to read what is inside (PRD FR-06.1).
+func PickFolder(ctx context.Context) (string, error) {
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Parent:    mygo.CallerWindow(ctx),
+		Title:     "打开文件夹",
+		Directory: true,
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(paths) == 0 {
+		return "", nil
+	}
+	return paths[0], nil
+}
+
+// OpenFolderDialog asks for a folder and makes it the window's root. The page
+// then asks for its tree with Scan.
+func (s *WindowService) OpenFolderDialog(ctx context.Context) (contract.OpenFolderResult, error) {
+	w, err := s.callerWindow(ctx)
+	if err != nil {
+		return contract.OpenFolderResult{}, err
+	}
+	chosen, err := s.pickDir(ctx)
+	if err != nil {
+		return contract.OpenFolderResult{}, err
+	}
+	if chosen == "" {
+		return contract.OpenFolderResult{}, nil
+	}
+	real, pathFailure := pathguard.Canon(chosen)
+	if pathFailure != nil {
+		return contract.OpenFolderResult{Failure: &contract.Failure{
+			Code: pathFailure.Code, Detail: pathFailure.Detail,
+		}}, nil
+	}
+	info, err := os.Stat(real)
+	if err != nil || !info.IsDir() {
+		return contract.OpenFolderResult{Failure: &contract.Failure{
+			Code:   "unsupported_type",
+			Detail: "请选择一个文件夹",
+		}}, nil
+	}
+	w.SetRoot(real)
+	return contract.OpenFolderResult{Root: real, Name: filepath.Base(real)}, nil
+}
+
+// Scan streams the tree of the window's folder in frames, ending with one
+// marked Done (PRD FR-03). A page that stops reading closes the channel and
+// the scan stops with it.
+func (s *WindowService) Scan(ctx context.Context, frames *mygo.Channel[contract.ScanFrame]) error {
+	w, err := s.callerWindow(ctx)
+	if err != nil {
+		return err
+	}
+	root, ok := w.Root()
+	if !ok {
+		_ = frames.Send(contract.ScanFrame{Done: true, Failure: &contract.Failure{
+			Code:   "no_folder",
+			Detail: "尚未打开文件夹",
+		}})
+		return nil
+	}
+	result, err := scan.Scan(ctx, root, scan.Options{})
+	if err != nil {
+		_ = frames.Send(contract.ScanFrame{Done: true, Failure: &contract.Failure{
+			Code:   "scan_failed",
+			Detail: "无法读取此文件夹",
+		}})
+		return nil
+	}
+
+	for _, frame := range scanFrames(result) {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err := frames.Send(frame); err != nil {
+			return nil // the page is done with this tree
+		}
+	}
+	return nil
+}
+
+// ScanBatch is how many entries one frame carries: the page draws its first
+// rows before the whole tree is on its way (PRD §8.2).
+const ScanBatch = 500
+
+// scanFrames slices a scan into the frames the page receives. The last frame
+// is marked Done and carries the outcome.
+func scanFrames(result scan.Result) []contract.ScanFrame {
+	frames := make([]contract.ScanFrame, 0, len(result.Entries)/ScanBatch+1)
+	for start := 0; start < len(result.Entries); start += ScanBatch {
+		end := min(start+ScanBatch, len(result.Entries))
+		frame := contract.ScanFrame{Entries: make([]contract.TreeEntry, 0, end-start)}
+		for _, entry := range result.Entries[start:end] {
+			frame.Entries = append(frame.Entries, contract.TreeEntry{
+				Path: entry.Path, Name: entry.Name, IsDir: entry.IsDir,
+			})
+		}
+		frames = append(frames, frame)
+	}
+	frames = append(frames, contract.ScanFrame{
+		Done:      true,
+		Truncated: result.Truncated,
+		Bound:     result.Bound,
+		Skipped:   result.Skipped,
+	})
+	return frames
 }
 
 // OpenFileDialog asks for a Markdown file and reads it (FR-01). Cancelling

@@ -43,7 +43,14 @@ func main() {
 	if err := mygo.Protocol.HandleFunc(resource.Scheme, resources.ServeHTTP); err != nil {
 		log.Fatal(err)
 	}
-	mygo.Bind(service.NewWindowService(windows, openWindow, service.PickMarkdown, resources, watch.Start))
+	mygo.Bind(service.NewWindowService(service.Deps{
+		Windows:    windows,
+		Open:       openWindow,
+		PickFile:   service.PickMarkdown,
+		PickFolder: service.PickFolder,
+		Resources:  resources,
+		Watch:      watch.Start,
+	}))
 
 	mygo.App.WhenReady(func() {
 		// The window opened for this launch: its page loads next, so these

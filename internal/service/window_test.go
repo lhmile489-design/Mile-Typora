@@ -3,13 +3,18 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/egoist/mygo"
+
+	"github.com/lhmile489-design/mile-typora/internal/contract"
 	"github.com/lhmile489-design/mile-typora/internal/markdown"
 	"github.com/lhmile489-design/mile-typora/internal/resource"
+	"github.com/lhmile489-design/mile-typora/internal/scan"
 	"github.com/lhmile489-design/mile-typora/internal/winctx"
 )
 
@@ -24,6 +29,7 @@ func newTestService(callerID int, registered bool) (*WindowService, *winctx.Regi
 		windows:   reg,
 		open:      func() (int, error) { return 99, nil },
 		pick:      func(context.Context) (string, error) { return "", nil },
+		pickDir:   func(context.Context) (string, error) { return "", nil },
 		render:    markdown.New(),
 		resources: resource.New(),
 	}, reg
@@ -139,7 +145,7 @@ func TestNewWindowRequiresCaller(t *testing.T) {
 
 func TestNewWindowServiceOutsideCall(t *testing.T) {
 	// A context that did not come from a page call has no window.
-	s := NewWindowService(winctx.NewRegistry(), func() (int, error) { return 1, nil }, nil, resource.New(), nil)
+	s := NewWindowService(Deps{Windows: winctx.NewRegistry(), Open: func() (int, error) { return 1, nil }, Resources: resource.New()})
 	if _, err := s.Ready(context.Background()); !errors.Is(err, ErrNoCallerWindow) {
 		t.Fatalf("Ready error = %v, want ErrNoCallerWindow", err)
 	}
@@ -292,5 +298,80 @@ func TestOpenFileDialogServesImagesThroughTokens(t *testing.T) {
 	}
 	if strings.Contains(got.Doc.HTML, "图.png\"") {
 		t.Fatalf("the raw image path reached the page: %s", got.Doc.HTML)
+	}
+}
+
+func TestOpenFolderDialogSetsTheWindowRoot(t *testing.T) {
+	dir := t.TempDir()
+	s, reg := newTestService(1, true)
+	s.pickDir = func(context.Context) (string, error) { return dir, nil }
+
+	got, err := s.OpenFolderDialog(context.Background())
+	if err != nil {
+		t.Fatalf("OpenFolderDialog: %v", err)
+	}
+	if got.Failure != nil || got.Root == "" {
+		t.Fatalf("result = %+v, want a root", got)
+	}
+	w, _ := reg.Get(1)
+	if root, ok := w.Root(); !ok || root != got.Root {
+		t.Fatalf("window root = %q, %v; want %q", root, ok, got.Root)
+	}
+}
+
+func TestOpenFolderDialogRejectsAFile(t *testing.T) {
+	dir := t.TempDir()
+	file := writeSample(t, dir, "a.md", []byte("# a"))
+	s, _ := newTestService(1, true)
+	s.pickDir = func(context.Context) (string, error) { return file, nil }
+
+	got, _ := s.OpenFolderDialog(context.Background())
+	if got.Failure == nil || got.Failure.Code != "unsupported_type" {
+		t.Fatalf("failure = %+v, want unsupported_type", got.Failure)
+	}
+}
+
+func TestOpenFolderDialogCancelled(t *testing.T) {
+	s, reg := newTestService(1, true)
+	got, err := s.OpenFolderDialog(context.Background())
+	if err != nil {
+		t.Fatalf("OpenFolderDialog: %v", err)
+	}
+	if got.Root != "" || got.Failure != nil {
+		t.Fatalf("result = %+v, want an empty result", got)
+	}
+	if w, _ := reg.Get(1); func() bool { _, ok := w.Root(); return ok }() {
+		t.Fatal("a cancelled dialog set a root")
+	}
+}
+
+func TestScanWithoutRootReportsIt(t *testing.T) {
+	s, _ := newTestService(1, true)
+	// A channel that takes nothing: the frame is dropped, but the call must
+	// still answer without an error.
+	if err := s.Scan(context.Background(), &mygo.Channel[contract.ScanFrame]{}); err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+}
+
+func TestScanFramesBatching(t *testing.T) {
+	entries := make([]scan.Entry, ScanBatch*2+1)
+	for i := range entries {
+		entries[i] = scan.Entry{Path: fmt.Sprintf("%d.md", i), Name: fmt.Sprintf("%d.md", i)}
+	}
+	frames := scanFrames(scan.Result{Entries: entries, Truncated: true, Bound: "entries", Skipped: 2})
+	if len(frames) != 4 {
+		t.Fatalf("frames = %d, want 4 (3 batches and a done frame)", len(frames))
+	}
+	total := 0
+	for _, f := range frames[:3] {
+		total += len(f.Entries)
+	}
+	if total != len(entries) {
+		t.Fatalf("entries in frames = %d, want %d", total, len(entries))
+	}
+	last := frames[len(frames)-1]
+	if !last.Done || !last.Truncated || last.Bound != "entries" || last.Skipped != 2 {
+		t.Fatalf("last frame = %+v, want the outcome", last)
 	}
 }

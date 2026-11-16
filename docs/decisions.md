@@ -180,3 +180,16 @@ M1 需验证：mermaid 12 的 `securityLevel: "strict"` 与 `%%{init}%%` 指令�
 - 监听按文件所在目录登记（mygo 的做法），所以编辑器替换文件也能看到；每个窗口只监听当前文档，换文档时先停旧监听（`winctx.Window` 上带 `SetStopWatch`）。
 - 扫描的联接判定：Go 1.23 起 `EvalSymlinks` 不解析目录联接，`Lstat` 报 `ModeIrregular`；扫描与 `pathguard.CheckComponents` 都用这条判断，实测 `mklink /J` 被正确跳过。
 - 打包：`bun run build` 产物 `Mile Typora.exe` 18.4 MB、安装包 6.2 MB；停掉 Vite 后独立运行正常，说明前端已嵌入。
+
+### D-T22 · 文件树的分批推送与测试环境
+
+- 目录扫描一次算完，再按 500 条一帧经 `Channel` 推给页面：只有一份条目内存、顺序天然正确，页面边收边画。若 M3-7 测出 1 万条目首批超过 1 秒，再把扫描本身改成边扫边发。
+- 页面关闭 Channel（离开或换文件夹）时 Go 的 `Send` 返回错误，扫描就此结束，不残留后台遍历。
+- jsdom 不做布局，`@tanstack/react-virtual` 拿不到滚动容器高度就一行不渲染。`src/test/setup.ts` 给了 `ResizeObserver` 桩和固定的 `clientHeight` / `getBoundingClientRect`，让组件测试能看到行；node 环境的测试（令牌比对）在 setup 里直接返回。
+- 文件树的选中与键盘焦点分开表达（DESIGN §8.2）：选中是 `--bg-selected` + `--accent`，焦点是 2px 内描边；方向键移动焦点，Enter 选中。
+
+### D-T23 · 右侧预留栏默认收起
+
+- 用户 2026-11-16 要求默认不打开右侧栏。PRD D-06 由"默认显示"改为"默认收起、可随时展开"，设计和实现同步。
+- 理由：P0 的右侧栏按 PRD 只放一行标题，默认展开等于白占 260px 阅读空间；接入 Agents 是未来阶段的事。
+- 实现：`App` 的 `showRight` 初值 `false`；工具栏开关与 `aria-pressed` 仍然表达真实状态。窗口宽度规则（窄窗口收起）留给 M3-5。

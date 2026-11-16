@@ -13,6 +13,8 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     pending: async () => ({ ok: true, value: [] }),
     ack: async () => {},
     openFile: async () => ({ kind: "cancelled" }),
+    openFolder: async () => ({ kind: "cancelled" }),
+    scan: () => ({ abort: () => {}, done: Promise.resolve() }),
     ...overrides,
   };
 }
@@ -23,18 +25,19 @@ describe("App shell", () => {
     expect(screen.getByRole("toolbar", { name: "工具栏" })).toBeTruthy();
     expect(screen.getByRole("complementary", { name: "文件树" })).toBeTruthy();
     expect(screen.getByRole("main")).toBeTruthy();
-    expect(screen.getByRole("complementary", { name: "预留侧栏" })).toBeTruthy();
+    // The reserved pane starts collapsed (decisions.md D-T23).
+    expect(screen.queryByRole("complementary", { name: "预留侧栏" })).toBeNull();
     expect(screen.getByText("开始阅读")).toBeTruthy();
   });
 
   it("keeps unwired toolbar commands visible but disabled", () => {
     render(<App transport={fakeTransport()} />);
-    for (const name of ["打开目录", "刷新", "查找", "设置"]) {
+    for (const name of ["刷新", "查找", "设置"]) {
       const b = screen.getByRole("button", { name });
       expect(b.getAttribute("aria-disabled")).toBe("true");
     }
     // Wired commands work, so they are not disabled.
-    for (const name of ["打开文件", "新建窗口", "左侧栏", "预留侧栏"]) {
+    for (const name of ["打开文件", "打开目录", "新建窗口", "左侧栏", "预留侧栏"]) {
       expect(screen.getByRole("button", { name }).getAttribute("aria-disabled")).toBeNull();
     }
   });
@@ -55,8 +58,10 @@ describe("App shell", () => {
     fireEvent.click(left);
     expect(left.getAttribute("aria-pressed")).toBe("false");
     expect(screen.queryByRole("complementary", { name: "文件树" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "预留侧栏" }));
-    expect(screen.queryByRole("complementary", { name: "预留侧栏" })).toBeNull();
+    const right = screen.getByRole("button", { name: "预留侧栏" });
+    expect(right.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(right);
+    expect(screen.getByRole("complementary", { name: "预留侧栏" })).toBeTruthy();
   });
 
   it("opens a window from the toolbar", () => {
@@ -169,5 +174,57 @@ describe("opening a file", () => {
     fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
     expect(await screen.findByText("这是一个空 Markdown 文件")).toBeTruthy();
     expect(screen.queryByText("无法打开文件")).toBeNull();
+  });
+});
+
+describe("opening a folder", () => {
+  const treeEntries = [
+    { path: "sub", name: "sub", isDir: true },
+    { path: "sub/b.md", name: "b.md", isDir: false },
+    { path: "a.md", name: "a.md", isDir: false },
+  ];
+
+  function folderTransport(frameExtra: Record<string, unknown> = {}) {
+    return fakeTransport({
+      openFolder: async () => ({ kind: "opened", root: "E:\notes", name: "notes" }),
+      scan: (onFrame) => {
+        queueMicrotask(() => {
+          onFrame({ entries: treeEntries, done: false } as never);
+          onFrame({ entries: [], done: true, truncated: false, ...frameExtra } as never);
+        });
+        return { abort: () => {}, done: Promise.resolve() };
+      },
+    });
+  }
+
+  it("shows the tree as it streams in", async () => {
+    render(<App transport={folderTransport()} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
+    expect(await screen.findByRole("tree", { name: "文件树" })).toBeTruthy();
+    expect(await screen.findByText("sub")).toBeTruthy();
+    expect(screen.getByText("a.md")).toBeTruthy();
+  });
+
+  it("opens the folder with Ctrl+Shift+O", () => {
+    const openFolder = vi.fn(async () => ({ kind: "cancelled" as const }));
+    render(<App transport={fakeTransport({ openFolder })} />);
+    fireEvent.keyDown(window, { key: "O", ctrlKey: true, shiftKey: true });
+    expect(openFolder).toHaveBeenCalledTimes(1);
+  });
+
+  it("says when the scan stopped at a bound", async () => {
+    render(<App transport={folderTransport({ truncated: true, bound: "markdown", skipped: 3 })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
+    expect(await screen.findByText(/结果不完整：达到文件数量上限，另有 3 项未包含/)).toBeTruthy();
+  });
+
+  it("selects a file with the keyboard", async () => {
+    render(<App transport={folderTransport()} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
+    const tree = await screen.findByRole("tree", { name: "文件树" });
+    fireEvent.keyDown(tree, { key: "ArrowDown" });
+    fireEvent.keyDown(tree, { key: "Enter" });
+    const selected = await screen.findByRole("treeitem", { name: /b\.md/, selected: true });
+    expect(selected).toBeTruthy();
   });
 });

@@ -12,8 +12,9 @@ import {
   Settings,
   SquarePlus,
 } from "lucide-react";
-import type { OpenedDoc, OpenRequest, ReadyInfo, Transport } from "../lib/transport";
-import { formatBytes } from "../lib/errors";
+import type { OpenedDoc, OpenRequest, ReadyInfo, ScanFrame, Transport, TreeEntry } from "../lib/transport";
+import { failureMessage, formatBytes } from "../lib/errors";
+import { FileTree } from "../components/FileTree";
 import { renderMath } from "../render/math";
 import { renderDiagrams } from "../render/mermaid";
 
@@ -36,8 +37,16 @@ export function App({ transport }: { transport: Transport }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [doc, setDoc] = useState<OpenedDoc | null>(null);
   const [loadError, setLoadError] = useState<LoadError | null>(null);
+  const [folder, setFolder] = useState<{ root: string; name: string } | null>(null);
+  const [tree, setTree] = useState<TreeEntry[]>([]);
+  const [treeNotice, setTreeNotice] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
+  const scanRef = useRef<{ abort: () => void } | null>(null);
   const [showLeft, setShowLeft] = useState(true);
-  const [showRight, setShowRight] = useState(true);
+  // The reserved pane starts collapsed: reading comes first, and the pane
+  // has nothing in it yet (PRD D-06, decisions.md D-T23).
+  const [showRight, setShowRight] = useState(false);
 
   // Requests live in the Go-side queue until acknowledged, so subscribing
   // before the handshake and fetching what is pending loses nothing: a
@@ -81,6 +90,45 @@ export function App({ transport }: { transport: Transport }) {
     }
   }, [transport]);
 
+  // Opening a folder replaces the tree, dropping any scan still running.
+  const openFolder = useCallback(async () => {
+    setNotice(null);
+    const result = await transport.openFolder();
+    if (result.kind === "failed") {
+      setLoadError({ code: result.code, message: result.message });
+      return;
+    }
+    if (result.kind !== "opened") return;
+
+    scanRef.current?.abort();
+    setFolder({ root: result.root, name: result.name });
+    setDoc(null);
+    setLoadError(null);
+    setSelected(null);
+    setTree([]);
+    setTreeNotice(null);
+    setScanning(true);
+
+    const rows: TreeEntry[] = [];
+    scanRef.current = transport.scan((frame: ScanFrame) => {
+      if (frame.failure) {
+        setScanning(false);
+        setTreeNotice(failureMessage(frame.failure.code, frame.failure.detail));
+        return;
+      }
+      if (frame.entries.length > 0) {
+        rows.push(...frame.entries);
+        setTree([...rows]);
+      }
+      if (frame.done) {
+        setScanning(false);
+        setTreeNotice(frame.truncated ? scanNotice(frame) : null);
+      }
+    });
+  }, [transport]);
+
+  useEffect(() => () => scanRef.current?.abort(), []);
+
   const newWindow = useCallback(async () => {
     setNotice(null);
     const r = await transport.newWindow();
@@ -95,6 +143,11 @@ export function App({ transport }: { transport: Transport }) {
         void openFile();
         return;
       }
+      if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === "O" || e.key === "o")) {
+        e.preventDefault();
+        void openFolder();
+        return;
+      }
       if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === "N" || e.key === "n")) {
         e.preventDefault();
         void newWindow();
@@ -102,13 +155,13 @@ export function App({ transport }: { transport: Transport }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openFile, newWindow]);
+  }, [openFile, openFolder, newWindow]);
 
   return (
     <div className="win">
       <div className="toolbar" role="toolbar" aria-label="工具栏">
         <ToolButton label="打开文件" icon={<FileText />} labeled onClick={() => void openFile()} />
-        <ToolButton label="打开目录" icon={<FolderOpen />} labeled disabled />
+        <ToolButton label="打开目录" icon={<FolderOpen />} labeled onClick={() => void openFolder()} />
         <ToolButton label="新建窗口" icon={<SquarePlus />} onClick={() => void newWindow()} />
         <span className="sep" aria-hidden="true" />
         <ToolButton label="刷新" icon={<RefreshCw />} disabled />
@@ -131,9 +184,20 @@ export function App({ transport }: { transport: Transport }) {
       <div className="body">
         {showLeft && (
           <aside className="side left" aria-label="文件树">
-            <div className="empty">
-              <p>{doc ? doc.name : "尚未打开文件或目录"}</p>
-            </div>
+            {folder ? (
+              <FileTree
+                rootName={folder.name}
+                entries={tree}
+                selected={selected}
+                onSelect={(entry) => setSelected(entry.path)}
+                busy={scanning}
+                notice={treeNotice}
+              />
+            ) : (
+              <div className="empty">
+                <p>{doc ? doc.name : "尚未打开文件或目录"}</p>
+              </div>
+            )}
           </aside>
         )}
         <main className="center">
@@ -295,4 +359,11 @@ function ReadyBadge({ state }: { state: ReadyState }) {
         </span>
       );
   }
+}
+
+/** scanNotice says which bound stopped the scan and what it left out. */
+function scanNotice(frame: ScanFrame): string {
+  const bound = frame.bound === "markdown" ? "文件数量" : frame.bound === "depth" ? "目录深度" : "条目数量";
+  const skipped = frame.skipped ? `，另有 ${frame.skipped} 项未包含` : "";
+  return `结果不完整：达到${bound}上限${skipped}`;
 }

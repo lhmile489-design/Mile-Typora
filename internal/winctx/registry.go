@@ -19,6 +19,7 @@ type Window struct {
 	// the watch on it.
 	stateMu   sync.Mutex
 	openFile  string
+	root      string
 	stopWatch func()
 }
 
@@ -28,6 +29,22 @@ func (w *Window) ID() int { return w.id }
 // Context is cancelled when the window closes. Bind work that belongs to the
 // window to it, so closing the window stops the work.
 func (w *Window) Context() context.Context { return w.ctx }
+
+// SetRoot records the folder the window browses, and forgets the file, which
+// belonged to the previous folder.
+func (w *Window) SetRoot(root string) {
+	w.stateMu.Lock()
+	w.root = root
+	w.openFile = ""
+	w.stateMu.Unlock()
+}
+
+// Root is the folder the window browses, if any.
+func (w *Window) Root() (string, bool) {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	return w.root, w.root != ""
+}
 
 // SetOpenFile records the file the window shows. The path is canonical and was
 // authorized by the user's choice in the system dialog.

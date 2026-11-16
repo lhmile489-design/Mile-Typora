@@ -64,6 +64,32 @@ type LoadResult struct {
 	Failure *Failure `json:"failure,omitempty"`
 }
 
+// TreeEntry is one row of the file tree: a folder or a Markdown file.
+type TreeEntry struct {
+	// Path is relative to the folder's root, separated by slashes.
+	Path  string `json:"path"`
+	Name  string `json:"name"`
+	IsDir bool   `json:"isDir"`
+}
+
+// ScanFrame is one batch of a folder scan. The page appends Entries as they
+// arrive; Done marks the last frame, which carries the outcome.
+type ScanFrame struct {
+	Entries   []TreeEntry `json:"entries"`
+	Done      bool        `json:"done"`
+	Truncated bool     `json:"truncated,omitempty"`
+	Bound     string   `json:"bound,omitempty"`
+	Skipped   int      `json:"skipped,omitempty"`
+	Failure   *Failure `json:"failure,omitempty"`
+}
+
+// OpenFolderResult answers the folder dialog. Root is empty when cancelled.
+type OpenFolderResult struct {
+	Root    string   `json:"root"`
+	Name    string   `json:"name"`
+	Failure *Failure `json:"failure,omitempty"`
+}
+
 // NewWindowResult answers a request for another window. WindowID is zero when
 // Failure is set.
 type NewWindowResult struct {

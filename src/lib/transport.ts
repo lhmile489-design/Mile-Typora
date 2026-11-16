@@ -2,10 +2,27 @@
 // (CLAUDE.md §5.8). Components receive a Transport, so tests and design-time
 // mocks can supply their own.
 import { isCallError } from "mygo-runtime";
-import { WindowService, events, type Doc, type OpenRequest, type ReadyInfo } from "../mygo";
+import { Channel } from "mygo-runtime";
+import {
+  WindowService,
+  events,
+  type Doc,
+  type OpenRequest,
+  type ReadyInfo,
+  type ScanFrame,
+} from "../mygo";
 import { failureMessage } from "./errors";
 
-export type { Doc as OpenedDoc, OpenRequest, ReadyInfo };
+export type { Doc as OpenedDoc, OpenRequest, ReadyInfo, ScanFrame };
+
+/** One row of the file tree, as Go sends it. */
+export type TreeEntry = ScanFrame["entries"][number];
+
+/** What opening a folder produced. */
+export type OpenFolderResult =
+  | { kind: "cancelled" }
+  | { kind: "opened"; root: string; name: string }
+  | { kind: "failed"; code: string; message: string };
 
 /** What opening a file produced: a document, a cancellation, or a problem. */
 export type OpenFileResult =
@@ -31,6 +48,13 @@ export interface Transport {
   ack(seq: number): Promise<void>;
   /** Asks for a Markdown file with the system dialog and reads it. */
   openFile(): Promise<OpenFileResult>;
+  /** Asks for a folder and makes it the window's root. */
+  openFolder(): Promise<OpenFolderResult>;
+  /**
+   * Streams the tree of the window's folder. Each frame appends rows; the
+   * frame marked done carries the outcome. Abort stops the stream.
+   */
+  scan(onFrame: (frame: ScanFrame) => void): { abort: () => void; done: Promise<void> };
 }
 
 /** wrap turns a rejected call into an Outcome, so callers never see a throw. */
@@ -58,6 +82,33 @@ export const mygoTransport: Transport = {
       return result.requests;
     }),
   ack: (seq) => WindowService.ack(seq),
+  openFolder: async () => {
+    try {
+      const result = await WindowService.openFolderDialog();
+      if (result.failure) {
+        return {
+          kind: "failed",
+          code: result.failure.code,
+          message: failureMessage(result.failure.code, result.failure.detail),
+        };
+      }
+      if (!result.root) return { kind: "cancelled" };
+      return { kind: "opened", root: result.root, name: result.name };
+    } catch (err) {
+      return { kind: "failed", code: "unknown", message: failureMessage("unknown", err instanceof Error ? err.message : "") };
+    }
+  },
+  scan: (onFrame) => {
+    const frames = new Channel<ScanFrame>();
+    const reading = (async () => {
+      for await (const frame of frames) onFrame(frame);
+    })();
+    const done = WindowService.scan(frames).then(
+      () => reading,
+      () => reading,
+    );
+    return { abort: () => frames.close(), done };
+  },
   openFile: async () => {
     try {
       const result = await WindowService.openFileDialog();
