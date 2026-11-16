@@ -85,6 +85,18 @@ func (w *Window) PendingSince(after int64) []Intent {
 	return out
 }
 
+// Intent returns the request with this seq while it is still queued.
+func (w *Window) Intent(seq int64) (Intent, bool) {
+	w.q.mu.Lock()
+	defer w.q.mu.Unlock()
+	for _, it := range w.q.items {
+		if it.Seq == seq {
+			return it, true
+		}
+	}
+	return Intent{}, false
+}
+
 // Ack records that the page handled every request up to seq, which frees the
 // queue. An older seq changes nothing.
 func (w *Window) Ack(seq int64) {

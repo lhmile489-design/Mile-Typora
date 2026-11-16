@@ -317,6 +317,38 @@ func (s *WindowService) OpenFileDialog(ctx context.Context) (contract.LoadResult
 		return contract.LoadResult{}, nil
 	}
 
+	return s.openPath(ctx, w, chosen)
+}
+
+// OpenRequested opens what a queued request names: a file association, a
+// command-line argument, or another instance's request (PRD FR-02.8). The
+// request is acknowledged once handled, whether it opened or not.
+func (s *WindowService) OpenRequested(ctx context.Context, seq int64) (contract.LoadResult, error) {
+	w, err := s.callerWindow(ctx)
+	if err != nil {
+		return contract.LoadResult{}, err
+	}
+	request, ok := w.Intent(seq)
+	if !ok {
+		// Already handled: a page that remounted (React StrictMode) or
+		// reloaded asks again. Give it the document the window shows, so the
+		// request is not lost to a discarded render.
+		if path, has := w.OpenFile(); has {
+			return s.openPath(ctx, w, path)
+		}
+		return contract.LoadResult{Failure: &contract.Failure{
+			Code:   "request_expired",
+			Detail: "这次打开请求已经处理过",
+		}}, nil
+	}
+	result, err := s.openPath(ctx, w, request.Path)
+	w.Ack(seq)
+	return result, err
+}
+
+// openPath validates a path the user chose or was handed, reads and renders
+// it, and makes it the window's document.
+func (s *WindowService) openPath(ctx context.Context, w *winctx.Window, chosen string) (contract.LoadResult, error) {
 	real, pathFailure := pathguard.Canon(chosen)
 	if pathFailure != nil {
 		return contract.LoadResult{Failure: &contract.Failure{
@@ -345,6 +377,12 @@ func (s *WindowService) OpenFileDialog(ctx context.Context) (contract.LoadResult
 			Code: renderFailure.Code, Detail: renderFailure.Detail,
 		}}, nil
 	}
+	return s.showDocument(ctx, w, real, doc, rendered)
+}
+
+// showDocument finishes an open: the window remembers the file, watches it for
+// changes, and the page receives the document.
+func (s *WindowService) showDocument(ctx context.Context, w *winctx.Window, real string, doc *docread.Doc, rendered markdown.Result) (contract.LoadResult, error) {
 	w.SetOpenFile(real)
 	// Watch the file so a change outside the app can be picked up. M3-4
 	// refreshes the document here; M1-7 records that events arrive.

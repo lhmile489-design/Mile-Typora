@@ -48,6 +48,26 @@ export function App({ transport }: { transport: Transport }) {
   // has nothing in it yet (PRD D-06, decisions.md D-T23).
   const [showRight, setShowRight] = useState(false);
 
+  // Opening what a request names: a double-clicked file, a command-line
+  // argument, or another instance's request (PRD FR-02.8, docs/踩坑记录.md).
+  const openRequested = useCallback(
+    async (seq: number) => {
+      const result = await transport.openRequested(seq);
+      if (result.kind === "loaded") {
+        setDoc(result.doc);
+        setLoadError(null);
+        // The window is now a single-file one.
+        scanRef.current?.abort();
+        setFolder(null);
+        setTree([]);
+        setSelected(null);
+      } else if (result.kind === "failed") {
+        setLoadError({ code: result.code, message: result.message });
+      }
+    },
+    [transport],
+  );
+
   // Requests live in the Go-side queue until acknowledged, so subscribing
   // before the handshake and fetching what is pending loses nothing: a
   // remount gets the same requests again. Seq keeps order and drops repeats.
@@ -57,7 +77,9 @@ export function App({ transport }: { transport: Transport }) {
       if (seen.has(request.seq)) return;
       seen.add(request.seq);
       setRequests((prev) => [...prev, request]);
-      void transport.ack(request.seq).catch(() => {});
+      // Go acknowledges the request once it has tried to open it, and gives
+      // the same document back to a page that asks again after a remount.
+      void openRequested(request.seq);
     };
     const off = transport.onOpenRequest(add);
     let alive = true;
@@ -76,7 +98,7 @@ export function App({ transport }: { transport: Transport }) {
       alive = false;
       off();
     };
-  }, [transport]);
+  }, [openRequested, transport]);
 
   // Opening a file replaces what the window shows; cancelling changes nothing.
   const openFile = useCallback(async () => {

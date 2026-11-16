@@ -147,6 +147,14 @@ export const WindowService = {
     return call("WindowService.OpenFolderDialog");
   },
   /**
+   * OpenRequested opens what a queued request names: a file association, a
+   * command-line argument, or another instance's request (PRD FR-02.8). The
+   * request is acknowledged once handled, whether it opened or not.
+   */
+  openRequested(seq: number): Promise<LoadResult> {
+    return call("WindowService.OpenRequested", seq);
+  },
+  /**
    * Pending returns the open requests after seq that the page has not
    * acknowledged. A page that remounts or reloads asks again and loses nothing
    * (PRD §9.2.3: no request is dropped silently).

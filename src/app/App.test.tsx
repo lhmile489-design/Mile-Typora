@@ -14,6 +14,7 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     ack: async () => {},
     openFile: async () => ({ kind: "cancelled" }),
     openFolder: async () => ({ kind: "cancelled" }),
+    openRequested: async () => ({ kind: "cancelled" }),
     scan: () => ({ abort: () => {}, done: Promise.resolve() }),
     ...overrides,
   };
@@ -81,12 +82,13 @@ describe("App shell", () => {
     expect(newWindow).toHaveBeenCalledTimes(1);
   });
 
-  it("shows the open requests queued before the handshake", async () => {
+  it("takes the requests queued before the handshake and opens them", async () => {
     const pending = async () => ({ ok: true as const, value: [{ seq: 2, path: "b.md" }] });
-    const ack = vi.fn(async () => {});
-    render(<App transport={fakeTransport({ pending, ack })} />);
+    const openRequested = vi.fn(async () => ({ kind: "cancelled" as const }));
+    render(<App transport={fakeTransport({ pending, openRequested })} />);
     expect(await screen.findByText(/待打开：b\.md/)).toBeTruthy();
-    expect(ack).toHaveBeenCalledWith(2);
+    // Go acknowledges the request once the page asked for it to be opened.
+    expect(openRequested).toHaveBeenCalledWith(2);
   });
 
   it("takes open requests after the handshake and ignores repeats", async () => {
@@ -226,5 +228,28 @@ describe("opening a folder", () => {
     fireEvent.keyDown(tree, { key: "Enter" });
     const selected = await screen.findByRole("treeitem", { name: /b\.md/, selected: true });
     expect(selected).toBeTruthy();
+  });
+});
+
+describe("opening a file a request names", () => {
+  it("opens the requested file as soon as the request arrives", async () => {
+    const pending = async () => ({ ok: true as const, value: [{ seq: 4, path: "E:\notes\a.md" }] });
+    const openRequested = vi.fn(async () => loadedDoc);
+    render(<App transport={fakeTransport({ pending, openRequested })} />);
+    expect(await screen.findByRole("heading", { name: "标题" })).toBeTruthy();
+    expect(openRequested).toHaveBeenCalledWith(4);
+    expect(screen.getByText("只读")).toBeTruthy();
+  });
+
+  it("shows the failure of a requested file and keeps the window usable", async () => {
+    const pending = async () => ({ ok: true as const, value: [{ seq: 5, path: "E:\notes\gone.md" }] });
+    const openRequested = async () => ({
+      kind: "failed" as const,
+      code: "not_found",
+      message: "文件不存在或已被移动",
+    });
+    render(<App transport={fakeTransport({ pending, openRequested })} />);
+    expect(await screen.findByText("无法打开文件")).toBeTruthy();
+    expect(screen.getByText(/文件不存在或已被移动/)).toBeTruthy();
   });
 });

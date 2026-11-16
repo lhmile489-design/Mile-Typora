@@ -9,6 +9,7 @@ import {
   type Doc,
   type OpenRequest,
   type ReadyInfo,
+  type LoadResult,
   type ScanFrame,
 } from "../mygo";
 import { failureMessage } from "./errors";
@@ -48,6 +49,11 @@ export interface Transport {
   ack(seq: number): Promise<void>;
   /** Asks for a Markdown file with the system dialog and reads it. */
   openFile(): Promise<OpenFileResult>;
+  /**
+   * Opens the file a queued request names: a file association, a command-line
+   * argument, or another instance's request.
+   */
+  openRequested(seq: number): Promise<OpenFileResult>;
   /** Asks for a folder and makes it the window's root. */
   openFolder(): Promise<OpenFolderResult>;
   /**
@@ -109,21 +115,29 @@ export const mygoTransport: Transport = {
     );
     return { abort: () => frames.close(), done };
   },
-  openFile: async () => {
-    try {
-      const result = await WindowService.openFileDialog();
-      if (result.failure) {
-        return {
-          kind: "failed",
-          code: result.failure.code,
-          message: failureMessage(result.failure.code, result.failure.detail),
-        };
-      }
-      if (!result.doc) return { kind: "cancelled" };
-      return { kind: "loaded", doc: result.doc };
-    } catch (err) {
-      // An unexpected failure: the page shows it and keeps reading.
-      return { kind: "failed", code: "unknown", message: failureMessage("unknown", err instanceof Error ? err.message : "") };
-    }
-  },
+  openFile: async () => openResult(() => WindowService.openFileDialog()),
+  openRequested: async (seq) => openResult(() => WindowService.openRequested(seq)),
 };
+
+/** openResult turns a call's LoadResult into what the page shows. */
+async function openResult(call: () => Promise<LoadResult>): Promise<OpenFileResult> {
+  try {
+    const result = await call();
+    if (result.failure) {
+      return {
+        kind: "failed",
+        code: result.failure.code,
+        message: failureMessage(result.failure.code, result.failure.detail),
+      };
+    }
+    if (!result.doc) return { kind: "cancelled" };
+    return { kind: "loaded", doc: result.doc };
+  } catch (err) {
+    // An unexpected failure: the page shows it and keeps reading.
+    return {
+      kind: "failed",
+      code: "unknown",
+      message: failureMessage("unknown", err instanceof Error ? err.message : ""),
+    };
+  }
+}

@@ -375,3 +375,71 @@ func TestScanFramesBatching(t *testing.T) {
 		t.Fatalf("last frame = %+v, want the outcome", last)
 	}
 }
+
+func TestOpenRequestedOpensTheQueuedPath(t *testing.T) {
+	dir := t.TempDir()
+	path := writeSample(t, dir, "关联.md", []byte("# 关联打开\n"))
+	s, reg := newTestService(1, true)
+	w, _ := reg.Get(1)
+	request, err := w.Push(path)
+	if err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+
+	got, callErr := s.OpenRequested(context.Background(), request.Seq)
+	if callErr != nil {
+		t.Fatalf("OpenRequested: %v", callErr)
+	}
+	if got.Failure != nil || got.Doc == nil || got.Doc.Name != "关联.md" {
+		t.Fatalf("result = %+v, want the document", got)
+	}
+	if _, still := w.Intent(request.Seq); still {
+		t.Fatal("the request was not acknowledged")
+	}
+}
+
+func TestOpenRequestedAgainReturnsTheSameDocument(t *testing.T) {
+	dir := t.TempDir()
+	path := writeSample(t, dir, "a.md", []byte("# a\n"))
+	s, reg := newTestService(1, true)
+	w, _ := reg.Get(1)
+	request, _ := w.Push(path)
+	if _, err := s.OpenRequested(context.Background(), request.Seq); err != nil {
+		t.Fatal(err)
+	}
+	// A page that remounted asks again with the same seq.
+	again, err := s.OpenRequested(context.Background(), request.Seq)
+	if err != nil {
+		t.Fatalf("second OpenRequested: %v", err)
+	}
+	if again.Failure != nil || again.Doc == nil || again.Doc.Name != "a.md" {
+		t.Fatalf("result = %+v, want the document again", again)
+	}
+}
+
+func TestOpenRequestedWithoutAnythingOpen(t *testing.T) {
+	s, _ := newTestService(1, true)
+	got, err := s.OpenRequested(context.Background(), 99)
+	if err != nil {
+		t.Fatalf("OpenRequested: %v", err)
+	}
+	if got.Failure == nil || got.Failure.Code != "request_expired" {
+		t.Fatalf("failure = %+v, want request_expired", got.Failure)
+	}
+}
+
+func TestOpenRequestedReportsAMissingFile(t *testing.T) {
+	s, reg := newTestService(1, true)
+	w, _ := reg.Get(1)
+	request, _ := w.Push(filepath.Join(t.TempDir(), "gone.md"))
+	got, err := s.OpenRequested(context.Background(), request.Seq)
+	if err != nil {
+		t.Fatalf("OpenRequested: %v", err)
+	}
+	if got.Failure == nil || got.Failure.Code != "not_found" {
+		t.Fatalf("failure = %+v, want not_found", got.Failure)
+	}
+	if _, still := w.Intent(request.Seq); still {
+		t.Fatal("a failed request was not acknowledged")
+	}
+}
