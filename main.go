@@ -34,7 +34,7 @@ func main() {
 	// appearance. M3-3 reads the saved preference instead.
 	mygo.Theme.SetSource(mygo.ThemeSystem)
 
-	mygo.Bind(service.NewWindowService(windows, openWindow))
+	mygo.Bind(service.NewWindowService(windows, openWindow, service.PickMarkdown))
 
 	mygo.App.WhenReady(func() {
 		// The window opened for this launch: its page loads next, so these

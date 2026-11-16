@@ -15,6 +15,9 @@ type Window struct {
 	cancel context.CancelFunc
 	// q holds the open requests that arrive before the page is ready.
 	q intentQueue
+	// state is what the window is showing. M1-3 tracks the open file.
+	stateMu  sync.Mutex
+	openFile string
 }
 
 // ID is the native window's ID, as mygo.Window.ID reports it.
@@ -23,6 +26,21 @@ func (w *Window) ID() int { return w.id }
 // Context is cancelled when the window closes. Bind work that belongs to the
 // window to it, so closing the window stops the work.
 func (w *Window) Context() context.Context { return w.ctx }
+
+// SetOpenFile records the file the window shows. The path is canonical and was
+// authorized by the user's choice in the system dialog.
+func (w *Window) SetOpenFile(path string) {
+	w.stateMu.Lock()
+	w.openFile = path
+	w.stateMu.Unlock()
+}
+
+// OpenFile is the file the window shows, if any.
+func (w *Window) OpenFile() (string, bool) {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	return w.openFile, w.openFile != ""
+}
 
 // Registry holds the windows that are open. It is safe for concurrent use:
 // native events and page calls arrive on different goroutines.

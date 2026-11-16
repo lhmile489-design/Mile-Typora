@@ -2,9 +2,16 @@
 // (CLAUDE.md §5.8). Components receive a Transport, so tests and design-time
 // mocks can supply their own.
 import { isCallError } from "mygo-runtime";
-import { WindowService, events, type OpenRequest, type ReadyInfo } from "../mygo";
+import { WindowService, events, type Doc, type OpenRequest, type ReadyInfo } from "../mygo";
+import { failureMessage } from "./errors";
 
-export type { OpenRequest, ReadyInfo };
+export type { Doc as OpenedDoc, OpenRequest, ReadyInfo };
+
+/** What opening a file produced: a document, a cancellation, or a problem. */
+export type OpenFileResult =
+  | { kind: "cancelled" }
+  | { kind: "loaded"; doc: Doc }
+  | { kind: "failed"; code: string; message: string };
 
 /** The result of a call: its value, or a message for a failure. */
 export type Outcome<T> = { ok: true; value: T } | { ok: false; message: string };
@@ -22,6 +29,8 @@ export interface Transport {
   pending(after: number): Promise<Outcome<OpenRequest[]>>;
   /** Confirms that every request up to seq was handled, freeing the queue. */
   ack(seq: number): Promise<void>;
+  /** Asks for a Markdown file with the system dialog and reads it. */
+  openFile(): Promise<OpenFileResult>;
 }
 
 /** wrap turns a rejected call into an Outcome, so callers never see a throw. */
@@ -49,4 +58,21 @@ export const mygoTransport: Transport = {
       return result.requests;
     }),
   ack: (seq) => WindowService.ack(seq),
+  openFile: async () => {
+    try {
+      const result = await WindowService.openFileDialog();
+      if (result.failure) {
+        return {
+          kind: "failed",
+          code: result.failure.code,
+          message: failureMessage(result.failure.code, result.failure.detail),
+        };
+      }
+      if (!result.doc) return { kind: "cancelled" };
+      return { kind: "loaded", doc: result.doc };
+    } catch (err) {
+      // An unexpected failure: the page shows it and keeps reading.
+      return { kind: "failed", code: "unknown", message: failureMessage("unknown", err instanceof Error ? err.message : "") };
+    }
+  },
 };

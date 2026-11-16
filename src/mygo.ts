@@ -5,6 +5,19 @@ import { call, event } from "mygo-runtime";
 // ---- Types ----
 
 /**
+ * Doc is one opened Markdown file, as text. From M1-4 the text becomes
+ * rendered HTML.
+ */
+export interface Doc {
+  name: string;
+  path: string;
+  size: number;
+  hasBom: boolean;
+  lineEnding: string;
+  text: string;
+}
+
+/**
  * Failure is an expected, user-facing failure. Detail never contains
  * document text or unauthorized paths.
  */
@@ -13,6 +26,15 @@ export interface Failure {
   detail: string;
   size?: number;
   limit?: number;
+}
+
+/**
+ * LoadResult answers an open request. Doc is nil when Failure is set or when
+ * the user cancelled the dialog, which both fields nil also mark.
+ */
+export interface LoadResult {
+  doc?: Doc;
+  failure?: Failure;
 }
 
 /**
@@ -66,6 +88,13 @@ export const WindowService = {
    */
   newWindow(): Promise<NewWindowResult> {
     return call("WindowService.NewWindow");
+  },
+  /**
+   * OpenFileDialog asks for a Markdown file and reads it (FR-01). Cancelling
+   * changes nothing; every problem is an expected Failure for the page to show.
+   */
+  openFileDialog(): Promise<LoadResult> {
+    return call("WindowService.OpenFileDialog");
   },
   /**
    * Pending returns the open requests after seq that the page has not

@@ -4,10 +4,13 @@ package service
 import (
 	"context"
 	"errors"
+	"path/filepath"
 
 	"github.com/egoist/mygo"
 
 	"github.com/lhmile489-design/mile-typora/internal/contract"
+	"github.com/lhmile489-design/mile-typora/internal/docread"
+	"github.com/lhmile489-design/mile-typora/internal/pathguard"
 	"github.com/lhmile489-design/mile-typora/internal/winctx"
 )
 
@@ -23,6 +26,10 @@ var (
 // registers the window; tests supply their own.
 type Opener func() (int, error)
 
+// Picker shows the system file dialog and returns the chosen path, or "" when
+// the user cancelled. Tests supply their own.
+type Picker func(ctx context.Context) (string, error)
+
 // WindowService manages the windows of the app.
 type WindowService struct {
 	// caller finds the calling window's ID; tests replace it.
@@ -30,10 +37,14 @@ type WindowService struct {
 	version func() string
 	windows *winctx.Registry
 	open    Opener
+	pick    Picker
 }
 
 // NewWindowService returns a WindowService over the open windows.
-func NewWindowService(windows *winctx.Registry, open Opener) *WindowService {
+func NewWindowService(windows *winctx.Registry, open Opener, pick Picker) *WindowService {
+	if pick == nil {
+		pick = PickMarkdown
+	}
 	return &WindowService{
 		caller: func(ctx context.Context) (int, bool) {
 			w := mygo.CallerWindow(ctx)
@@ -45,7 +56,75 @@ func NewWindowService(windows *winctx.Registry, open Opener) *WindowService {
 		version: mygo.App.Version,
 		windows: windows,
 		open:    open,
+		pick:    pick,
 	}
+}
+
+// PickMarkdown asks the system for one Markdown file. Choosing it is the
+// authorization to read it (PRD FR-06.1).
+func PickMarkdown(ctx context.Context) (string, error) {
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Parent: mygo.CallerWindow(ctx),
+		Title:  "打开 Markdown 文件",
+		Filters: []mygo.FileFilter{
+			{Name: "Markdown", Extensions: []string{"md", "markdown"}},
+			{Name: "所有文件", Extensions: []string{"*"}},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(paths) == 0 {
+		return "", nil
+	}
+	return paths[0], nil
+}
+
+// OpenFileDialog asks for a Markdown file and reads it (FR-01). Cancelling
+// changes nothing; every problem is an expected Failure for the page to show.
+func (s *WindowService) OpenFileDialog(ctx context.Context) (contract.LoadResult, error) {
+	w, err := s.callerWindow(ctx)
+	if err != nil {
+		return contract.LoadResult{}, err
+	}
+	chosen, err := s.pick(ctx)
+	if err != nil {
+		return contract.LoadResult{}, err
+	}
+	if chosen == "" {
+		return contract.LoadResult{}, nil
+	}
+
+	real, pathFailure := pathguard.Canon(chosen)
+	if pathFailure != nil {
+		return contract.LoadResult{Failure: &contract.Failure{
+			Code: pathFailure.Code, Detail: pathFailure.Detail,
+		}}, nil
+	}
+	if !pathguard.MarkdownExt(real) {
+		return contract.LoadResult{Failure: &contract.Failure{
+			Code:   "unsupported_type",
+			Detail: "只支持 .md 和 .markdown 文件",
+		}}, nil
+	}
+	doc, readFailure := docread.Read(real)
+	if readFailure != nil {
+		return contract.LoadResult{Failure: &contract.Failure{
+			Code:   readFailure.Code,
+			Detail: readFailure.Detail,
+			Size:   readFailure.Size,
+			Limit:  readFailure.Limit,
+		}}, nil
+	}
+	w.SetOpenFile(real)
+	return contract.LoadResult{Doc: &contract.Doc{
+		Name:       filepath.Base(real),
+		Path:       real,
+		Size:       doc.Size,
+		HasBOM:     doc.HasBOM,
+		LineEnding: doc.LineEnding,
+		Text:       doc.Text,
+	}}, nil
 }
 
 // callerWindow resolves the window a call came from. The window ID the page

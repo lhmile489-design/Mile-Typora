@@ -87,3 +87,41 @@ body {
 .statusbar .item { display: inline-flex; align-items: center; gap: var(--sp-1); }
 .statusbar svg { width: 12px; height: 12px; }
 .st-danger { color: var(--danger); }
+
+/* 阅读区：M1-3 显示纯文本，M1-4 起换成 markdown.css 的排版 */
+.reader { flex: 1; min-height: 0; overflow-y: auto; }
+.plain-doc {
+  max-width: calc(var(--content-max) + var(--content-pad-x) * 2);
+  margin: 0 auto;
+  padding: var(--content-pad-top) var(--content-pad-x) 40vh;
+  font-family: var(--font-mono);
+  font-size: var(--ui-base);
+  line-height: 1.75;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 只读徽标（DESIGN.md §8.8） */
+.badge-ro {
+  display: inline-flex; align-items: center; gap: var(--sp-1);
+  height: 18px; padding: 0 var(--sp-2);
+  border-radius: var(--r-pill);
+  background: var(--info-bg); color: var(--info); font-weight: 600;
+}
+.badge-ro svg { width: 12px; height: 12px; }
+
+/* 空状态与错误状态（DESIGN.md §8.9） */
+.empty .ic { width: 32px; height: 32px; margin: 0 auto var(--sp-3); color: var(--text-faint); }
+.empty h3 { margin: 0 0 var(--sp-2); font: 600 var(--ui-lg)/var(--ui-lg-lh) var(--font-heading); color: var(--text-strong); }
+.empty .row { display: flex; gap: var(--sp-3); justify-content: center; }
+.empty.error .ic { color: var(--danger); }
+
+/* 按钮（DESIGN.md §8.11）：目前只有次按钮 */
+.btn {
+  height: var(--control-h); padding: 0 var(--sp-3);
+  border: 0; border-radius: var(--r-sm);
+  font: inherit; font-size: var(--ui-base); cursor: pointer;
+}
+.btn.secondary { background: transparent; border: 1px solid var(--line-strong); color: var(--text); }
+.btn.secondary:hover { background: var(--bg-hover); }

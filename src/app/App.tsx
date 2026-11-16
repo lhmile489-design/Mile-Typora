@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   CircleAlert,
+  CircleX,
   FileText,
   FolderOpen,
+  Lock,
   PanelLeft,
   PanelRight,
   RefreshCw,
@@ -10,12 +12,15 @@ import {
   Settings,
   SquarePlus,
 } from "lucide-react";
-import type { OpenRequest, ReadyInfo, Transport } from "../lib/transport";
+import type { OpenedDoc, OpenRequest, ReadyInfo, Transport } from "../lib/transport";
+import { formatBytes } from "../lib/errors";
 
 type ReadyState =
   | { kind: "waiting" }
   | { kind: "ready"; info: ReadyInfo }
   | { kind: "failed"; message: string };
+
+type LoadError = { code: string; message: string };
 
 /**
  * The window shell, laid out after artboard 2 of the design draft
@@ -27,6 +32,8 @@ export function App({ transport }: { transport: Transport }) {
   const [ready, setReady] = useState<ReadyState>({ kind: "waiting" });
   const [requests, setRequests] = useState<OpenRequest[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
+  const [doc, setDoc] = useState<OpenedDoc | null>(null);
+  const [loadError, setLoadError] = useState<LoadError | null>(null);
   const [showLeft, setShowLeft] = useState(true);
   const [showRight, setShowRight] = useState(true);
 
@@ -39,8 +46,6 @@ export function App({ transport }: { transport: Transport }) {
       if (seen.has(request.seq)) return;
       seen.add(request.seq);
       setRequests((prev) => [...prev, request]);
-      // The queue frees itself as soon as everything up to this request is
-      // handled, and Go never replays those to this page again.
       void transport.ack(request.seq).catch(() => {});
     };
     const off = transport.onOpenRequest(add);
@@ -62,8 +67,18 @@ export function App({ transport }: { transport: Transport }) {
     };
   }, [transport]);
 
-  // FR-09: the window shortcuts act on the app, so the page would otherwise
-  // keep the keystroke.
+  // Opening a file replaces what the window shows; cancelling changes nothing.
+  const openFile = useCallback(async () => {
+    setNotice(null);
+    const result = await transport.openFile();
+    if (result.kind === "loaded") {
+      setDoc(result.doc);
+      setLoadError(null);
+    } else if (result.kind === "failed") {
+      setLoadError({ code: result.code, message: result.message });
+    }
+  }, [transport]);
+
   const newWindow = useCallback(async () => {
     setNotice(null);
     const r = await transport.newWindow();
@@ -73,6 +88,11 @@ export function App({ transport }: { transport: Transport }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "o" || e.key === "O")) {
+        e.preventDefault();
+        void openFile();
+        return;
+      }
       if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === "N" || e.key === "n")) {
         e.preventDefault();
         void newWindow();
@@ -80,12 +100,12 @@ export function App({ transport }: { transport: Transport }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [newWindow]);
+  }, [openFile, newWindow]);
 
   return (
     <div className="win">
       <div className="toolbar" role="toolbar" aria-label="工具栏">
-        <ToolButton label="打开文件" icon={<FileText />} labeled disabled />
+        <ToolButton label="打开文件" icon={<FileText />} labeled onClick={() => void openFile()} />
         <ToolButton label="打开目录" icon={<FolderOpen />} labeled disabled />
         <ToolButton label="新建窗口" icon={<SquarePlus />} onClick={() => void newWindow()} />
         <span className="sep" aria-hidden="true" />
@@ -110,17 +130,23 @@ export function App({ transport }: { transport: Transport }) {
         {showLeft && (
           <aside className="side left" aria-label="文件树">
             <div className="empty">
-              <p>尚未打开文件或目录</p>
+              <p>{doc ? doc.name : "尚未打开文件或目录"}</p>
             </div>
           </aside>
         )}
         <main className="center">
-          <div className="start-wrap">
-            <div className="start">
-              <h2>开始阅读</h2>
-              <p>打开一个 Markdown 文件，或打开一个目录浏览其中的文档。</p>
+          {loadError ? (
+            <LoadFailure error={loadError} onRetry={() => void openFile()} />
+          ) : doc ? (
+            <Reader doc={doc} />
+          ) : (
+            <div className="start-wrap">
+              <div className="start">
+                <h2>开始阅读</h2>
+                <p>打开一个 Markdown 文件，或打开一个目录浏览其中的文档。</p>
+              </div>
             </div>
-          </div>
+          )}
         </main>
         {showRight && (
           <aside className="side right" aria-label="预留侧栏">
@@ -131,8 +157,26 @@ export function App({ transport }: { transport: Transport }) {
         )}
       </div>
       <footer className="statusbar" role="status">
-        <PendingRequest requests={requests} />
-        <span className="grow" />
+        {doc ? (
+          <>
+            <span className="badge-ro">
+              <Lock aria-hidden="true" />
+              只读
+            </span>
+            <span className="item" title={doc.path}>
+              {doc.name}
+            </span>
+            <span className="grow" />
+            <span className="item">{formatBytes(doc.size)}</span>
+            <span className="item">{doc.hasBom ? "UTF-8 BOM" : "UTF-8"}</span>
+            <span className="item">{doc.lineEnding}</span>
+          </>
+        ) : (
+          <>
+            <PendingRequest requests={requests} />
+            <span className="grow" />
+          </>
+        )}
         {notice && (
           <span className="item st-danger">
             <CircleAlert aria-hidden="true" />
@@ -145,9 +189,42 @@ export function App({ transport }: { transport: Transport }) {
   );
 }
 
+/** The reader as it stands in M1-3: the file's text. M1-4 renders it. */
+function Reader({ doc }: { doc: OpenedDoc }) {
+  if (doc.text === "") {
+    return (
+      <div className="empty">
+        <p>这是一个空 Markdown 文件</p>
+      </div>
+    );
+  }
+  return (
+    <div className="reader">
+      <pre className="plain-doc">{doc.text}</pre>
+    </div>
+  );
+}
+
+function LoadFailure({ error, onRetry }: { error: LoadError; onRetry: () => void }) {
+  return (
+    <div className="empty error">
+      <div>
+        <CircleX className="ic" aria-hidden="true" />
+        <h3>无法打开文件</h3>
+        <p>{error.message}</p>
+        <div className="row">
+          <button className="btn secondary" type="button" onClick={onRetry}>
+            重新选择
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /**
- * M1-2 shows the queued open requests here so the plumbing is visible; M1-3
- * replaces this with actually opening the file (docs/开发计划.md M1-2).
+ * M1-2 shows the queued open requests here so the plumbing is visible; M2
+ * turns requests into opened files.
  */
 function PendingRequest({ requests }: { requests: OpenRequest[] }) {
   const last = requests.at(-1);

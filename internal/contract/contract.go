@@ -32,6 +32,24 @@ type PendingResult struct {
 	Requests []OpenRequest `json:"requests"`
 }
 
+// Doc is one opened Markdown file, as text. From M1-4 the text becomes
+// rendered HTML.
+type Doc struct {
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	Size       int64  `json:"size"`
+	HasBOM     bool   `json:"hasBom"`
+	LineEnding string `json:"lineEnding"`
+	Text       string `json:"text"`
+}
+
+// LoadResult answers an open request. Doc is nil when Failure is set or when
+// the user cancelled the dialog, which both fields nil also mark.
+type LoadResult struct {
+	Doc     *Doc     `json:"doc,omitempty"`
+	Failure *Failure `json:"failure,omitempty"`
+}
+
 // NewWindowResult answers a request for another window. WindowID is zero when
 // Failure is set.
 type NewWindowResult struct {

@@ -12,6 +12,7 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     onOpenRequest: () => () => {},
     pending: async () => ({ ok: true, value: [] }),
     ack: async () => {},
+    openFile: async () => ({ kind: "cancelled" }),
     ...overrides,
   };
 }
@@ -28,12 +29,12 @@ describe("App shell", () => {
 
   it("keeps unwired toolbar commands visible but disabled", () => {
     render(<App transport={fakeTransport()} />);
-    for (const name of ["打开文件", "打开目录", "刷新", "查找", "设置"]) {
+    for (const name of ["打开目录", "刷新", "查找", "设置"]) {
       const b = screen.getByRole("button", { name });
       expect(b.getAttribute("aria-disabled")).toBe("true");
     }
     // Wired commands work, so they are not disabled.
-    for (const name of ["新建窗口", "左侧栏", "预留侧栏"]) {
+    for (const name of ["打开文件", "新建窗口", "左侧栏", "预留侧栏"]) {
       expect(screen.getByRole("button", { name }).getAttribute("aria-disabled")).toBeNull();
     }
   });
@@ -104,5 +105,67 @@ describe("App shell", () => {
     render(<App transport={fakeTransport({ newWindow })} />);
     fireEvent.click(screen.getByRole("button", { name: "新建窗口" }));
     expect(await screen.findByText(/无法创建新窗口/)).toBeTruthy();
+  });
+});
+
+const loadedDoc = {
+  kind: "loaded" as const,
+  doc: {
+    name: "笔记.md",
+    path: "E:\notes\笔记.md",
+    size: 2048,
+    hasBom: false,
+    lineEnding: "LF",
+    text: "# 标题\n\n正文",
+  },
+};
+
+describe("opening a file", () => {
+  it("shows the text, the read-only badge and the file details", async () => {
+    render(<App transport={fakeTransport({ openFile: async () => loadedDoc })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    expect(await screen.findByText(/# 标题/)).toBeTruthy();
+    expect(screen.getByText("只读")).toBeTruthy();
+    // The name shows in the file pane and in the status bar.
+    expect(screen.getAllByText("笔记.md").length).toBeGreaterThan(0);
+    expect(screen.getByText("2.0 KB")).toBeTruthy();
+    expect(screen.getByText("UTF-8")).toBeTruthy();
+    expect(screen.getByText("LF")).toBeTruthy();
+  });
+
+  it("opens with Ctrl+O", () => {
+    const openFile = vi.fn(async () => ({ kind: "cancelled" as const }));
+    render(<App transport={fakeTransport({ openFile })} />);
+    fireEvent.keyDown(window, { key: "o", ctrlKey: true });
+    expect(openFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancelling changes nothing", async () => {
+    const openFile = vi.fn(async () => ({ kind: "cancelled" as const }));
+    render(<App transport={fakeTransport({ openFile })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    expect(await screen.findByText("开始阅读")).toBeTruthy();
+    expect(screen.queryByText("只读")).toBeNull();
+  });
+
+  it("shows a load failure with its message and keeps the window usable", async () => {
+    const openFile = async () => ({
+      kind: "failed" as const,
+      code: "encoding",
+      message: "暂不支持此文件编码，请转换为 UTF-8",
+    });
+    render(<App transport={fakeTransport({ openFile })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    expect(await screen.findByText("无法打开文件")).toBeTruthy();
+    expect(screen.getByText(/暂不支持此文件编码/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "重新选择" })).toBeTruthy();
+  });
+
+  it("shows an empty document as valid, not as an error", async () => {
+    const empty = { kind: "loaded" as const, doc: { ...loadedDoc.doc, text: "", size: 0 } };
+    render(<App transport={fakeTransport({ openFile: async () => empty })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    expect(await screen.findByText("这是一个空 Markdown 文件")).toBeTruthy();
+    expect(screen.queryByText("无法打开文件")).toBeNull();
   });
 });

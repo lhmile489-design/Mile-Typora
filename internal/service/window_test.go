@@ -3,6 +3,9 @@ package service
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lhmile489-design/mile-typora/internal/winctx"
@@ -18,6 +21,7 @@ func newTestService(callerID int, registered bool) (*WindowService, *winctx.Regi
 		version: func() string { return "0.1.0" },
 		windows: reg,
 		open:    func() (int, error) { return 99, nil },
+		pick:    func(context.Context) (string, error) { return "", nil },
 	}, reg
 }
 
@@ -131,8 +135,88 @@ func TestNewWindowRequiresCaller(t *testing.T) {
 
 func TestNewWindowServiceOutsideCall(t *testing.T) {
 	// A context that did not come from a page call has no window.
-	s := NewWindowService(winctx.NewRegistry(), func() (int, error) { return 1, nil })
+	s := NewWindowService(winctx.NewRegistry(), func() (int, error) { return 1, nil }, nil)
 	if _, err := s.Ready(context.Background()); !errors.Is(err, ErrNoCallerWindow) {
 		t.Fatalf("Ready error = %v, want ErrNoCallerWindow", err)
+	}
+}
+
+func writeSample(t *testing.T, dir, name string, content []byte) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestOpenFileDialogReadsTheChosenFile(t *testing.T) {
+	dir := t.TempDir()
+	path := writeSample(t, dir, "笔记.md", []byte("# 标题\n正文\n"))
+	s, reg := newTestService(1, true)
+	s.pick = func(context.Context) (string, error) { return path, nil }
+
+	got, err := s.OpenFileDialog(context.Background())
+	if err != nil {
+		t.Fatalf("OpenFileDialog: %v", err)
+	}
+	if got.Failure != nil {
+		t.Fatalf("failure = %+v, want none", got.Failure)
+	}
+	if got.Doc == nil || got.Doc.Name != "笔记.md" || !strings.HasPrefix(got.Doc.Text, "# 标题") {
+		t.Fatalf("doc = %+v, want the chosen file's content", got.Doc)
+	}
+	if got.Doc.LineEnding != "LF" || got.Doc.Size != int64(len("# 标题\n正文\n")) {
+		t.Fatalf("doc = %+v, want LF and the file's size", got.Doc)
+	}
+	w, _ := reg.Get(1)
+	if open, ok := w.OpenFile(); !ok || open == "" {
+		t.Fatal("the window did not record the open file")
+	}
+}
+
+func TestOpenFileDialogCancelledChangesNothing(t *testing.T) {
+	s, reg := newTestService(1, true)
+	got, err := s.OpenFileDialog(context.Background())
+	if err != nil {
+		t.Fatalf("OpenFileDialog: %v", err)
+	}
+	if got.Doc != nil || got.Failure != nil {
+		t.Fatalf("result = %+v, want an empty result for a cancelled dialog", got)
+	}
+	if w, _ := reg.Get(1); w.PageReady() || func() bool { _, ok := w.OpenFile(); return ok }() {
+		t.Fatal("a cancelled dialog changed the window")
+	}
+}
+
+func TestOpenFileDialogRejectsOtherFileTypes(t *testing.T) {
+	dir := t.TempDir()
+	path := writeSample(t, dir, "notes.txt", []byte("plain"))
+	s, _ := newTestService(1, true)
+	s.pick = func(context.Context) (string, error) { return path, nil }
+
+	got, _ := s.OpenFileDialog(context.Background())
+	if got.Failure == nil || got.Failure.Code != "unsupported_type" {
+		t.Fatalf("failure = %+v, want unsupported_type", got.Failure)
+	}
+}
+
+func TestOpenFileDialogReportsEncoding(t *testing.T) {
+	s, _ := newTestService(1, true)
+	s.pick = func(context.Context) (string, error) {
+		return filepath.Join("..", "..", "testdata", "docs", "invalid-utf8.md"), nil
+	}
+	got, _ := s.OpenFileDialog(context.Background())
+	if got.Failure == nil || got.Failure.Code != "encoding" || got.Failure.Detail == "" {
+		t.Fatalf("failure = %+v, want encoding with a detail", got.Failure)
+	}
+}
+
+func TestOpenFileDialogReportsMissingFile(t *testing.T) {
+	s, _ := newTestService(1, true)
+	s.pick = func(context.Context) (string, error) { return filepath.Join(t.TempDir(), "gone.md"), nil }
+	got, _ := s.OpenFileDialog(context.Background())
+	if got.Failure == nil || got.Failure.Code != "not_found" {
+		t.Fatalf("failure = %+v, want not_found", got.Failure)
 	}
 }

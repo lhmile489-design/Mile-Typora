@@ -135,3 +135,9 @@ M1 需验证：mermaid 12 的 `securityLevel: "strict"` 与 `%%{init}%%` 指令�
   - `scripts/native-eval.mjs`：通过 WebView2 的调试端口在真实窗口里执行表达式并打印结果，用来读状态栏文字、主题、计算样式。
 - 调试端口只在手动启动时开，需要三个环境变量（`MYGO_DEV=1`、`MYGO_DEV_URL=http://localhost:5273`、`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`）。`mygo dev` 启动的应用不带调试端口，生产构建更不会。
 - 两者只用于开发期验收，不进入构建产物。
+
+### D-T17 · 原生对话框不能可靠地脚本化
+
+- 试过三种方式让脚本在系统文件对话框里选文件：`SendKeys` 打字、`SetWindowText` 写文件名输入框、`PostMessage IDOK`。Windows 11 的通用文件对话框是 DirectUI（`DirectUIHWND`），没有经典 `Edit` 控件，`SendKeys` 又依赖前台焦点，Windows 会拒绝跨进程抢焦点，结果时好时坏。
+- 结论：**打开文件的对话框交互由用户点一次**，脚本只负责准备环境（`scripts/native-windows.ps1` 计数/关窗）和读取结果（`scripts/native-eval.mjs`）。曾写的 `native-open-file.ps1` 已删除，避免留下不可靠的工具。
+- 走通的自动化原生验收仍是：多窗口计数、关窗、最后一窗退出、页面文本与样式读取、第二个实例传参。
