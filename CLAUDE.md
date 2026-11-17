@@ -2,11 +2,11 @@
 
 > 给 AI 的项目级说明。优先级：用户当次指令 > 本文 > `docs/PRD.md` > `DESIGN.md` / `docs/decisions.md` > 项目 skills > 全局 `~/.claude/CLAUDE.md` > 通用经验。
 > 全局规范（UTF-8、不编造、无 emoji、破坏性操作先确认、没有证据不算完成）照常生效，本文只写本项目特有的内容。
-> 最后更新：2026-11-17（PRD v0.4；P0、P1 完成；P2 需求冻结并完成 M5-1 至 M5-8，发布 0.5.0；M6-0 需求细化中）
+> 最后更新：2026-11-17（PRD v0.4；P0、P1 完成；P2 需求冻结并完成 M5-1 至 M5-8，发布 0.5.0；M6-0 需求草案待确认）
 
 ## 0. 先读这几条
 
-1. **P0 已完成（G4，29/29），P1 已完成（M4-8），P2 需求冻结（M5-0）并完成 M5-1 至 M5-8。** P1 验收见 [docs/develop/M4-验收记录.md](docs/develop/M4-验收记录.md)，M5 验收见 [docs/develop/M5-1-验收记录.md](docs/develop/M5-1-验收记录.md)、[M5-2](docs/develop/M5-2-验收记录.md)、[M5-3](docs/develop/M5-3-验收记录.md)、[M5-4](docs/develop/M5-4-验收记录.md)、[M5-5](docs/develop/M5-5-验收记录.md)、[M5-6](docs/develop/M5-6-验收记录.md)、[M5-7](docs/develop/M5-7-验收记录.md)、[M5-8](docs/develop/M5-8-验收记录.md)，P2 需求与验收基线见 [docs/P2-效率与排版需求.md](docs/P2-效率与排版需求.md)；P1-AC-05 的真实 ACL 拒绝、P1-AC-16 的多窗口保存全部组合、M5-4 图片选择完整点击流程与 M5-8 的 Win+. 系统面板输入仍待用户桌面验收。下一步是 M6 需求细化，需用户确认后才能开始。
+1. **P0 已完成（G4，29/29），P1 已完成（M4-8），P2 需求冻结（M5-0）并完成 M5-1 至 M5-8。** P1 验收见 [docs/develop/M4-验收记录.md](docs/develop/M4-验收记录.md)，M5 验收见 [docs/develop/M5-1-验收记录.md](docs/develop/M5-1-验收记录.md)、[M5-2](docs/develop/M5-2-验收记录.md)、[M5-3](docs/develop/M5-3-验收记录.md)、[M5-4](docs/develop/M5-4-验收记录.md)、[M5-5](docs/develop/M5-5-验收记录.md)、[M5-6](docs/develop/M5-6-验收记录.md)、[M5-7](docs/develop/M5-7-验收记录.md)、[M5-8](docs/develop/M5-8-验收记录.md)，P2 需求与验收基线见 [docs/P2-效率与排版需求.md](docs/P2-效率与排版需求.md)；P1-AC-05 的真实 ACL 拒绝、P1-AC-16 的多窗口保存全部组合、M5-4 图片选择完整点击流程与 M5-8 的 Win+. 系统面板输入仍待用户桌面验收。M6-0 草案见 [docs/P3-高级工具需求.md](docs/P3-高级工具需求.md)，用户确认冻结后才能开始 M6-1。
 2. **需求以 [docs/PRD.md](docs/PRD.md) 为准**，[PRODUCT.md](PRODUCT.md) 是精简版。PRD 区分"已确认项"（C-01 至 C-12）和"建议默认项"（D-01 至 D-11、性能与容量数值），不能把建议项说成用户已确认。
 3. **P0 是只读阅读器。** 任何写用户文件、写工作区目录的代码在 P0 都是缺陷。
 4. **视觉以 [DESIGN.md](DESIGN.md) 为准**，组件不硬编码颜色、字号、间距。
@@ -43,6 +43,7 @@ Mile-Typora/
 │   ├── PRD.md                    需求权威来源
 │   ├── P1-编辑需求.md            P1 需求基线（已冻结）
 │   ├── P2-效率与排版需求.md      P2 需求与验收基线（M5-0 冻结）
+│   ├── P3-高级工具需求.md        P3 需求与验收基线（M6-0 草案，待确认）
 │   ├── 开发计划.md               M1–M6 小阶段拆分、门禁、AC 覆盖矩阵、进度
 │   ├── decisions.md              技术与产品决策（含依赖版本）
 │   ├── develop/接口契约.md       绑定方法、事件、错误码
@@ -198,6 +199,7 @@ bun run build          # mygo build，产物在 build/
 | --- | --- | --- |
 | `docs/PRD.md` | 需求权威来源 | 用户评审改动后；改建议默认项要同步需求、异常规则和验收条目 |
 | `docs/P2-效率与排版需求.md` | P2 需求与验收基线（M5-0 冻结） | M5 实现若要改行为，先改本文并重新确认 |
+| `docs/P3-高级工具需求.md` | P3 需求与验收基线（M6-0 草案） | 用户确认冻结后生效；M6 实现若要改行为，先改本文并重新确认 |
 | `PRODUCT.md` | 产品概览 | PRD 版本变化时 |
 | `DESIGN.md` | 设计令牌与组件规范 | 改视觉前先改这里，同步 `tokens.css` 与设计稿 |
 | `docs/decisions.md` | 技术与产品决策 | 选型、版本、重要取舍变化时新增条目 |
