@@ -128,6 +128,17 @@ export type ClipboardCopyOutcome =
   | { kind: "copied" }
   | { kind: "failed"; code: string; message: string };
 
+/** What an HTML/PDF export produced (M5-6). */
+export type ExportOutcome =
+  | { kind: "exported"; path: string; warnings: string[] }
+  | { kind: "cancelled" }
+  | { kind: "failed"; code: string; message: string };
+
+/** What opening the print preview produced (M5-6). */
+export type PrintOutcome =
+  | { kind: "printed"; warnings: string[] }
+  | { kind: "failed"; code: string; message: string };
+
 /** The result of a call: its value, or a message for a failure. */
 export type Outcome<T> = { ok: true; value: T } | { ok: false; message: string };
 
@@ -205,6 +216,12 @@ export interface Transport {
   copyImageToClipboard(source: string): Promise<ClipboardCopyOutcome>;
   /** Turns a clipboard image into a pending asset copy (EDIT-06). */
   readClipboardImage(): Promise<ImagePickOutcome>;
+  /** Writes the enhanced document as a standalone HTML file (M5-6). */
+  exportHTML(bodyHTML: string, title: string): Promise<ExportOutcome>;
+  /** Writes the enhanced document as PDF (M5-6). */
+  exportPDF(bodyHTML: string, title: string): Promise<ExportOutcome>;
+  /** Opens the system print preview on the dedicated print view (M5-6). */
+  printDocument(bodyHTML: string, title: string): Promise<PrintOutcome>;
   /** Tells Go whether the buffer is dirty and which version it started from. */
   setEditState(dirty: boolean, hash: string, hasBom: boolean, lineEnding: string): Promise<void>;
   /** Reads the settings and the recent list. */
@@ -290,6 +307,52 @@ async function clipboardCopy(
       };
     }
     return { kind: "copied" };
+  } catch (err) {
+    return {
+      kind: "failed",
+      code: "unknown",
+      message: failureText({ code: "unknown", detail: err instanceof Error ? err.message : "" }),
+    };
+  }
+}
+
+/** exportOutcome maps the HTML/PDF binding's failure and cancellation. */
+async function exportOutcome(
+  call: () => Promise<{ path?: string; warnings?: string[]; failure?: { code: string; detail?: string } }>,
+): Promise<ExportOutcome> {
+  try {
+    const result = await call();
+    if (result.failure) {
+      if (result.failure.code === "cancelled") return { kind: "cancelled" };
+      return {
+        kind: "failed",
+        code: result.failure.code,
+        message: failureText(result.failure),
+      };
+    }
+    return { kind: "exported", path: result.path ?? "", warnings: result.warnings ?? [] };
+  } catch (err) {
+    return {
+      kind: "failed",
+      code: "unknown",
+      message: failureText({ code: "unknown", detail: err instanceof Error ? err.message : "" }),
+    };
+  }
+}
+
+async function printOutcome(
+  call: () => Promise<{ warnings?: string[]; failure?: { code: string; detail?: string } }>,
+): Promise<PrintOutcome> {
+  try {
+    const result = await call();
+    if (result.failure) {
+      return {
+        kind: "failed",
+        code: result.failure.code,
+        message: failureText(result.failure),
+      };
+    }
+    return { kind: "printed", warnings: result.warnings ?? [] };
   } catch (err) {
     return {
       kind: "failed",
@@ -566,6 +629,9 @@ export const mygoTransport: Transport = {
       };
     }
   },
+  exportHTML: (bodyHTML, title) => exportOutcome(() => WindowService.exportHTML(bodyHTML, title)),
+  exportPDF: (bodyHTML, title) => exportOutcome(() => WindowService.exportPDF(bodyHTML, title)),
+  printDocument: (bodyHTML, title) => printOutcome(() => WindowService.printDocument(bodyHTML, title)),
   setEditState: (dirty, hash, hasBom, lineEnding) =>
     WindowService.setEditState(dirty, hash, hasBom, lineEnding),
   getSettings: async () => {

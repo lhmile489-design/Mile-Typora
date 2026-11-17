@@ -461,3 +461,14 @@ M1 需验证：mermaid 12 的 `securityLevel: "strict"` 与 `%%{init}%%` 指令�
 - 图片粘贴复用 M5-4 的两阶段确认：`ClipboardReadImage` 只准备 `assets/` 目标与一次性令牌，确认后才调用 `CopyImage`。PNG 原样写入，其他格式转 PNG；输入与转码后的 PNG 都检查 20 MiB，像素检查 2500 万；未落盘文档返回 `no_file`。切换文档会丢弃待确认图片，避免把资源写到旧文档目录。
 - 拷贝图片的 `source` 来自编辑器图片语法或阅读区 `mtres` 地址；Go 侧相对路径走文档目录授权，`mtres` 令牌必须属于调用窗口；复制只读文件，不修改文档、不联网。
 - 对抗式审查发现并修复四项：待确认图片跨文档存活、转码 PNG 未复检大小、菜单 `mousedown` 阻止默认后丢失键盘焦点、Ctrl+A 选区因共同祖先在文章外而被判为空。测试：页面 305 项、Go 221 项；原生验收见 M5-5 验收记录。
+
+### D-T53 · M5-6 导出与打印：页面增强产物 + 独立导出清理器 + 隔离打印窗口
+
+- 导出正文来自页面已经增强的 `.markdown` DOM：公式取 KaTeX 的 MathML，Mermaid 取净化后的内联 SVG，图片保留 mtres 引用，front matter 与注释不进入正文。编辑模式先在离屏 `.markdown` 容器里用同一渲染管线生成并增强，再序列化；阅读/预览直接使用当前文章。为此 `renderMath` 增加了幂等保护：已有 `.katex` 或 `.math-error` 的元素不再重复排版。
+- Mermaid 12 的标签开关改为根级 `htmlLabels: false`；此前写在 `flowchart` 下已弃用，导致标签依赖 `foreignObject` 并被 DOMPurify 清空。启用根级开关后标签是 SVG `<text>`，页面与导出都能保留“开始/判断/结束”等文字；DOMPurify 仍只启用 SVG profile，并禁止 `img`、`script`、`iframe`、`object`、`embed`、`link`、`meta`。
+- 新增独立导出清理器（不复用页面 bluemonday）：HTML 结构、MathML 固定元素/属性子集、Mermaid SVG 固定元素/属性子集；SVG 的 `style` 只允许本地 `url(#id)`，拒绝 `http(s)`、`data:`、`@import`、`expression`、`javascript:` 与控制字符链接。图片只允许 `data:image/(png|jpeg|gif|webp);base64,` 出现在 `img.src`；超 20 MiB 总量或读取失败时替换为占位并回报警告。
+- HTML 导出模板是固定字符串：`lang="zh-CN"`、文档名标题、固定打印样式、代码高亮颜色、CSP `default-src 'none'; img-src data:; style-src 'unsafe-inline'`；写入走用户选择路径与 `docwrite` 原子替换，取消不写文件。
+- PDF 与打印使用隔离的 mygo 窗口加载同一份导出 HTML。窗口先等待初始 about:blank 完成，再 LoadHTML，并用 `main.markdown` + `document.readyState` 轮询确认正文已提交；随后等待图片与 `document.fonts.ready`。窗口设置 `Untrusted`，不注册进 winctx，并在 `printWindowIDs` 中登记，打开请求与焦点路由跳过它。PDF 使用 A4 纵向、0.6 英寸边距、打印背景；打印窗口保持打开供用户查看/关闭，打印预览取消不影响正文与文件。
+- PDF 的 30 秒预算覆盖实际 `PrintToPDF` 调用：该 mygo 调用不接受 context，因此在 goroutine 中执行并 select context；超时关闭打印窗口以释放挂起的 CDP 调用，服务层总会释放导出单飞槽。此前的隐藏/离屏窗口在 WebView2 中会得到空白 PDF，最终采用可见但独立的打印窗口，并通过初始页面等待避免空白/竞态。
+- 对抗式审查修复五项：`details.fm` 判断误删 chroma `fm` 代码 token、`PrintToPDF` 超时未真正生效、打印窗口被第二实例当成打开目标、控制字符 href 未拒绝、打印视图页面被当作受信页面。测试：页面 311 项、Go 228 项；原生验收见 M5-6 验收记录。
+

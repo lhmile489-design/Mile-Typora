@@ -278,6 +278,20 @@ type ClipboardResult struct {
 	Failure *Failure `json:"failure,omitempty"`
 }
 
+// ExportResult is one finished HTML or PDF export (M5-6 FILE-16).
+type ExportResult struct {
+	Path     string   `json:"path,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
+	Failure  *Failure `json:"failure,omitempty"`
+}
+
+// PrintResult reports a print preview opened from the dedicated print view
+// (M5-6 FILE-17).
+type PrintResult struct {
+	Warnings []string `json:"warnings,omitempty"`
+	Failure  *Failure `json:"failure,omitempty"`
+}
+
 // ThemeChange tells every window that the appearance preference changed
 // (PRD FR-10.12: all windows switch at once).
 type ThemeChange struct {

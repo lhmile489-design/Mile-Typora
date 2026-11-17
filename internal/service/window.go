@@ -68,6 +68,10 @@ type Deps struct {
 	CloseWindow func(windowID int) error
 	// SavePicker asks where to save; nil uses the system save dialog.
 	SavePicker SavePicker
+	// PickExportPath asks where an HTML/PDF export should be written.
+	PickExportPath ExportPicker
+	// PrintRunner renders the dedicated print view; main supplies the native one.
+	PrintRunner PrintRunner
 	// StartedAt is when the process started, for the startup measurement
 	// (docs/develop/性能基线.md).
 	StartedAt time.Time
@@ -116,6 +120,9 @@ type WindowService struct {
 	treeChanged   func(windowID int)
 	closeWindow   func(windowID int) error
 	savePick      SavePicker
+	exportPick    ExportPicker
+	printRunner   PrintRunner
+	exportBusy    atomic.Bool
 	startedAt     time.Time
 	// metaFailed records that an implicit settings write failed, so the next
 	// GetSettings can tell the user without blocking the reading (PRD FR-08.8).
@@ -162,6 +169,9 @@ func NewWindowService(d Deps) *WindowService {
 	if d.SavePicker == nil {
 		d.SavePicker = PickSavePath
 	}
+	if d.PickExportPath == nil {
+		d.PickExportPath = PickExportPath
+	}
 	if d.Trash == nil {
 		d.Trash = mygo.Shell.TrashItem
 	}
@@ -191,6 +201,8 @@ func NewWindowService(d Deps) *WindowService {
 		treeChanged:        d.TreeChanged,
 		closeWindow:        d.CloseWindow,
 		savePick:           d.SavePicker,
+		exportPick:         d.PickExportPath,
+		printRunner:        d.PrintRunner,
 		startedAt:          d.StartedAt,
 		state:              d.State,
 		startupNotice:      d.StartupNotice,

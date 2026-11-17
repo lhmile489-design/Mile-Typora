@@ -51,6 +51,9 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     copyClipboardHTML: async () => ({ kind: "copied" as const }),
     copyImageToClipboard: async () => ({ kind: "copied" as const }),
     readClipboardImage: async () => ({ kind: "failed" as const, code: "no_image", message: "剪贴板中没有图片" }),
+    exportHTML: async () => ({ kind: "exported" as const, path: "", warnings: [] }),
+    exportPDF: async () => ({ kind: "exported" as const, path: "", warnings: [] }),
+    printDocument: async () => ({ kind: "printed" as const, warnings: [] }),
     cancelImage: async () => {},
     onNotice: () => () => {},
     onCloseRequested: () => () => {},
@@ -709,6 +712,51 @@ describe("file operations", () => {
     const dialog = await screen.findByRole("dialog", { name: "复制图片到文档资源目录？" });
     fireEvent.click(within(dialog).getByRole("button", { name: "复制并插入" }));
     await waitFor(() => expect(imageContent.textContent).toContain("![粘贴图片](assets/%E7%B2%98%E8%B4%B4%E5%9B%BE%E7%89%87.png)"));
+  });
+
+  it("exports HTML and PDF from the file menu", async () => {
+    const exportHTML = vi.fn(async () => ({
+      kind: "exported" as const,
+      path: "E:/notes/笔记.html",
+      warnings: [],
+    }));
+    const exportPDF = vi.fn(async () => ({
+      kind: "exported" as const,
+      path: "E:/notes/笔记.pdf",
+      warnings: ["图片超过 20 MiB，已省略"],
+    }));
+    render(<App transport={fakeTransport({ openFile: async () => loadedDoc, exportHTML, exportPDF })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "文件" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "导出" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "HTML…" }));
+    await waitFor(() =>
+      expect(exportHTML).toHaveBeenCalledWith(expect.stringContaining("<h1>标题</h1>"), "笔记"),
+    );
+    expect(await screen.findByText(/已导出到 E:\/notes\/笔记\.html/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "文件" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "导出" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "PDF…" }));
+    const dialog = await screen.findByRole("dialog", { name: "PDF 已导出" });
+    expect(dialog.textContent).toContain("图片超过 20 MiB");
+    fireEvent.click(within(dialog).getByRole("button", { name: "关闭" }));
+    expect(screen.queryByRole("dialog", { name: "PDF 已导出" })).toBeNull();
+  });
+
+  it("prints through the dedicated print view with Alt+Shift+P", async () => {
+    const printDocument = vi.fn(async () => ({ kind: "printed" as const, warnings: [] }));
+    render(<App transport={fakeTransport({ openFile: async () => loadedDoc, printDocument })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+
+    fireEvent.keyDown(window, { key: "p", altKey: true, shiftKey: true });
+    await waitFor(() =>
+      expect(printDocument).toHaveBeenCalledWith(expect.stringContaining("<h1>标题</h1>"), "笔记"),
+    );
+    expect(await screen.findByText("已打开打印预览")).toBeTruthy();
   });
 
   it("keeps keyboard control of a menu opened with the mouse", async () => {

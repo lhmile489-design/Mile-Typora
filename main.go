@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -30,6 +31,23 @@ var startedAt = time.Now()
 
 // windowsService is the service the window hooks talk to; main sets it once.
 var windowsService *service.WindowService
+
+// printWindowIDs marks the isolated print views. They are mygo windows but not
+// app windows: open requests and focus routing must never pick them.
+var printWindowIDs sync.Map
+
+func markPrintWindow(id int, active bool) {
+	if active {
+		printWindowIDs.Store(id, true)
+		return
+	}
+	printWindowIDs.Delete(id)
+}
+
+func isPrintWindow(id int) bool {
+	_, ok := printWindowIDs.Load(id)
+	return ok
+}
 
 // startupRequest is one thing a resume launch opens, in order.
 type startupRequest struct {
@@ -196,7 +214,8 @@ func main() {
 				}
 			}
 		},
-		StartedAt: startedAt,
+		StartedAt:   startedAt,
+		PrintRunner: nativePrintRunner{},
 		CloseWindow: func(windowID int) error {
 			for _, w := range mygo.Windows() {
 				if w.ID() == windowID {
@@ -258,6 +277,139 @@ func main() {
 // a window and returns its ID.
 func openWindow() (int, error) {
 	return newWindow().ID(), nil
+}
+
+// nativePrintRunner renders M5-6's dedicated print view in an isolated mygo
+// window. The window is not registered in winctx: it has no document, gets no
+// open requests, and exists only until the PDF or print dialog finishes.
+type nativePrintRunner struct{}
+
+func (nativePrintRunner) PDF(ctx context.Context, document string) ([]byte, error) {
+	return renderPrintView(ctx, document, false)
+}
+
+func (nativePrintRunner) Print(ctx context.Context, document string) error {
+	_, err := renderPrintView(ctx, document, true)
+	return err
+}
+
+func renderPrintView(ctx context.Context, document string, show bool) ([]byte, error) {
+	options := mygo.WindowOptions{
+		Title:           "Mile Typora 打印",
+		Width:           1000,
+		Height:          1400,
+		SkipTaskbar:     true,
+		BackgroundColor: "#FFFFFF",
+		URL:             "about:blank",
+		Page: mygo.PageOptions{
+			DevTools:             mygo.DevToolsDisabled,
+			BackgroundThrottling: mygo.ThrottlingOff,
+			// The page only renders the export document; it never needs the
+			// app's bindings, dropped files or custom-scheme reads.
+			Untrusted: true,
+		},
+	}
+	if !show {
+		// PrintToPDF lays out the real page; a hidden or off-screen window can
+		// come back blank. Use an isolated visible window and close it after.
+		options.Hidden = false
+		options.SkipTaskbar = true
+	}
+	w := mygo.NewWindow(options)
+	printID := w.ID()
+	markPrintWindow(printID, true)
+	w.OnClosed(func() { markPrintWindow(printID, false) })
+	if !show {
+		defer w.Close()
+	}
+	page := w.Page()
+	page.OnWillNavigate(func(e *mygo.NavigateEvent) {
+		if e.URL != "" && e.URL != "about:blank" {
+			e.PreventDefault()
+		}
+	})
+	page.OnContextMenu(func(e *mygo.ContextMenuEvent) {
+		e.Menu = nil
+	})
+	if err := waitForInitialPage(ctx, page); err != nil {
+		return nil, err
+	}
+	page.LoadHTML(document, "")
+	if err := waitForPrintReady(ctx, page); err != nil {
+		return nil, err
+	}
+	if _, err := page.EvalContext(ctx, `Promise.all(Array.from(document.images).map(img => img.complete ? Promise.resolve() : new Promise(resolve => { img.addEventListener('load', resolve, {once: true}); img.addEventListener('error', resolve, {once: true}); }))).then(() => document.fonts.ready).then(() => true)`); err != nil {
+		return nil, err
+	}
+	if show {
+		// window.print returns once the preview is requested. Keep this clean
+		// document window open: the preview belongs to it, and the user closes
+		// it when done. Closing here would cancel the preview.
+		page.Print()
+		return nil, nil
+	}
+	type pdfResult struct {
+		data []byte
+		err  error
+	}
+	done := make(chan pdfResult, 1)
+	go func() {
+		data, err := page.PrintToPDF(mygo.PDFOptions{
+			PageSize:   mygo.PageA4,
+			Margins:    &mygo.Margins{Top: 0.6, Right: 0.6, Bottom: 0.6, Left: 0.6},
+			Background: true,
+		})
+		done <- pdfResult{data: data, err: err}
+	}()
+	select {
+	case result := <-done:
+		return result.data, result.err
+	case <-ctx.Done():
+		// PrintToPDF has no context parameter; closing the window releases
+		// WebView2's pending CDP call and keeps exportBusy from wedging.
+		w.Close()
+		return nil, ctx.Err()
+	}
+}
+
+// waitForInitialPage waits for the new window's initial about:blank document.
+// LoadHTML replaces that document, so it must not race the first navigation.
+func waitForInitialPage(ctx context.Context, page *mygo.Page) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(30 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		state, err := page.EvalContext(ctx, "document.readyState")
+		if err == nil && state == "complete" {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+// waitForPrintReady polls document.readyState: the page may already be ready
+// before an OnDOMReady listener can be registered on a fresh hidden window.
+func waitForPrintReady(ctx context.Context, page *mygo.Page) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		ready, err := page.EvalContext(ctx, `document.readyState === "complete" && document.querySelector("main.markdown") !== null`)
+		if err == nil && ready == true {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 // newWindow opens an empty reader window (DESIGN.md §4, PRD §5.2).
@@ -373,12 +525,14 @@ func notifyWindow(id int, text string) {
 func focusedWindow() *mygo.Window {
 	all := mygo.Windows()
 	for _, w := range all {
-		if w.IsFocused() {
+		if w.IsFocused() && !isPrintWindow(w.ID()) {
 			return w
 		}
 	}
-	if len(all) > 0 {
-		return all[len(all)-1]
+	for i := len(all) - 1; i >= 0; i-- {
+		if !isPrintWindow(all[i].ID()) {
+			return all[i]
+		}
 	}
 	return nil
 }

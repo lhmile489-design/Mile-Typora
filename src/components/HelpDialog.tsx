@@ -13,6 +13,7 @@ const ORDER: Array<[Command, string]> = [
   ["open-folder", "打开目录"],
   ["save-blocked", "保存"],
   ["save-as", "另存为"],
+  ["print-document", "打印预览"],
   ["toggle-source", "源码 / 预览"],
   ["find", "查找"],
   ["close-window", "关闭窗口"],

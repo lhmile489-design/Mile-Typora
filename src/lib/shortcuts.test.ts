@@ -56,6 +56,7 @@ describe("the P0 shortcut table", () => {
     ["\\", { ctrlKey: true }, "clear-format"],
     ["5", { altKey: true, shiftKey: true }, "strikethrough"],
     ["%", { altKey: true, shiftKey: true }, "strikethrough"],
+    ["p", { altKey: true, shiftKey: true }, "print-document"],
     ["ArrowUp", { altKey: true }, "move-line-up"],
     ["ArrowDown", { altKey: true }, "move-line-down"],
     ["c", { ctrlKey: true, shiftKey: true }, "copy-markdown"],

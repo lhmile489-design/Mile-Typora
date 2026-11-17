@@ -52,7 +52,7 @@ async function load(): Promise<Mermaid> {
         // Strict mode: no click handlers, no HTML labels, no scripts.
         securityLevel: "strict",
         theme: "base",
-        flowchart: { htmlLabels: false },
+        htmlLabels: false,
         maxTextSize: 65536,
       });
       return mermaid;
@@ -114,7 +114,7 @@ export async function renderDiagrams(root: ParentNode, timeoutMs = RENDER_TIMEOU
         // Mermaid keeps a label's <img> tag (its event handler is stripped),
         // and an image would load from wherever it points; a diagram needs
         // none (PRD §8.4: no request from document content).
-        FORBID_TAGS: ["img"],
+        FORBID_TAGS: ["img", "script", "iframe", "object", "embed", "link", "meta"],
       });
       const holder = document.createElement("div");
       holder.className = "diagram";

@@ -9,6 +9,9 @@ export function renderMath(root: ParentNode): number {
   const nodes = root.querySelectorAll<HTMLElement>(".math");
   let rendered = 0;
   for (const el of nodes) {
+    // An element keeps its `.math` class after KaTeX replaces its children;
+    // re-running the pass would typeset the output as TeX again.
+    if (el.querySelector(".katex") || el.classList.contains("math-error")) continue;
     const tex = el.textContent ?? "";
     const displayMode = el.dataset.display === "true";
     try {

@@ -20,6 +20,7 @@ export type Command =
   | "toggle-source"
   | "save-blocked"
   | "save-as"
+  | "print-document"
   | "copy-markdown"
   | "paste"
   | "paste-plain"
@@ -82,6 +83,7 @@ export function commandFor(e: KeyPress): Command | null {
 
   if (!ctrl && !shift && !e.altKey && key === "F5") return "refresh";
   if (!ctrl && !shift && !e.altKey && key === "Escape") return "dismiss";
+  if (!e.ctrlKey && shift && e.altKey && !e.metaKey && (key === "p" || key === "P")) return "print-document";
   if (!e.ctrlKey && shift && e.altKey && !e.metaKey && (key === "5" || key === "%")) return "strikethrough";
   if (!e.ctrlKey && !shift && e.altKey && !e.metaKey && key === "ArrowUp") return "move-line-up";
   if (!e.ctrlKey && !shift && e.altKey && !e.metaKey && key === "ArrowDown") return "move-line-down";
@@ -142,6 +144,7 @@ export const SHORTCUT_HINT: Partial<Record<Command, string>> = {
   "toggle-source": "Ctrl+/",
   "save-blocked": "Ctrl+S",
   "save-as": "Ctrl+Shift+S",
+  "print-document": "Alt+Shift+P",
   "copy-markdown": "Ctrl+Shift+C",
   "paste-plain": "Ctrl+Shift+V",
   "heading-1": "Ctrl+1",

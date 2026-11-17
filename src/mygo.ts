@@ -78,6 +78,13 @@ export interface DocUpdate {
   rel?: string;
 }
 
+/** ExportResult is one finished HTML or PDF export (M5-6 FILE-16). */
+export interface ExportResult {
+  path?: string;
+  warnings?: string[];
+  failure?: Failure;
+}
+
 /**
  * Failure is an expected, user-facing failure. Detail never contains
  * document text or unauthorized paths.
@@ -238,6 +245,15 @@ export interface OutlineResult {
  */
 export interface PendingResult {
   requests: OpenRequest[];
+}
+
+/**
+ * PrintResult reports a print preview opened from the dedicated print view
+ * (M5-6 FILE-17).
+ */
+export interface PrintResult {
+  warnings?: string[];
+  failure?: Failure;
 }
 
 /** ReadyInfo answers the page's ready handshake. */
@@ -502,6 +518,20 @@ export const WindowService = {
     return call("WindowService.DocumentProperties", rel);
   },
   /**
+   * ExportHTML writes a standalone HTML document to the path the user chooses
+   * (M5-6 FILE-16). Images are embedded as data URIs under a 20 MiB budget.
+   */
+  exportHTML(bodyHTML: string, title: string): Promise<ExportResult> {
+    return call("WindowService.ExportHTML", bodyHTML, title);
+  },
+  /**
+   * ExportPDF renders the dedicated print view to PDF and writes it to the
+   * chosen path (M5-6 FILE-16). Generation has a 30 second budget.
+   */
+  exportPDF(bodyHTML: string, title: string): Promise<ExportResult> {
+    return call("WindowService.ExportPDF", bodyHTML, title);
+  },
+  /**
    * ExtractOutline returns the headings of the page's buffer or document for the
    * left outline (M5-2 VIEW-02). It parses the source with the same GFM rules as
    * the renderer and never writes anything.
@@ -597,6 +627,13 @@ export const WindowService = {
    */
   pickImage(): Promise<ImagePickResult> {
     return call("WindowService.PickImage");
+  },
+  /**
+   * PrintDocument opens the system print preview on the dedicated print view
+   * (M5-6 FILE-17). It never prints the editor page itself.
+   */
+  printDocument(bodyHTML: string, title: string): Promise<PrintResult> {
+    return call("WindowService.PrintDocument", bodyHTML, title);
   },
   /**
    * Ready is the page's handshake: it identifies the calling window. The page

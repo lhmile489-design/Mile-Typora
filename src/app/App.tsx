@@ -47,7 +47,9 @@ import { OutlineView } from "../components/OutlineView";
 import { SearchPanel } from "../components/SearchPanel";
 import { TableDialog } from "../components/TableDialog";
 import { LinkDialog } from "../components/LinkDialog";
+import { ExportNoticeDialog } from "../components/ExportNoticeDialog";
 import { readerSelectionHTML, readerSelectionText, selectedReaderImage } from "../lib/clipboard";
+import { serializeExportBody } from "../lib/export";
 import { SettingsDialog } from "../components/SettingsDialog";
 import { UnsavedDialog } from "../components/UnsavedDialog";
 import { FindBar } from "../components/FindBar";
@@ -97,6 +99,7 @@ type MenuState = {
   readerImage: boolean;
   saveAllRunning: boolean;
   saving: boolean;
+  exporting: boolean;
   promptOpen: boolean;
   recentCount: number;
 };
@@ -130,6 +133,23 @@ function buildMenus(state: MenuState): MenuGroup[] {
         editing("save-as", "另存为…", "Ctrl+Shift+S", !state.canSave || state.saving || state.promptOpen, state.saving ? "正在保存" : state.promptOpen ? "先处理当前保存提示" : "打开文档后可另存为"),
         editing("save-all", "保存全部…", undefined, state.saveAllRunning || state.promptOpen || state.saving, state.saving ? "正在保存" : state.promptOpen ? "先处理当前保存提示" : "保存全部正在进行"),
         sep,
+        {
+          id: "export-menu",
+          label: "导出",
+          disabled: !state.hasDoc || state.exporting,
+          reason: !state.hasDoc ? "先打开或新建文档" : "正在导出或打印",
+          children: [
+            { id: "export-html", label: "HTML…", disabled: state.exporting, reason: "正在导出或打印" },
+            { id: "export-pdf", label: "PDF…", disabled: state.exporting, reason: "正在导出或打印" },
+          ],
+        },
+        {
+          id: "print-document",
+          label: "打印…",
+          shortcut: "Alt+Shift+P",
+          disabled: !state.hasDoc || state.exporting,
+          reason: !state.hasDoc ? "先打开或新建文档" : "正在导出或打印",
+        },
         {
           id: "move-file",
           label: "移动到…",
@@ -425,6 +445,13 @@ export function App({ transport }: { transport: Transport }) {
   // M4-2: the buffer is dirty when it differs from the last saved/loaded text.
   const [savedText, setSavedText] = useState("");
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportNotice, setExportNotice] = useState<{
+    title: string;
+    path: string;
+    warnings: string[];
+  } | null>(null);
+  const exportingRef = useRef(false);
   const [unsavedOpen, setUnsavedOpen] = useState(false);
   const [unsavedError, setUnsavedError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -2020,6 +2047,90 @@ export function App({ transport }: { transport: Transport }) {
     setNotice(result.kind === "copied" ? "已拷贝图片" : result.message);
   }, [transport]);
 
+  /** buildExportDocument flattens the current article for M5-6. */
+  const buildExportDocument = useCallback(async (): Promise<{ body: string; title: string } | null> => {
+    let article: Element | null = null;
+    let holder: HTMLDivElement | null = null;
+    if (modeRef.current === "editing") {
+      const rendered = await transport.renderSource(bufferRef.current);
+      if (rendered.kind !== "ok") {
+        setNotice(rendered.message);
+        return null;
+      }
+      holder = document.createElement("div");
+      holder.className = "markdown";
+      holder.style.cssText = "position:fixed;left:-10000px;top:0;width:860px;";
+      holder.innerHTML = rendered.html;
+      document.body.appendChild(holder);
+      article = holder;
+      renderMath(article);
+      await renderDiagrams(article, 5000);
+    } else {
+      article = readerRef.current?.querySelector(".markdown") ?? null;
+      if (article) {
+        renderMath(article);
+        await renderDiagrams(article, 5000);
+      }
+    }
+    if (!article) {
+      holder?.remove();
+      setNotice("没有可导出的内容");
+      return null;
+    }
+    const body = serializeExportBody(article);
+    holder?.remove();
+    const current = docRef.current;
+    const title = current?.path ? current.name.replace(/\.(md|markdown)$/i, "") : "未命名";
+    return { body, title };
+  }, [transport]);
+
+  const runExport = useCallback(
+    async (kind: "html" | "pdf" | "print") => {
+      if (exportingRef.current) return;
+      exportingRef.current = true;
+      setExporting(true);
+      setNotice(kind === "print" ? "正在准备打印…" : kind === "pdf" ? "正在生成 PDF…" : "正在导出 HTML…");
+      try {
+        const built = await buildExportDocument();
+        if (!built) return;
+        if (kind === "print") {
+          const result = await transport.printDocument(built.body, built.title);
+          if (result.kind === "failed") {
+            setNotice(result.message);
+          } else if (result.warnings.length > 0) {
+            setNotice("打印视图已生成，存在警告");
+            setExportNotice({ title: "打印", path: "", warnings: result.warnings });
+          } else {
+            setNotice("已打开打印预览");
+          }
+          return;
+        }
+        const result =
+          kind === "html"
+            ? await transport.exportHTML(built.body, built.title)
+            : await transport.exportPDF(built.body, built.title);
+        if (result.kind === "failed") {
+          setNotice(result.message);
+        } else if (result.kind === "cancelled") {
+          setNotice("已取消导出");
+        } else if (result.warnings.length > 0) {
+          setNotice("已导出，存在警告");
+          setExportNotice({
+            title: kind === "html" ? "HTML 已导出" : "PDF 已导出",
+            path: result.path,
+            warnings: result.warnings,
+          });
+        } else {
+          setNotice(`已导出到 ${result.path}`);
+        }
+      } finally {
+        exportingRef.current = false;
+        setExporting(false);
+      }
+    },
+    [buildExportDocument, transport],
+  );
+
   const onMenuCommand = useCallback(
     (id: string) => {
       const editor = editorRef.current;
@@ -2036,6 +2147,9 @@ export function App({ transport }: { transport: Transport }) {
         case "save": void save(); return;
         case "save-as": void saveAs(); return;
         case "save-all": void startSaveAll(); return;
+        case "export-html": void runExport("html"); return;
+        case "export-pdf": void runExport("pdf"); return;
+        case "print-document": void runExport("print"); return;
         case "move-file": requestMove(); return;
         case "reveal-file": void revealFile(); return;
         case "show-in-sidebar": revealInSidebar(); return;
@@ -2178,7 +2292,7 @@ export function App({ transport }: { transport: Transport }) {
         case "help-about": setHelpKind("about"); return;
       }
     },
-    [newDocument, newWindow, openFile, openFolder, openList, openSearch, requestClose, requestDelete, requestMove, requestProperties, revealFile, revealInSidebar, save, saveAs, startSaveAll, toggleRight, toggleSource, chooseImage, pasteAuto, pasteImageFromClipboard, copyImage, copyPlainText, copyHTMLFragment, transport],
+    [newDocument, newWindow, openFile, openFolder, openList, openSearch, requestClose, requestDelete, requestMove, requestProperties, revealFile, revealInSidebar, save, saveAs, startSaveAll, toggleRight, toggleSource, chooseImage, pasteAuto, pasteImageFromClipboard, copyImage, copyPlainText, copyHTMLFragment, runExport, transport],
   );
 
   // Links in the preview do not replace the buffer before M4-2's protection.
@@ -2314,7 +2428,7 @@ export function App({ transport }: { transport: Transport }) {
       if (e.defaultPrevented) return;
       const command = commandFor(e);
       if (!command) return;
-      if ((settingsOpen || unsavedOpen || conflict !== null || reloadOpen || deleteTarget !== null || properties !== null || sidebarConfirm || searchConfirm || listConfirm || tableOpen || linkDialog !== null || imageConfirm !== null || saveAllSummary !== null || recentOpen || helpKind !== null) && command !== "dismiss") return;
+      if ((settingsOpen || unsavedOpen || conflict !== null || reloadOpen || deleteTarget !== null || properties !== null || sidebarConfirm || searchConfirm || listConfirm || tableOpen || linkDialog !== null || imageConfirm !== null || exportNotice !== null || exporting || saveAllSummary !== null || recentOpen || helpKind !== null) && command !== "dismiss") return;
       const editorAction = EDITOR_ACTIONS[command];
       if (editorAction) {
         const active = document.activeElement;
@@ -2416,6 +2530,10 @@ export function App({ transport }: { transport: Transport }) {
           e.preventDefault();
           void saveAs();
           return;
+        case "print-document":
+          e.preventDefault();
+          void runExport("print");
+          return;
         case "copy-markdown":
           e.preventDefault();
           if (modeRef.current !== "editing") {
@@ -2480,6 +2598,8 @@ export function App({ transport }: { transport: Transport }) {
     tableOpen,
     linkDialog,
     imageConfirm,
+    exportNotice,
+    exporting,
     saveAllSummary,
     recentOpen,
     helpKind,
@@ -2488,6 +2608,7 @@ export function App({ transport }: { transport: Transport }) {
     toggleSource,
     pasteAuto,
     pasteImageFromClipboard,
+    runExport,
   ]);
 
   return (
@@ -2512,6 +2633,7 @@ export function App({ transport }: { transport: Transport }) {
           readerImage: readerImageActive,
           saveAllRunning,
           saving,
+          exporting,
           promptOpen: unsavedOpen || conflict !== null,
           recentCount: recent.length,
         })}
@@ -2975,6 +3097,14 @@ export function App({ transport }: { transport: Transport }) {
           confirmLabel={imageConfirm.mode === "replace" ? "复制并替换" : "复制并插入"}
           onConfirm={() => void confirmImageCopy()}
           onCancel={cancelImageCopy}
+        />
+      )}
+      {exportNotice && (
+        <ExportNoticeDialog
+          title={exportNotice.title}
+          path={exportNotice.path}
+          warnings={exportNotice.warnings}
+          onClose={() => setExportNotice(null)}
         />
       )}
       {tableOpen && (

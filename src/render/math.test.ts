@@ -24,6 +24,14 @@ describe("renderMath", () => {
     expect(root.textContent).toBe("没有公式");
   });
 
+  it("does not typeset its own output again", () => {
+    const root = article('<span class="math" data-display="false">E = mc^2</span>');
+    expect(renderMath(root)).toBe(1);
+    const math = root.querySelector(".katex-mathml math")?.innerHTML ?? "";
+    expect(renderMath(root)).toBe(0);
+    expect(root.querySelector(".katex-mathml math")?.innerHTML).toBe(math);
+  });
+
   it("degrades one broken formula and keeps its source readable", () => {
     const root = article(
       '<span class="math" data-display="false">\\nope</span>' +

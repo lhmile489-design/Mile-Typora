@@ -496,6 +496,14 @@ body {
 .dialog-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .dialog-source { margin: 0 0 var(--sp-4); color: var(--text-muted); font-size: var(--ui-xs); overflow-wrap: anywhere; }
 
+.export-warnings {
+  margin: 0 0 var(--sp-4); padding: var(--sp-2) var(--sp-3);
+  max-height: 220px; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  color: var(--text-soft); font-size: var(--ui-sm); list-style: disc inside;
+}
+.export-warnings li { margin: var(--sp-1) 0; overflow-wrap: anywhere; }
+
 .props-list { margin: 0 0 var(--sp-4); display: grid; gap: var(--sp-2); }
 .props-row { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: var(--sp-3); font-size: var(--ui-sm); }
 .props-row dt { color: var(--text-muted); }

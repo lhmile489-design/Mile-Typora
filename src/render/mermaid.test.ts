@@ -44,7 +44,7 @@ describe("sanitizing diagram output", () => {
     const dirty = '<svg xmlns="http://www.w3.org/2000/svg"><a><text>甲</text></a><img src="x" onerror="alert(1)"></svg>';
     const clean = DOMPurify.sanitize(dirty, {
       USE_PROFILES: { svg: true, svgFilters: true },
-      FORBID_TAGS: ["img"],
+      FORBID_TAGS: ["img", "script", "iframe", "object", "embed", "link", "meta"],
     });
     expect(clean.toLowerCase()).not.toContain("<img");
     expect(clean).not.toContain("onerror");
