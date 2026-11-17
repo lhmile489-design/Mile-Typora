@@ -69,6 +69,8 @@ type Renderer struct {
 	highlighter *highlighter
 	md          goldmark.Markdown
 	policy      *bluemonday.Policy
+	clipboard   *bluemonday.Policy
+	simplified  *bluemonday.Policy
 	counts      Counts
 	// images resolves image references of the render in progress; it is set
 	// under mu, like counts.
@@ -77,7 +79,12 @@ type Renderer struct {
 
 // New returns a Renderer for CommonMark with GFM and formula delimiters.
 func New() *Renderer {
-	r := &Renderer{policy: newPolicy(), highlighter: newHighlighter()}
+	r := &Renderer{
+		policy:      newPolicy(),
+		clipboard:   newClipboardPolicy(),
+		simplified:  newSimplifiedPolicy(),
+		highlighter: newHighlighter(),
+	}
 	r.md = goldmark.New(
 		goldmark.WithExtensions(
 			extension.GFM,

@@ -15,6 +15,14 @@ export interface AttachFolderResult {
 }
 
 /**
+ * ClipboardResult reports a clipboard write that may fail for an expected
+ * reason, such as an empty selection or a failed image decode (M5-5).
+ */
+export interface ClipboardResult {
+  failure?: Failure;
+}
+
+/**
  * CloseRequested asks a window's page to run the unsaved-changes prompt
  * before the native close goes through.
  */
@@ -424,6 +432,38 @@ export const WindowService = {
    */
   clearStartUntitled(): Promise<void> {
     return call("WindowService.ClearStartUntitled");
+  },
+  /**
+   * ClipboardCopyHTML puts a cleaned HTML fragment and its plain-text fallback
+   * on the clipboard in one item (M5-5 EDIT-09/EDIT-10). FromSource parses the
+   * Markdown selected in the source editor; otherwise content is an HTML
+   * fragment selected in the reading view.
+   */
+  clipboardCopyHTML(content: string, fromSource: boolean, simplified: boolean): Promise<ClipboardResult> {
+    return call("WindowService.ClipboardCopyHTML", content, fromSource, simplified);
+  },
+  /**
+   * ClipboardCopyImage reads an authorized local image, converts it to PNG and
+   * writes it to the clipboard (M5-5 EDIT-05). Source is either a relative image
+   * reference from the editor or an mtres URL of a rendered image.
+   */
+  clipboardCopyImage(source: string): Promise<ClipboardResult> {
+    return call("WindowService.ClipboardCopyImage", source);
+  },
+  /**
+   * ClipboardCopyPlainText renders a source selection and writes only readable
+   * text to the clipboard (M5-5 EDIT-07).
+   */
+  clipboardCopyPlainText(source: string): Promise<ClipboardResult> {
+    return call("WindowService.ClipboardCopyPlainText", source);
+  },
+  /**
+   * ClipboardReadImage turns a clipboard image into a pending PNG copy beside
+   * the document, waiting for the same confirmation as an inserted image
+   * (M5-5 EDIT-06).
+   */
+  clipboardReadImage(): Promise<ImagePickResult> {
+    return call("WindowService.ClipboardReadImage");
   },
   /** ClipboardReadText returns the system clipboard's plain text (P1 EDIT-06). */
   clipboardReadText(): Promise<string> {

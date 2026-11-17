@@ -136,6 +136,11 @@ export function MenuBar({ menus, onCommand }: Props) {
               tops.current[index] = node;
             }}
             onClick={() => (open === index ? setOpen(null) : openMenu(index))}
+            onMouseDown={(e) => {
+              // Keep the reader/editor selection without losing keyboard focus.
+              e.preventDefault();
+              e.currentTarget.focus();
+            }}
             onMouseEnter={() => {
               if (open !== null) openMenu(index);
             }}
@@ -178,6 +183,10 @@ export function MenuBar({ menus, onCommand }: Props) {
                         }
                         setOpen(null);
                         onCommand(item.id);
+                      }}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.currentTarget.focus();
                       }}
                       onMouseEnter={() => {
                         if (disabled) return;
@@ -222,6 +231,10 @@ export function MenuBar({ menus, onCommand }: Props) {
                                 setOpen(null);
                                 onCommand(child.id);
                               }}
+                              onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.currentTarget.focus();
+                      }}
                             >
                               <span className="menu-check" aria-hidden="true" />
                               <span className="label">{child.label}</span>

@@ -21,6 +21,7 @@ export type Command =
   | "save-blocked"
   | "save-as"
   | "copy-markdown"
+  | "paste"
   | "paste-plain"
   | "heading-1"
   | "heading-2"
@@ -97,6 +98,7 @@ export function commandFor(e: KeyPress): Command | null {
   if (shift && key === "s") return "save-as";
   if (shift && key === "c") return "copy-markdown";
   if (shift && key === "v") return "paste-plain";
+  if (!shift && key === "v") return "paste";
   if (!shift && key >= "1" && key <= "6") return `heading-${key}` as Command;
   if (!shift && key === "0") return "paragraph";
   if (!shift && key === "=") return "heading-promote";

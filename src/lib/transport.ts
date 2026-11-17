@@ -123,6 +123,11 @@ export type ImageCopyOutcome =
   | { kind: "copied"; path: string; markdown: string; name: string }
   | { kind: "failed"; code: string; message: string };
 
+/** What a clipboard copy command produced (M5-5). */
+export type ClipboardCopyOutcome =
+  | { kind: "copied" }
+  | { kind: "failed"; code: string; message: string };
+
 /** The result of a call: its value, or a message for a failure. */
 export type Outcome<T> = { ok: true; value: T } | { ok: false; message: string };
 
@@ -192,6 +197,14 @@ export interface Transport {
   readClipboardText(): Promise<Outcome<string>>;
   /** Writes plain text to the system clipboard. */
   writeClipboardText(text: string): Promise<Outcome<void>>;
+  /** Copies a source selection as readable text (M5-5 EDIT-07). */
+  copyPlainTextSource(source: string): Promise<ClipboardCopyOutcome>;
+  /** Copies a selection as cleaned HTML with a text fallback (EDIT-09/10). */
+  copyClipboardHTML(content: string, fromSource: boolean, simplified: boolean): Promise<ClipboardCopyOutcome>;
+  /** Copies one authorized local image as PNG (EDIT-05). */
+  copyImageToClipboard(source: string): Promise<ClipboardCopyOutcome>;
+  /** Turns a clipboard image into a pending asset copy (EDIT-06). */
+  readClipboardImage(): Promise<ImagePickOutcome>;
   /** Tells Go whether the buffer is dirty and which version it started from. */
   setEditState(dirty: boolean, hash: string, hasBom: boolean, lineEnding: string): Promise<void>;
   /** Reads the settings and the recent list. */
@@ -260,6 +273,29 @@ export async function wrap<T>(call: () => Promise<T>): Promise<Outcome<T>> {
   } catch (err) {
     if (isCallError(err)) return { ok: false, message: err.message };
     return { ok: false, message: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** clipboardCopy maps one clipboard binding's expected failure or error. */
+async function clipboardCopy(
+  call: () => Promise<{ failure?: { code: string; detail?: string } }>,
+): Promise<ClipboardCopyOutcome> {
+  try {
+    const result = await call();
+    if (result.failure) {
+      return {
+        kind: "failed",
+        code: result.failure.code,
+        message: failureText(result.failure),
+      };
+    }
+    return { kind: "copied" };
+  } catch (err) {
+    return {
+      kind: "failed",
+      code: "unknown",
+      message: failureText({ code: "unknown", detail: err instanceof Error ? err.message : "" }),
+    };
   }
 }
 
@@ -504,6 +540,32 @@ export const mygoTransport: Transport = {
     wrap(async () => {
       await WindowService.clipboardWriteText(text);
     }),
+  copyPlainTextSource: (source) => clipboardCopy(() => WindowService.clipboardCopyPlainText(source)),
+  copyClipboardHTML: (content, fromSource, simplified) =>
+    clipboardCopy(() => WindowService.clipboardCopyHTML(content, fromSource, simplified)),
+  copyImageToClipboard: (source) => clipboardCopy(() => WindowService.clipboardCopyImage(source)),
+  readClipboardImage: async () => {
+    try {
+      const result = await WindowService.clipboardReadImage();
+      if (result.failure) {
+        return { kind: "failed", code: result.failure.code, message: failureText(result.failure) };
+      }
+      if (!result.token) return { kind: "failed", code: "no_image", message: "剪贴板中没有图片" };
+      return {
+        kind: "picked",
+        token: result.token,
+        name: result.name ?? "",
+        target: result.target ?? "",
+        size: result.size ?? 0,
+      };
+    } catch (err) {
+      return {
+        kind: "failed",
+        code: "unknown",
+        message: failureText({ code: "unknown", detail: err instanceof Error ? err.message : "" }),
+      };
+    }
+  },
   setEditState: (dirty, hash, hasBom, lineEnding) =>
     WindowService.setEditState(dirty, hash, hasBom, lineEnding),
   getSettings: async () => {

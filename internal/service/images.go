@@ -19,6 +19,28 @@ import (
 	"github.com/lhmile489-design/mile-typora/internal/winctx"
 )
 
+// imageDocument is the canonical path of the window's saved document, after
+// checking that a workspace root still authorizes writes beside it.
+func (s *WindowService) imageDocument(w *winctx.Window) (string, *contract.Failure) {
+	doc, ok := w.OpenFile()
+	if !ok {
+		return "", failFile("no_file", "当前文档尚未保存")
+	}
+	docReal, pathFailure := pathguard.Canon(doc)
+	if pathFailure != nil {
+		return "", contractFailure(pathFailure)
+	}
+	if root, hasRoot := w.Root(); hasRoot {
+		if within, _ := pathguard.Within(root, docReal); !within {
+			return "", failFile("out_of_scope", "文档不在当前工作区内")
+		}
+		if componentFailure := pathguard.CheckComponents(root, docReal); componentFailure != nil {
+			return "", contractFailure(componentFailure)
+		}
+	}
+	return docReal, nil
+}
+
 // PickImage asks for a local image and prepares a copy in the document's
 // assets folder. Nothing is written until CopyImage confirms (M5-4 FORMAT-09).
 func (s *WindowService) PickImage(ctx context.Context) (contract.ImagePickResult, error) {
@@ -26,21 +48,9 @@ func (s *WindowService) PickImage(ctx context.Context) (contract.ImagePickResult
 	if err != nil {
 		return contract.ImagePickResult{}, err
 	}
-	doc, ok := w.OpenFile()
-	if !ok {
-		return contract.ImagePickResult{Failure: failFile("no_file", "当前文档尚未保存")}, nil
-	}
-	docReal, pathFailure := pathguard.Canon(doc)
-	if pathFailure != nil {
-		return contract.ImagePickResult{Failure: contractFailure(pathFailure)}, nil
-	}
-	if root, hasRoot := w.Root(); hasRoot {
-		if within, _ := pathguard.Within(root, docReal); !within {
-			return contract.ImagePickResult{Failure: failFile("out_of_scope", "文档不在当前工作区内")}, nil
-		}
-		if componentFailure := pathguard.CheckComponents(root, docReal); componentFailure != nil {
-			return contract.ImagePickResult{Failure: contractFailure(componentFailure)}, nil
-		}
+	docReal, failure := s.imageDocument(w)
+	if failure != nil {
+		return contract.ImagePickResult{Failure: failure}, nil
 	}
 	picker := s.pickImage
 	if picker == nil {
@@ -92,8 +102,10 @@ func (s *WindowService) CopyImage(ctx context.Context, token string) (contract.I
 	if !ok {
 		return contract.ImageCopyResult{Failure: failFile("not_found", "没有待确认的图片")}, nil
 	}
-	if reason := resource.Check(pending.Source); reason != "" {
-		return contract.ImageCopyResult{Failure: imageFailure(reason)}, nil
+	if len(pending.Data) == 0 {
+		if reason := resource.Check(pending.Source); reason != "" {
+			return contract.ImageCopyResult{Failure: imageFailure(reason)}, nil
+		}
 	}
 	// The workspace may have changed while the confirmation was open: the
 	// document must still be inside it, and no link may appear on the way to
@@ -127,7 +139,13 @@ func (s *WindowService) CopyImage(ctx context.Context, token string) (contract.I
 	} else if !os.IsNotExist(err) {
 		return contract.ImageCopyResult{Failure: failFile("permission", "无法检查目标位置")}, nil
 	}
-	if err := copyNewFile(pending.Source, pending.Target); err != nil {
+	var writeErr error
+	if len(pending.Data) > 0 {
+		writeErr = writeNewBytes(pending.Data, pending.Target)
+	} else {
+		writeErr = copyNewFile(pending.Source, pending.Target)
+	}
+	if writeErr != nil {
 		return contract.ImageCopyResult{Failure: failFile("image_failed", "无法复制图片，原文件未改变")}, nil
 	}
 	name := filepath.Base(pending.Target)
@@ -193,7 +211,7 @@ func uniqueImageTarget(dir, name, source string) (string, *contract.Failure) {
 		if i > 0 {
 			candidate = filepath.Join(dir, base+"-"+strconv.Itoa(i)+ext)
 		}
-		if sameFilePath(candidate, source) {
+		if source != "" && sameFilePath(candidate, source) {
 			continue
 		}
 		if _, err := os.Stat(candidate); os.IsNotExist(err) {
@@ -223,6 +241,33 @@ func copyNewFile(source, target string) error {
 		}
 	}()
 	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	if err := out.Sync(); err != nil {
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	keep = true
+	return nil
+}
+
+// writeNewBytes writes clipboard image bytes with the same exclusive-create
+// guarantee as a file copy.
+func writeNewBytes(data []byte, target string) error {
+	out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	keep := false
+	defer func() {
+		out.Close()
+		if !keep {
+			os.Remove(target)
+		}
+	}()
+	if _, err := out.Write(data); err != nil {
 		return err
 	}
 	if err := out.Sync(); err != nil {

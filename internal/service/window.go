@@ -131,6 +131,11 @@ type WindowService struct {
 	trash          func(path string) error
 	reveal         func(path string)
 	fileTrashed    func(windowID int, event contract.FileTrashed)
+	// Clipboard I/O is injectable so tests never touch the system clipboard.
+	clipboardReadImage func() []byte
+	clipboardWritePNG  func([]byte) error
+	clipboardWriteHTML func(markup, text string) error
+	clipboardWriteText func(string) error
 }
 
 // NewWindowService returns a WindowService over the open windows. resources is
@@ -171,32 +176,36 @@ func NewWindowService(d Deps) *WindowService {
 			}
 			return w.ID(), true
 		},
-		version:        mygo.App.Version,
-		windows:        d.Windows,
-		open:           d.Open,
-		pick:           d.PickFile,
-		pickDir:        d.PickFolder,
-		pickMove:       d.PickMoveFolder,
-		pickImage:      d.PickImageFile,
-		render:         markdown.New(),
-		resources:      d.Resources,
-		watcher:        d.Watcher,
-		docUpdated:     d.DocUpdated,
-		treeWatcher:    d.TreeWatcher,
-		treeChanged:    d.TreeChanged,
-		closeWindow:    d.CloseWindow,
-		savePick:       d.SavePicker,
-		startedAt:      d.StartedAt,
-		state:          d.State,
-		startupNotice:  d.StartupNotice,
-		themeChanged:   d.ThemeChanged,
-		confirm:        d.Confirm,
-		external:       d.External,
-		saveAllRequest: d.SaveAllRequest,
-		saveAllDone:    d.SaveAllDone,
-		trash:          d.Trash,
-		reveal:         d.Reveal,
-		fileTrashed:    d.FileTrashed,
+		version:            mygo.App.Version,
+		windows:            d.Windows,
+		open:               d.Open,
+		pick:               d.PickFile,
+		pickDir:            d.PickFolder,
+		pickMove:           d.PickMoveFolder,
+		pickImage:          d.PickImageFile,
+		render:             markdown.New(),
+		resources:          d.Resources,
+		watcher:            d.Watcher,
+		docUpdated:         d.DocUpdated,
+		treeWatcher:        d.TreeWatcher,
+		treeChanged:        d.TreeChanged,
+		closeWindow:        d.CloseWindow,
+		savePick:           d.SavePicker,
+		startedAt:          d.StartedAt,
+		state:              d.State,
+		startupNotice:      d.StartupNotice,
+		themeChanged:       d.ThemeChanged,
+		confirm:            d.Confirm,
+		external:           d.External,
+		saveAllRequest:     d.SaveAllRequest,
+		saveAllDone:        d.SaveAllDone,
+		trash:              d.Trash,
+		reveal:             d.Reveal,
+		fileTrashed:        d.FileTrashed,
+		clipboardReadImage: readClipboardImage,
+		clipboardWritePNG:  writeClipboardPNG,
+		clipboardWriteHTML: writeClipboardHTML,
+		clipboardWriteText: writeClipboardText,
 	}
 }
 
@@ -211,54 +220,65 @@ func (s *WindowService) imageResolver(window int, dir string) markdown.ImageReso
 // are separate, so rendering the edited buffer keeps the reading images.
 func (s *WindowService) imageResolverKind(window int, dir string, kind string) markdown.ImageResolver {
 	return func(ref string) (string, string) {
-		trimmed := strings.TrimSpace(ref)
-		if trimmed == "" {
-			return "", "图片地址为空"
-		}
-		lower := strings.ToLower(trimmed)
-		if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
-			// No request leaves the app for document content (PRD §8.4).
-			return "", "远程图片未加载"
-		}
-		if hasScheme(trimmed) {
-			return "", "不支持此图片地址"
-		}
-		unescaped, err := url.PathUnescape(trimmed)
-		if err != nil {
-			return "", "图片地址无效"
-		}
-		if strings.HasPrefix(unescaped, "/") || strings.HasPrefix(unescaped, `\`) ||
-			filepath.IsAbs(unescaped) || filepath.VolumeName(unescaped) != "" {
-			return "", "只能显示文档目录内的图片"
-		}
-		target := filepath.Join(dir, filepath.FromSlash(unescaped))
-		// Lexically first: a reference that climbs out is refused before the
-		// file system is asked, so nothing about it leaks.
-		if ok, _ := pathguard.Within(dir, filepath.Clean(target)); !ok {
-			return "", "只能显示文档目录内的图片"
-		}
-		real, pathFailure := pathguard.Canon(target)
-		if pathFailure != nil {
-			if pathFailure.Code == "out_of_scope" {
-				return "", "此图片不在允许的范围内"
-			}
-			return "", "图片不存在"
-		}
-		if ok, _ := pathguard.Within(dir, real); !ok {
-			return "", "此图片不在文档目录内"
-		}
-		if componentFailure := pathguard.CheckComponents(dir, real); componentFailure != nil {
-			return "", componentFailure.Detail
-		}
-		if !imageExt(real) {
-			return "", "不支持的图片格式"
-		}
-		// The bytes and the size decide, before the page asks for them.
-		if reason := resource.Check(real); reason != "" {
+		real, reason := s.resolveDocumentImage(dir, ref)
+		if reason != "" {
 			return "", reason
 		}
 		return resourceURL(s.resources.AddKind(window, kind, real)), ""
 	}
+}
+
+// resolveDocumentImage checks one Markdown image reference against the
+// document directory and returns its canonical path. Clipboard image copying
+// shares this authorization without registering a resource token.
+func (s *WindowService) resolveDocumentImage(dir string, ref string) (string, string) {
+	trimmed := strings.TrimSpace(ref)
+	if trimmed == "" {
+		return "", "图片地址为空"
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+		// No request leaves the app for document content (PRD §8.4).
+		return "", "远程图片未加载"
+	}
+	if hasScheme(trimmed) {
+		return "", "不支持此图片地址"
+	}
+	unescaped, err := url.PathUnescape(trimmed)
+	if err != nil {
+		return "", "图片地址无效"
+	}
+	if strings.HasPrefix(unescaped, "/") || strings.HasPrefix(unescaped, `\`) ||
+		filepath.IsAbs(unescaped) || filepath.VolumeName(unescaped) != "" {
+		return "", "只能显示文档目录内的图片"
+	}
+	target := filepath.Join(dir, filepath.FromSlash(unescaped))
+	// Lexically first: a reference that climbs out is refused before the
+	// file system is asked, so nothing about it leaks.
+	if ok, _ := pathguard.Within(dir, filepath.Clean(target)); !ok {
+		return "", "只能显示文档目录内的图片"
+	}
+	real, pathFailure := pathguard.Canon(target)
+	if pathFailure != nil {
+		if pathFailure.Code == "out_of_scope" {
+			return "", "此图片不在允许的范围内"
+		}
+		return "", "图片不存在"
+	}
+	if ok, _ := pathguard.Within(dir, real); !ok {
+		return "", "此图片不在文档目录内"
+	}
+	if componentFailure := pathguard.CheckComponents(dir, real); componentFailure != nil {
+		return "", componentFailure.Detail
+	}
+	if !imageExt(real) {
+		return "", "不支持的图片格式"
+	}
+	// The bytes and the size decide, before the page asks for them.
+	if reason := resource.Check(real); reason != "" {
+		return "", reason
+	}
+	return real, ""
 }
 
 // hasScheme reports whether ref names a scheme, as "javascript:alert(1)" does.

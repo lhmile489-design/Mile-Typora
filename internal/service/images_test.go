@@ -124,6 +124,34 @@ func TestImageCopyRechecksTheTargetAndRoot(t *testing.T) {
 	}
 }
 
+func TestPendingImageIsDroppedWhenTheDocumentChanges(t *testing.T) {
+	dir := t.TempDir()
+	docA := writeSample(t, dir, "a.md", []byte("# 一\n"))
+	docB := writeSample(t, dir, "b.md", []byte("# 二\n"))
+	source := filepath.Join(dir, "图.png")
+	if err := os.WriteFile(source, tinyPNG(t), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := newRefreshHarness(t, 145)
+	if _, err := h.service.openPath(context.Background(), h.window, docA); err != nil {
+		t.Fatal(err)
+	}
+	h.service.pickImage = func(context.Context) (string, error) { return source, nil }
+	picked, err := h.service.PickImage(context.Background())
+	if err != nil || picked.Failure != nil {
+		t.Fatalf("PickImage = %+v, %v", picked, err)
+	}
+	// Another window or instance opens a different document while the
+	// confirmation is open; the pending target belongs to the old document.
+	h.window.SetOpenFile(docB)
+	if result, _ := h.service.CopyImage(context.Background(), picked.Token); result.Failure == nil {
+		t.Fatal("a pending image survived the document switch")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "assets")); !os.IsNotExist(err) {
+		t.Fatal("the dropped pick wrote the old document's assets")
+	}
+}
+
 func TestImageCancelLeavesNoTarget(t *testing.T) {
 	dir := t.TempDir()
 	doc := writeSample(t, dir, "笔记.md", []byte("# 一\n"))

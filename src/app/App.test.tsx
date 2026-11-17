@@ -47,6 +47,10 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     searchDirectory: () => ({ abort: () => {}, done: Promise.resolve() }),
     pickImage: async () => ({ kind: "cancelled" as const }),
     copyImage: async () => ({ kind: "failed" as const, code: "not_found", message: "no image" }),
+    copyPlainTextSource: async () => ({ kind: "copied" as const }),
+    copyClipboardHTML: async () => ({ kind: "copied" as const }),
+    copyImageToClipboard: async () => ({ kind: "copied" as const }),
+    readClipboardImage: async () => ({ kind: "failed" as const, code: "no_image", message: "剪贴板中没有图片" }),
     cancelImage: async () => {},
     onNotice: () => () => {},
     onCloseRequested: () => () => {},
@@ -545,6 +549,177 @@ describe("file operations", () => {
 
     await waitFor(() => expect(content.textContent).toContain("![图](assets/b.png)"));
     expect(content.textContent).not.toContain("assets/a.png");
+  });
+
+  it("copies source selections as plain text, HTML and simplified HTML", async () => {
+    const copyPlainTextSource = vi.fn(async () => ({ kind: "copied" as const }));
+    const copyClipboardHTML = vi.fn(async () => ({ kind: "copied" as const }));
+    render(
+      <App
+        transport={fakeTransport({
+          openFile: async () => loadedDoc,
+          copyPlainTextSource,
+          copyClipboardHTML,
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    content.focus();
+    fireEvent.keyDown(content, { key: "a", ctrlKey: true });
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "复制为纯文本" }));
+    await waitFor(() => expect(copyPlainTextSource).toHaveBeenCalledWith("# 标题\n\n正文"));
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "复制为 HTML 代码" }));
+    await waitFor(() => expect(copyClipboardHTML).toHaveBeenCalledWith("# 标题\n\n正文", true, false));
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "复制内容并简化格式" }));
+    await waitFor(() => expect(copyClipboardHTML).toHaveBeenCalledWith("# 标题\n\n正文", true, true));
+  });
+
+  it("copies a reading selection as HTML through the DOM fragment", async () => {
+    const copyClipboardHTML = vi.fn(async () => ({ kind: "copied" as const }));
+    render(<App transport={fakeTransport({ openFile: async () => loadedDoc, copyClipboardHTML })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    const heading = await screen.findByRole("heading", { name: "标题" });
+    const range = document.createRange();
+    range.selectNodeContents(heading);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    act(() => {
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
+    const item = screen.getByRole("menuitem", { name: "复制为 HTML 代码" });
+    expect(item.getAttribute("aria-disabled")).toBeNull();
+    fireEvent.click(item);
+    await waitFor(() =>
+      expect(copyClipboardHTML).toHaveBeenCalledWith(
+        expect.stringContaining("<h1>标题</h1>"),
+        false,
+        false,
+      ),
+    );
+  });
+
+  it("copies the image under the editor caret and the image selected in the reader", async () => {
+    const imageDoc = {
+      kind: "loaded" as const,
+      doc: { ...loadedDoc.doc, text: "![图](assets/a.png)", html: '<p><img alt="图" src="http://mtres.localhost/token"></p>' },
+    };
+    const copyImageToClipboard = vi.fn(async () => ({ kind: "copied" as const }));
+    render(
+      <App
+        transport={fakeTransport({
+          openFile: async () => imageDoc,
+          copyImageToClipboard,
+          renderSource: async () => ({
+            kind: "ok" as const,
+            html: '<p><img alt="图" src="http://mtres.localhost/token"></p>',
+            counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
+          }),
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await waitFor(() => expect(document.querySelector(".markdown img")).not.toBeNull());
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "拷贝图片" }));
+    await waitFor(() => expect(copyImageToClipboard).toHaveBeenCalledWith("assets/a.png"));
+
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const image = await waitFor(() => {
+      const found = document.querySelector<HTMLImageElement>(".markdown img");
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    const range = document.createRange();
+    range.selectNode(image);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    act(() => {
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "拷贝图片" }));
+    await waitFor(() =>
+      expect(copyImageToClipboard).toHaveBeenCalledWith("http://mtres.localhost/token"),
+    );
+  });
+
+  it("pastes clipboard text on Ctrl+V and falls back to an image", async () => {
+    const readClipboardText = vi.fn(async () => ({ ok: true as const, value: "粘贴文本" }));
+    const insertDoc = {
+      kind: "loaded" as const,
+      doc: { ...loadedDoc.doc, text: "正文", html: "<p>正文</p>" },
+    };
+    const { unmount } = render(
+      <App transport={fakeTransport({ openFile: async () => insertDoc, readClipboardText })} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByText("正文");
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    content.focus();
+    fireEvent.keyDown(window, { key: "v", ctrlKey: true });
+    await waitFor(() => expect(content.textContent).toContain("粘贴文本"));
+    unmount();
+
+    const pick = vi.fn(async () => ({
+      kind: "picked" as const,
+      token: "p1",
+      name: "粘贴图片.png",
+      target: "E:/notes/assets/粘贴图片.png",
+      size: 1024,
+    }));
+    const copyImage = vi.fn(async () => ({
+      kind: "copied" as const,
+      path: "E:/notes/assets/粘贴图片.png",
+      markdown: "assets/%E7%B2%98%E8%B4%B4%E5%9B%BE%E7%89%87.png",
+      name: "粘贴图片.png",
+    }));
+    render(
+      <App
+        transport={fakeTransport({
+          openFile: async () => insertDoc,
+          readClipboardText: async () => ({ ok: true, value: "" }),
+          readClipboardImage: pick,
+          copyImage,
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByText("正文");
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const imageContent = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    imageContent.focus();
+    fireEvent.keyDown(window, { key: "v", ctrlKey: true });
+    const dialog = await screen.findByRole("dialog", { name: "复制图片到文档资源目录？" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "复制并插入" }));
+    await waitFor(() => expect(imageContent.textContent).toContain("![粘贴图片](assets/%E7%B2%98%E8%B4%B4%E5%9B%BE%E7%89%87.png)"));
+  });
+
+  it("keeps keyboard control of a menu opened with the mouse", async () => {
+    render(<App transport={fakeTransport({ openFile: async () => loadedDoc })} />);
+    const format = screen.getByRole("menuitem", { name: "格式" });
+    fireEvent.mouseDown(format);
+    expect(document.activeElement).toBe(format);
+    fireEvent.click(format);
+    expect(screen.getByRole("menu", { name: "格式" })).toBeTruthy();
+    fireEvent.keyDown(format, { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "格式" })).toBeNull();
   });
 
   it("attaches the parent folder when showing a single file in the sidebar", async () => {

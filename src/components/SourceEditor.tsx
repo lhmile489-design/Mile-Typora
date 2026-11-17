@@ -44,6 +44,8 @@ export type SourceCommands = {
   copyMarkdown(): Promise<boolean>;
   /** Pastes clipboard text at the selection, ignoring rich formatting. */
   pastePlain(): Promise<boolean>;
+  /** Inserts already-read clipboard text at the selection (M5-5). */
+  insertText(text: string): boolean;
   selectionText(): string;
   /** Paragraph commands (P1 PARA-01..07, 10..17, 20). */
   setHeading(level: HeadingLevel): boolean;
@@ -121,7 +123,7 @@ type Props = {
   ref?: React.Ref<SourceCommands>;
 };
 
-export type EditorContext = { inTable: boolean; inLink: boolean; inImage: boolean };
+export type EditorContext = { inTable: boolean; inLink: boolean; inImage: boolean; hasSelection: boolean };
 
 /**
  * The Markdown source editor (PRD 10.1, M4-1). CodeMirror is imported only
@@ -264,6 +266,13 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
         if (!view) return false;
         const text = await readClipboardRef.current();
         if (text === null || text === "") return false;
+        view.dispatch(view.state.replaceSelection(text));
+        view.focus();
+        return true;
+      },
+      insertText(text) {
+        const view = viewRef.current;
+        if (!view || text === "") return false;
         view.dispatch(view.state.replaceSelection(text));
         view.focus();
         return true;
@@ -573,7 +582,11 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
         EditorView.updateListener.of((update) => {
           if (!update.docChanged && !update.selectionSet) return;
           if (update.docChanged && !applying.current) changeRef.current(update.state.doc.toString());
-          contextRef.current?.(contextAt(update.state.doc.toString(), update.state.selection.main.head));
+          contextRef.current?.(contextAt(
+            update.state.doc.toString(),
+            update.state.selection.main.head,
+            !update.state.selection.main.empty,
+          ));
         }),
       ];
       extensions.current = editorExtensions;
@@ -582,7 +595,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
         state: EditorState.create({ doc: valueRef.current, extensions: editorExtensions }),
       });
       viewRef.current = view;
-      contextRef.current?.(contextAt(valueRef.current, 0));
+      contextRef.current?.(contextAt(valueRef.current, 0, false));
       view.focus();
     })();
 
@@ -627,12 +640,13 @@ const TABLE_ROW = /^\s*\|.*\|\s*$/;
 const TABLE_DELIMITER = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/;
 
 /** contextAt reports what the caret touches, for menu enablement (M5-4). */
-export function contextAt(text: string, position: number): EditorContext {
+export function contextAt(text: string, position: number, hasSelection = false): EditorContext {
   const snapshot = { text, anchor: position, head: position };
   return {
     inTable: inTableAt(text, position),
     inLink: linkAt(snapshot) !== null,
     inImage: imageAt(snapshot) !== null,
+    hasSelection,
   };
 }
 

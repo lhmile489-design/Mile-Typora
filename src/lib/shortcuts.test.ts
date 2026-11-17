@@ -59,6 +59,7 @@ describe("the P0 shortcut table", () => {
     ["ArrowUp", { altKey: true }, "move-line-up"],
     ["ArrowDown", { altKey: true }, "move-line-down"],
     ["c", { ctrlKey: true, shiftKey: true }, "copy-markdown"],
+    ["v", { ctrlKey: true }, "paste"],
     ["v", { ctrlKey: true, shiftKey: true }, "paste-plain"],
     ["Escape", {}, "dismiss"],
   ] as const)("%s with %o runs %s", (key, mods, command) => {
@@ -67,7 +68,6 @@ describe("the P0 shortcut table", () => {
 
   it("leaves keys the app does not own alone", () => {
     expect(commandFor(press("c", { ctrlKey: true }))).toBeNull();
-    expect(commandFor(press("v", { ctrlKey: true }))).toBeNull();
     expect(commandFor(press("o", { ctrlKey: true, altKey: true }))).toBeNull();
     expect(commandFor(press("o", { ctrlKey: true, metaKey: true }))).toBeNull();
     expect(commandFor(press("o"))).toBeNull();

@@ -14,6 +14,9 @@ const messages: Record<string, string> = {
   scan_failed: "无法读取此文件夹",
   render_timeout: "渲染超时",
   image_failed: "无法复制图片",
+  no_image: "剪贴板中没有图片",
+  empty_selection: "先选择要复制的内容",
+  clipboard_failed: "无法写入系统剪贴板",
   queue_full: "打开请求太多，请稍后再试",
   no_frontend: "页面没有加载",
 };

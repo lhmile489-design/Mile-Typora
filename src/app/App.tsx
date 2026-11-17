@@ -47,6 +47,7 @@ import { OutlineView } from "../components/OutlineView";
 import { SearchPanel } from "../components/SearchPanel";
 import { TableDialog } from "../components/TableDialog";
 import { LinkDialog } from "../components/LinkDialog";
+import { readerSelectionHTML, readerSelectionText, selectedReaderImage } from "../lib/clipboard";
 import { SettingsDialog } from "../components/SettingsDialog";
 import { UnsavedDialog } from "../components/UnsavedDialog";
 import { FindBar } from "../components/FindBar";
@@ -91,6 +92,9 @@ type MenuState = {
   inTable: boolean;
   inLink: boolean;
   inImage: boolean;
+  editorSelection: boolean;
+  readerSelection: boolean;
+  readerImage: boolean;
   saveAllRunning: boolean;
   saving: boolean;
   promptOpen: boolean;
@@ -108,6 +112,8 @@ function buildMenus(state: MenuState): MenuGroup[] {
   });
   const item = (id: string, label: string, shortcut?: string) => ({ id, label, shortcut });
   const sep = { kind: "separator" as const };
+  const hasCopySelection = (state.editing && state.editorSelection) || state.readerSelection;
+  const hasCopyImage = (state.editing && state.inImage) || state.readerImage;
   return [
     {
       id: "file",
@@ -186,7 +192,32 @@ function buildMenus(state: MenuState): MenuGroup[] {
         item("copy", "复制", "Ctrl+C"),
         editing("paste", "粘贴", "Ctrl+V"),
         editing("paste-plain", "粘贴为纯文本", "Ctrl+Shift+V"),
+        editing("paste-image", "粘贴图片", undefined, !state.editing || !state.hasPath, !state.editing ? reason : "先保存文档，再粘贴图片"),
         editing("copy-markdown", "复制为 Markdown", "Ctrl+Shift+C"),
+        {
+          id: "copy-image",
+          label: "拷贝图片",
+          disabled: !hasCopyImage,
+          reason: "光标不在图片语法内，且阅读区没有选中本地图片",
+        },
+        {
+          id: "copy-text",
+          label: "复制为纯文本",
+          disabled: !hasCopySelection,
+          reason: "先选择要复制的内容",
+        },
+        {
+          id: "copy-html",
+          label: "复制为 HTML 代码",
+          disabled: !hasCopySelection,
+          reason: "先选择要复制的内容",
+        },
+        {
+          id: "copy-simplified",
+          label: "复制内容并简化格式",
+          disabled: !hasCopySelection,
+          reason: "先选择要复制的内容",
+        },
         sep,
         editing("select-all", "全选", "Ctrl+A"),
         editing("select-line", "选择当前行"),
@@ -379,6 +410,9 @@ export function App({ transport }: { transport: Transport }) {
   const [editorInTable, setEditorInTable] = useState(false);
   const [editorInLink, setEditorInLink] = useState(false);
   const [editorInImage, setEditorInImage] = useState(false);
+  const [editorHasSelection, setEditorHasSelection] = useState(false);
+  const [readerSelectionActive, setReaderSelectionActive] = useState(false);
+  const [readerImageActive, setReaderImageActive] = useState(false);
   const [linkDialog, setLinkDialog] = useState<{ address: string; reference: boolean } | null>(null);
   const [imageConfirm, setImageConfirm] = useState<{
     token: string;
@@ -1900,6 +1934,92 @@ export function App({ transport }: { transport: Transport }) {
     setImageConfirm(null);
   }, [imageConfirm, transport]);
 
+  /** pasteImageFromClipboard prepares a clipboard image for confirmation. */
+  const pasteImageFromClipboard = useCallback(
+    async (announce: boolean) => {
+      const picked = await transport.readClipboardImage();
+      if (picked.kind === "failed") {
+        if (announce || picked.code !== "no_image") setNotice(picked.message);
+        return;
+      }
+      if (picked.kind !== "picked") return;
+      setImageConfirm({ token: picked.token, name: picked.name, target: picked.target, mode: "insert" });
+    },
+    [transport],
+  );
+
+  /** pasteAuto gives clipboard text priority, then falls back to an image. */
+  const pasteAuto = useCallback(async () => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const text = await transport.readClipboardText();
+    if (text.ok && text.value !== "") {
+      if (!editor.insertText(text.value)) setNotice("无法粘贴文本");
+      return;
+    }
+    await pasteImageFromClipboard(false);
+  }, [transport, pasteImageFromClipboard]);
+
+  const copyPlainText = useCallback(async () => {
+    if (modeRef.current === "editing") {
+      const source = editorRef.current?.selectionText() ?? "";
+      if (source === "") {
+        setNotice("先选择要复制的源码");
+        return;
+      }
+      const result = await transport.copyPlainTextSource(source);
+      setNotice(result.kind === "copied" ? "已复制为纯文本" : result.message);
+      return;
+    }
+    const text = readerSelectionText(window.getSelection());
+    if (text === "") {
+      setNotice("先选择要复制的内容");
+      return;
+    }
+    const result = await transport.writeClipboardText(text);
+    setNotice(result.ok ? "已复制为纯文本" : result.message);
+  }, [transport]);
+
+  const copyHTMLFragment = useCallback(
+    async (simplified: boolean) => {
+      if (modeRef.current === "editing") {
+        const source = editorRef.current?.selectionText() ?? "";
+        if (source === "") {
+          setNotice("先选择要复制的源码");
+          return;
+        }
+        const result = await transport.copyClipboardHTML(source, true, simplified);
+        setNotice(
+          result.kind === "copied" ? (simplified ? "已复制简化格式" : "已复制 HTML") : result.message,
+        );
+        return;
+      }
+      const html = readerSelectionHTML(window.getSelection());
+      if (html === null) {
+        setNotice("先选择要复制的内容");
+        return;
+      }
+      const result = await transport.copyClipboardHTML(html, false, simplified);
+      setNotice(
+        result.kind === "copied" ? (simplified ? "已复制简化格式" : "已复制 HTML") : result.message,
+      );
+    },
+    [transport],
+  );
+
+  const copyImage = useCallback(async () => {
+    const source =
+      modeRef.current === "editing"
+        ? editorRef.current?.imageInfo()?.url ?? ""
+        : selectedReaderImage(window.getSelection()) ?? "";
+    if (source === "") {
+      setNotice("先选中本地图片");
+      return;
+    }
+    const result = await transport.copyImageToClipboard(source);
+    setNotice(result.kind === "copied" ? "已拷贝图片" : result.message);
+  }, [transport]);
+
   const onMenuCommand = useCallback(
     (id: string) => {
       const editor = editorRef.current;
@@ -1960,9 +2080,14 @@ export function App({ transport }: { transport: Transport }) {
             }
           }
           return;
-        case "paste": run((c) => void c.paste()); return;
+        case "paste": void pasteAuto(); return;
         case "paste-plain": run((c) => void c.pastePlain()); return;
+        case "paste-image": void pasteImageFromClipboard(true); return;
         case "copy-markdown": run((c) => void c.copyMarkdown()); return;
+        case "copy-image": void copyImage(); return;
+        case "copy-text": void copyPlainText(); return;
+        case "copy-html": void copyHTMLFragment(false); return;
+        case "copy-simplified": void copyHTMLFragment(true); return;
         case "select-all": run((c) => c.selectAll()); return;
         case "select-line": run((c) => c.selectLine()); return;
         case "select-paragraph": run((c) => c.selectParagraph()); return;
@@ -2053,7 +2178,7 @@ export function App({ transport }: { transport: Transport }) {
         case "help-about": setHelpKind("about"); return;
       }
     },
-    [newDocument, newWindow, openFile, openFolder, openList, openSearch, requestClose, requestDelete, requestMove, requestProperties, revealFile, revealInSidebar, save, saveAs, startSaveAll, toggleRight, toggleSource, chooseImage, transport],
+    [newDocument, newWindow, openFile, openFolder, openList, openSearch, requestClose, requestDelete, requestMove, requestProperties, revealFile, revealInSidebar, save, saveAs, startSaveAll, toggleRight, toggleSource, chooseImage, pasteAuto, pasteImageFromClipboard, copyImage, copyPlainText, copyHTMLFragment, transport],
   );
 
   // Links in the preview do not replace the buffer before M4-2's protection.
@@ -2161,6 +2286,25 @@ export function App({ transport }: { transport: Transport }) {
     setFindCount(result.count);
     setFindIndex(0);
   }, [findQuery, findReplacement]);
+
+  // Reading-view selections drive the M5-5 copy commands. Recomputing here
+  // keeps menu enablement in step with the browser selection; the commands
+  // read the selection again so a stale flag can never copy the wrong text.
+  useEffect(() => {
+    const update = () => {
+      if (modeRef.current === "editing") {
+        setReaderSelectionActive(false);
+        setReaderImageActive(false);
+        return;
+      }
+      const selection = window.getSelection();
+      setReaderSelectionActive(readerSelectionText(selection).trim() !== "");
+      setReaderImageActive(selectedReaderImage(selection) !== null);
+    };
+    update();
+    document.addEventListener("selectionchange", update);
+    return () => document.removeEventListener("selectionchange", update);
+  }, [mode, doc?.html, preview?.html]);
 
   // One key listener runs the table in src/lib/shortcuts.ts. The find bar
   // and the settings dialog handle their own keys first, so a handled press
@@ -2283,6 +2427,16 @@ export function App({ transport }: { transport: Transport }) {
             setNotice(ok ? "已复制源码" : "先选择要复制的源码");
           })();
           return;
+        case "paste":
+          if (modeRef.current !== "editing") return;
+          {
+            const active = document.activeElement;
+            const inEditor = active instanceof HTMLElement && active.closest(".source-editor") !== null;
+            if (!inEditor) return;
+          }
+          e.preventDefault();
+          void pasteAuto();
+          return;
         case "paste-plain":
           e.preventDefault();
           if (modeRef.current !== "editing") {
@@ -2324,12 +2478,16 @@ export function App({ transport }: { transport: Transport }) {
     searchConfirm,
     listConfirm,
     tableOpen,
+    linkDialog,
+    imageConfirm,
     saveAllSummary,
     recentOpen,
     helpKind,
     openList,
     openSearch,
     toggleSource,
+    pasteAuto,
+    pasteImageFromClipboard,
   ]);
 
   return (
@@ -2349,6 +2507,9 @@ export function App({ transport }: { transport: Transport }) {
           inTable: editorInTable,
           inLink: editorInLink,
           inImage: editorInImage,
+          editorSelection: editorHasSelection,
+          readerSelection: readerSelectionActive,
+          readerImage: readerImageActive,
           saveAllRunning,
           saving,
           promptOpen: unsavedOpen || conflict !== null,
@@ -2539,6 +2700,7 @@ export function App({ transport }: { transport: Transport }) {
                 setEditorInTable(context.inTable);
                 setEditorInLink(context.inLink);
                 setEditorInImage(context.inImage);
+                setEditorHasSelection(context.hasSelection);
               }}
               readClipboard={async () => {
                 const result = await transport.readClipboardText();

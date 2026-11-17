@@ -97,9 +97,13 @@ func (w *Window) Root() (string, bool) {
 }
 
 // SetOpenFile records the file the window shows. The path is canonical and was
-// authorized by the user's choice in the system dialog.
+// authorized by the user's choice in the system dialog. Switching documents
+// drops a pending image: its target belongs to the document it was picked for.
 func (w *Window) SetOpenFile(path string) {
 	w.stateMu.Lock()
+	if w.openFile != path {
+		w.pendingImage = nil
+	}
 	w.openFile = path
 	if path == "" {
 		w.dirty = false
@@ -186,6 +190,9 @@ type PendingImage struct {
 	Doc    string
 	Source string
 	Target string
+	// Data carries clipboard image bytes (always PNG). A pasted image has no
+	// source file, so CopyImage writes Data instead of copying Source.
+	Data []byte
 }
 
 // SetPendingImage remembers one picked image. A newer pick replaces the old

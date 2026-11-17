@@ -272,6 +272,12 @@ type ImageCopyResult struct {
 	Failure  *Failure `json:"failure,omitempty"`
 }
 
+// ClipboardResult reports a clipboard write that may fail for an expected
+// reason, such as an empty selection or a failed image decode (M5-5).
+type ClipboardResult struct {
+	Failure *Failure `json:"failure,omitempty"`
+}
+
 // ThemeChange tells every window that the appearance preference changed
 // (PRD FR-10.12: all windows switch at once).
 type ThemeChange struct {
