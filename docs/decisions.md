@@ -491,3 +491,10 @@ M1 需验证：mermaid 12 的 `securityLevel: "strict"` 与 `%%{init}%%` 指令�
 - 表情与符号只在编辑模式的菜单里显示“按 Win+. 打开 Windows 表情面板”的非阻塞提示；不注册全局快捷键、不拦截 Win+.，系统面板输入按普通文本进入 CodeMirror。
 - 顶层新增“主题”菜单，位于“视图”和“帮助”之间，只有浅色、深色、跟随系统三项单选。它读写同一 `appearance` 设置：本地立即应用并调用 `saveSettings`，Go 的 `theme-changed` 事件让所有窗口同步；不新增主题或自定义配色，视觉仍以 DESIGN.md 两套令牌为准。
 - 测试：页面 336 项、Go 237 项；新增恶意样本 `testdata/malicious/extensions.md` 覆盖警告框、脚注、TOC、下划线、注释与引用定义中的脚本、事件属性、危险协议和远程图片；新增大表格完整渲染与搜索取消 1 秒内生效的回归用例；`bun run build:web` 仍通过，保持既有大分包警告。原生验收见 `docs/develop/M5-8-验收记录.md`。
+
+### D-T56 · M5 发布版本 0.5.0：版本号只以 mygo.config.ts 为准
+
+- 版本从 P0 验收构建的 `0.1.0` 升到 `0.5.0`，对应 P2/M5 阶段完成；`identifier` 仍为 `dev.mile.typora`，不因版本升级改变应用数据目录与单实例标识。
+- `mygo.config.ts` 是版本号唯一来源，`mygo build` 用它生成 `Mile Typora.exe` 的 PE 元数据与 `mile-typora-setup-0.5.0-amd64.exe` 文件名；`package.json` 不重复写版本，避免两处漂移。
+- 产物与哈希记录在 `docs/develop/M5-发布记录.md`。构建使用 `bun run build`；不提交 `build/` 产物，发布时将安装包与免安装版一起交付。
+- 本次只做启动冒烟，未在干净系统验证安装向导与 WebView2 缺失引导；已列入发布记录的待验收项。

@@ -3,7 +3,7 @@ import { defineConfig } from "mygo-cli";
 export default defineConfig({
   name: "Mile Typora",
   identifier: "dev.mile.typora",
-  version: "0.1.0",
+  version: "0.5.0",
   // `mygo dev` runs devCommand and loads devUrl; `mygo build` runs
   // buildCommand and embeds frontendDist into the app.
   devUrl: "http://127.0.0.1:5273",

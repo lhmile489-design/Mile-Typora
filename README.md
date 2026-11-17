@@ -58,7 +58,8 @@ Windows 11 上的本地 Markdown 阅读与源码编辑器。P0 只读阅读、P1
 
 ## 安装与启动
 
-- 安装包：`build/windows-amd64/mile-typora-setup-<版本>-amd64.exe`。
+- 当前 M5 发布版本：`0.5.0`。
+- 安装包：`build/windows-amd64/mile-typora-setup-0.5.0-amd64.exe`。
 - 免安装运行：`build/windows-amd64/Mile Typora.exe`。
 - 首次启动是空白页；可在“设置 → 常规 → 启动时”选择恢复上一份文档或打开空白页。
 

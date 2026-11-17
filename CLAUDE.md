@@ -2,7 +2,7 @@
 
 > 给 AI 的项目级说明。优先级：用户当次指令 > 本文 > `docs/PRD.md` > `DESIGN.md` / `docs/decisions.md` > 项目 skills > 全局 `~/.claude/CLAUDE.md` > 通用经验。
 > 全局规范（UTF-8、不编造、无 emoji、破坏性操作先确认、没有证据不算完成）照常生效，本文只写本项目特有的内容。
-> 最后更新：2026-11-17（PRD v0.4；P0、P1 完成；P2 需求冻结并完成 M5-1 至 M5-8，P2 功能全部交付）
+> 最后更新：2026-11-17（PRD v0.4；P0、P1 完成；P2 需求冻结并完成 M5-1 至 M5-8，发布 0.5.0；M6-0 需求细化中）
 
 ## 0. 先读这几条
 
@@ -80,7 +80,7 @@ Git：远程 `https://github.com/lhmile489-design/Mile-Typora.git`，分支 `mai
   - 生产构建 `PageOptions.DevTools = DevToolsDisabled`，同时关掉 WebView2 的 F5、Ctrl+P、Ctrl+F 等默认按键。
   - 本地图片经 `mygo.Protocol.Handle("mtres", ...)`（建窗前注册），Windows 上地址 `http://mtres.localhost/...`。
   - 前端 `CallError` 不带错误码，可预期的失败放在返回值的 `failure` 字段。
-- `mygo.config.ts`、`vite.config.ts`、`package.json` 来自 `mygo init`，契约字段只增不改；已填的值是 identifier、端口 5273、mygo 包精确版本 0.9.0（decisions.md D-T12）。`src/mygo.ts` 是生成物，禁止手改。
+- `mygo.config.ts`、`vite.config.ts`、`package.json` 来自 `mygo init`，契约字段只增不改；已填的值是 identifier、端口 5273、mygo 包精确版本 0.9.0（decisions.md D-T12）。`src/mygo.ts` 是生成物，禁止手改。应用版本号只写在 `mygo.config.ts`（当前 `0.5.0`，见 D-T56），`package.json` 不重复维护。
 - `mygo init` 默认取最新版（这次写成了 v0.9.1），已手动钉回 v0.9.0。升级 mygo 需在 decisions.md 新增条目并经用户同意。
 - 参照项目 `E:\mygo\my-app\` 只参考工程结构，不照搬其业务参数和 Bento 视觉。
 
