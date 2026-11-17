@@ -391,6 +391,7 @@ export interface SearchMatch {
 /** SettingsChange tells every window that a shared preference changed. */
 export interface SettingsChange {
   showStatusBar: boolean;
+  smartPunctuation: boolean;
 }
 
 /**
@@ -408,6 +409,7 @@ export interface SettingsView {
   startup: string;
   appearance: string;
   showStatusBar: boolean;
+  smartPunctuation: boolean;
   recent: RecentEntry[];
 }
 

@@ -4,6 +4,7 @@
 
 import type { ParagraphEdit, Snapshot } from "./paragraph";
 import { protectedLineSet } from "./paragraph";
+import { protectedAt } from "./protection";
 
 export type MathKind = "inline" | "block";
 
@@ -31,14 +32,6 @@ function splitLines(text: string): Line[] {
   }
   return lines;
 }
-
-function lineIndexAt(lines: Line[], position: number): number {
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (position >= lines[i]!.start) return i;
-  }
-  return 0;
-}
-
 
 function codeSpanMask(line: string): boolean[] {
   const mask = new Array<boolean>(line.length).fill(false);
@@ -219,14 +212,13 @@ export function mathAt(snapshot: Snapshot): MathFormula | null {
   return null;
 }
 
-/** mathProtected reports a caret in code, front matter or another protected line. */
+/**
+ * mathProtected reports a caret in code, front matter, a link destination or
+ * another protected region — the shared inline-exclusion verdict (P3-AC-14).
+ */
 export function mathProtected(text: string, position: number): boolean {
-  const lines = splitLines(text);
-  const index = lineIndexAt(lines, position);
-  if (protectedLineSet(text).has(index)) return true;
-  const line = lines[index]!;
-  const mask = codeSpanMask(line.text);
-  return mask[Math.max(0, position - line.start)] ?? false;
+  // Math commands run inside formulas, so the shared verdict excludes them.
+  return protectedAt(text, position, false);
 }
 
 function result(text: string, anchor: number, head = anchor): Snapshot {

@@ -9,6 +9,9 @@ type Props = {
   onChangeAppearance: (appearance: string) => void;
   showStatusBar: boolean;
   onChangeShowStatusBar: (show: boolean) => void;
+  /** Converts newly typed input to CJK punctuation (M6-3 EDIT-18). */
+  smartPunctuation: boolean;
+  onChangeSmartPunctuation: (value: boolean) => void;
   onCancel: () => void;
   onSave: () => void;
   saving?: boolean;
@@ -47,6 +50,8 @@ export function SettingsDialog({
   onChangeAppearance,
   showStatusBar,
   onChangeShowStatusBar,
+  smartPunctuation,
+  onChangeSmartPunctuation,
   onCancel,
   onSave,
   saving,
@@ -141,6 +146,20 @@ export function SettingsDialog({
                 <span className="txt">
                   <span className="label">显示状态栏</span>
                   <span className="hint">关闭后仍通过窗口标题与提示消息显示保存失败等关键状态。</span>
+                </span>
+              </label>
+            </fieldset>
+            <fieldset className="settings-group">
+              <legend>编辑</legend>
+              <label className="radio-row">
+                <input
+                  type="checkbox"
+                  checked={smartPunctuation}
+                  onChange={(e) => onChangeSmartPunctuation(e.target.checked)}
+                />
+                <span className="txt">
+                  <span className="label">智能标点</span>
+                  <span className="hint">输入时把英文引号、三个句点和连续横线转成中文标点，只影响新输入的内容。</span>
                 </span>
               </label>
             </fieldset>

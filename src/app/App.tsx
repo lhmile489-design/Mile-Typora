@@ -99,6 +99,7 @@ type MenuState = {
   alwaysOnTop: boolean;
   zoom: number;
   showStatusBar: boolean;
+  smartPunctuation: boolean;
   inTable: boolean;
   inLink: boolean;
   inImage: boolean;
@@ -330,6 +331,21 @@ function buildMenus(state: MenuState): MenuGroup[] {
           label: "表情与符号",
           disabled: !state.editing,
           reason,
+        },
+        {
+          id: "smart-punct",
+          label: "智能标点",
+          disabled: !state.editing,
+          reason,
+          children: [
+            {
+              id: "toggle-smart-punct",
+              label: "启用智能标点",
+              checked: state.smartPunctuation,
+              disabled: !state.editing,
+              reason,
+            },
+          ],
         },
         {
           id: "math-tools",
@@ -830,10 +846,11 @@ export function App({ transport }: { transport: Transport }) {
   const [findIndex, setFindIndex] = useState(0);
   const [findCount, setFindCount] = useState(0);
   const [recent, setRecent] = useState<RecentEntry[]>([]);
-  const [settings, setSettings] = useState<{ startup: string; appearance: string; showStatusBar: boolean }>({
+  const [settings, setSettings] = useState<{ startup: string; appearance: string; showStatusBar: boolean; smartPunctuation: boolean }>({
     startup: "blank",
     appearance: "system",
     showStatusBar: true,
+    smartPunctuation: false,
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
@@ -1001,7 +1018,11 @@ export function App({ transport }: { transport: Transport }) {
 
   useEffect(() => {
     return transport.onSettingsChange((change) => {
-      setSettings((current) => ({ ...current, showStatusBar: change.showStatusBar }));
+      setSettings((current) => ({
+        ...current,
+        showStatusBar: change.showStatusBar,
+        smartPunctuation: change.smartPunctuation,
+      }));
     });
   }, [transport]);
 
@@ -1182,6 +1203,7 @@ export function App({ transport }: { transport: Transport }) {
       startup: result.settings.startup,
       appearance: result.settings.appearance,
       showStatusBar: result.settings.showStatusBar !== false,
+      smartPunctuation: result.settings.smartPunctuation === true,
     });
     applyTheme(result.settings.appearance);
     if (result.notice) setNotice(result.notice);
@@ -1535,6 +1557,7 @@ export function App({ transport }: { transport: Transport }) {
       startup: settings.startup,
       appearance: settings.appearance,
       showStatusBar: settings.showStatusBar,
+      smartPunctuation: settings.smartPunctuation,
       recent: [],
     });
     setSettingsSaving(false);
@@ -2604,13 +2627,31 @@ export function App({ transport }: { transport: Transport }) {
       startup: settings.startup,
       appearance: settings.appearance,
       showStatusBar: next,
+      smartPunctuation: settings.smartPunctuation,
       recent: [],
     });
     if (!result.ok) {
       setSettings((current) => ({ ...current, showStatusBar: !next }));
       setNotice(result.message);
     }
-  }, [settings.appearance, settings.showStatusBar, settings.startup, transport]);
+  }, [settings.appearance, settings.showStatusBar, settings.smartPunctuation, settings.startup, transport]);
+
+  // M6-3 EDIT-18: one checkbox under 编辑 → 智能标点, shared across windows.
+  const toggleSmartPunct = useCallback(async () => {
+    const next = !settings.smartPunctuation;
+    setSettings((current) => ({ ...current, smartPunctuation: next }));
+    const result = await transport.saveSettings({
+      startup: settings.startup,
+      appearance: settings.appearance,
+      showStatusBar: settings.showStatusBar,
+      smartPunctuation: next,
+      recent: [],
+    });
+    if (!result.ok) {
+      setSettings((current) => ({ ...current, smartPunctuation: !next }));
+      setNotice(result.message);
+    }
+  }, [settings.appearance, settings.showStatusBar, settings.smartPunctuation, settings.startup, transport]);
 
   // The 主题 menu shares the settings appearance preference: all windows
   // switch at once and the choice persists (P2 §11, P2-AC-27).
@@ -2624,6 +2665,7 @@ export function App({ transport }: { transport: Transport }) {
         startup: settings.startup,
         appearance,
         showStatusBar: settings.showStatusBar,
+        smartPunctuation: settings.smartPunctuation,
         recent: [],
       });
       if (!result.ok) {
@@ -2632,7 +2674,7 @@ export function App({ transport }: { transport: Transport }) {
         setNotice(result.message);
       }
     },
-    [applyTheme, settings.appearance, settings.showStatusBar, settings.startup, transport],
+    [applyTheme, settings.appearance, settings.showStatusBar, settings.smartPunctuation, settings.startup, transport],
   );
 
   const onMenuCommand = useCallback(
@@ -2693,6 +2735,7 @@ export function App({ transport }: { transport: Transport }) {
         case "zoom-reset": void changeZoom(1); return;
         case "word-count": void requestWordCount(); return;
         case "toggle-statusbar": void toggleStatusBar(); return;
+        case "toggle-smart-punct": void toggleSmartPunct(); return;
         case "undo": run((c) => c.undo()); return;
         case "redo": run((c) => c.redo()); return;
         case "cut": run((c) => void c.cut()); return;
@@ -3228,6 +3271,7 @@ export function App({ transport }: { transport: Transport }) {
           alwaysOnTop: viewState.alwaysOnTop,
           zoom: viewState.zoom,
           showStatusBar: settings.showStatusBar,
+          smartPunctuation: settings.smartPunctuation,
           inTable: editorInTable,
           inLink: editorInLink,
           inImage: editorInImage,
@@ -3430,6 +3474,7 @@ export function App({ transport }: { transport: Transport }) {
               focusMode={focusMode}
               typewriter={typewriter}
               lineEnding={doc.lineEnding}
+              smartPunctuation={settings.smartPunctuation}
               onLineEndingChange={(next) => {
                 setDoc((prev) => (prev ? { ...prev, lineEnding: next } : prev));
               }}
@@ -3798,6 +3843,8 @@ export function App({ transport }: { transport: Transport }) {
           }}
           showStatusBar={settings.showStatusBar}
           onChangeShowStatusBar={(showStatusBar) => setSettings({ ...settings, showStatusBar })}
+          smartPunctuation={settings.smartPunctuation}
+          onChangeSmartPunctuation={(smartPunctuation) => setSettings({ ...settings, smartPunctuation })}
           onCancel={() => setSettingsOpen(false)}
           onSave={() => void saveSettings()}
           saving={settingsSaving}

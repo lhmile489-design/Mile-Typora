@@ -34,6 +34,7 @@ type SearchModule = typeof import("../editor/search");
 type LineOpsModule = typeof import("../editor/lineops");
 type AssistModule = typeof import("../editor/editassist");
 type MathModule = typeof import("../editor/mathtools");
+type SmartPunctModule = typeof import("../editor/smartpunct");
 
 /** Commands the app and, later, the Edit menu call on the editor. */
 export type SourceCommands = {
@@ -144,6 +145,8 @@ type Props = {
   lineEnding?: string;
   /** Reports a line-ending conversion so the app can mark the buffer dirty. */
   onLineEndingChange?: (lineEnding: string) => void;
+  /** Converts new typed input to CJK punctuation (M6-3 EDIT-18). */
+  smartPunctuation?: boolean;
   ref?: React.Ref<SourceCommands>;
 };
 
@@ -165,7 +168,7 @@ export type EditorContext = {
  * when editing starts, so reading pays nothing for it. The buffer is the
  * editor's document; preview renders the same string through Go.
  */
-export function SourceEditor({ value, onChange, readClipboard, writeClipboard, onContext, focusMode = false, typewriter = false, lineEnding = "LF", onLineEndingChange, ref }: Props) {
+export function SourceEditor({ value, onChange, readClipboard, writeClipboard, onContext, focusMode = false, typewriter = false, lineEnding = "LF", onLineEndingChange, smartPunctuation = false, ref }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const contextRef = useRef(onContext);
@@ -189,6 +192,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
   const lineops = useRef<LineOpsModule | null>(null);
   const assist = useRef<AssistModule | null>(null);
   const mathTools = useRef<MathModule | null>(null);
+  const smartPunct = useRef<SmartPunctModule | null>(null);
   const isolateHistory = useRef<AnnotationType<"after" | "before" | "full"> | null>(null);
   const stateCtor = useRef<typeof import("@codemirror/state").EditorState | null>(null);
   const extensions = useRef<Extension[] | null>(null);
@@ -198,6 +202,8 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
   typewriterRef.current = typewriter;
   const lineEndingRef = useRef(lineEnding);
   lineEndingRef.current = lineEnding;
+  const smartPunctuationRef = useRef(smartPunctuation);
+  smartPunctuationRef.current = smartPunctuation;
   const onLineEndingChangeRef = useRef(onLineEndingChange);
   onLineEndingChangeRef.current = onLineEndingChange;
   // A conversion changes no text, so CodeMirror's history cannot hold it.
@@ -672,6 +678,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
         lineopsModule,
         assistModule,
         mathModule,
+        smartPunctModule,
       ] = await Promise.all([
         import("@codemirror/view"),
         import("@codemirror/state"),
@@ -683,6 +690,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
         import("../editor/lineops"),
         import("../editor/editassist"),
         import("../editor/mathtools"),
+        import("../editor/smartpunct"),
       ]);
       if (!alive || !host.current) return;
       historyActions.current = { undo, redo };
@@ -693,6 +701,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
       lineops.current = lineopsModule;
       assist.current = assistModule;
       mathTools.current = mathModule;
+      smartPunct.current = smartPunctModule;
       stateCtor.current = EditorState;
 
       const theme = EditorView.theme({
@@ -851,6 +860,23 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
           ...historyKeymap,
         ]),
         markdown(),
+        // M6-3 EDIT-18: smart punctuation intercepts one typed character and
+        // folds the conversion into the keystroke's own transaction, so one
+        // Ctrl+Z undoes the input. IME composition and multi-character input
+        // (paste, spellcheck replacement) pass through untouched.
+        EditorView.inputHandler.of((view, from, to, text) => {
+          if (!smartPunctuationRef.current || view.composing) return false;
+          const mod = smartPunct.current;
+          if (!mod || text.length !== 1) return false;
+          const edit = mod.smartPunct(view.state.doc.toString(), from, to, text);
+          if (!edit) return false;
+          view.dispatch({
+            changes: { from: edit.from, to: edit.to, insert: edit.insert },
+            selection: { anchor: edit.from + edit.insert.length },
+            scrollIntoView: true,
+          });
+          return true;
+        }),
         theme,
         EditorView.contentAttributes.of({ "aria-label": "Markdown 源码" }),
         EditorView.updateListener.of((update) => {

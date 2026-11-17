@@ -231,10 +231,10 @@ func main() {
 		State:         state,
 		StartupNotice: notice,
 		ThemeChanged:  applyAppearance,
-		SettingsChanged: func(showStatusBar bool) {
+		SettingsChanged: func(change contract.SettingsChange) {
 			for _, w := range mygo.Windows() {
 				if !isPrintWindow(w.ID()) {
-					_ = settingsChange.Emit(w, contract.SettingsChange{ShowStatusBar: showStatusBar})
+					_ = settingsChange.Emit(w, change)
 				}
 			}
 		},

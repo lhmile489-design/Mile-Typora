@@ -44,6 +44,48 @@ func TestSaveAndReload(t *testing.T) {
 	}
 }
 
+func TestSmartPunctuationDefaultsOff(t *testing.T) {
+	// A settings file written before M6-3 has no smartPunctuation key; it must
+	// read as off rather than crash or default on (P3 §4).
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	body := []byte(`{"startup":"blank","appearance":"system","recent":[]}`)
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	got := store.Get()
+	if got.SmartPunctuation == nil || *got.SmartPunctuation {
+		t.Fatalf("smartPunctuation = %v, want a saved false", got.SmartPunctuation)
+	}
+}
+
+func TestSmartPunctuationRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	store, _ := Open(dir)
+	on := true
+	want := Settings{
+		Startup:          StartupResume,
+		Appearance:       AppearanceDark,
+		ShowStatusBar:    &on,
+		SmartPunctuation: &on,
+	}
+	if err := store.Save(want); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	again, err := Open(dir)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	got := again.Get()
+	if got.SmartPunctuation == nil || !*got.SmartPunctuation {
+		t.Fatalf("reloaded smartPunctuation = %v, want true", got.SmartPunctuation)
+	}
+}
+
 func TestDamagedFileIsPreserved(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")

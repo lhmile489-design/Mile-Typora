@@ -85,7 +85,7 @@ type Deps struct {
 	// ThemeChanged tells every window the appearance preference changed.
 	ThemeChanged func(appearance string)
 	// SettingsChanged tells every window a shared preference changed.
-	SettingsChanged func(showStatusBar bool)
+	SettingsChanged func(change contract.SettingsChange)
 	// View controls the calling window's fullscreen, topmost and zoom state.
 	ViewState      func(windowID int) (contract.WindowViewState, error)
 	SetFullScreen  func(windowID int, value bool) (contract.WindowViewState, error)
@@ -127,7 +127,7 @@ type WindowService struct {
 	// startupNotice is handed to the first page once.
 	startupNotice   string
 	themeChanged    func(appearance string)
-	settingsChanged func(showStatusBar bool)
+	settingsChanged func(change contract.SettingsChange)
 	viewState       func(windowID int) (contract.WindowViewState, error)
 	setFullScreen   func(windowID int, value bool) (contract.WindowViewState, error)
 	setAlwaysOnTop  func(windowID int, value bool) (contract.WindowViewState, error)

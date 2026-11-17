@@ -516,3 +516,11 @@ M1 需验证：mermaid 12 的 `securityLevel: "strict"` 与 `%%{init}%%` 指令�
 - 公式模板为有界清单：分数、根号、上标、下标、矩阵、分段函数、多行对齐、求和、积分、极限；插入后选中第一个占位内容。块级公式复用既有 `insertFence` 公式块命令（`Ctrl+Shift+M`），不新增快捷键。
 - 数学模块与编辑辅助一样按需加载，避免把 CodeMirror 相关代码带进阅读首包；`contextAt` 增加 `inMath` / `mathBlocked` 供菜单使能，不改变既有表格、链接、图片上下文。
 - 测试：mathtools 纯变换、KaTeX 校验、页面数学子菜单与只读禁用；原生验收见 `docs/develop/M6-2-验收记录.md`。
+
+### D-T59 · M6-3 智能标点：inputHandler 逐键变换 + 共享保护判定
+
+- 新增 `src/editor/smartpunct.ts` 纯函数：对每个新输入的 `"`、`'`、`.`、`-` 决定是否转换，返回 `{from,to,insert}`；SourceEditor 经 `EditorView.inputHandler` 在同一次 dispatch 里替换，一次 Ctrl+Z 撤销输入本身。只拦单字符，IME 组合（`view.composing`）、粘贴与多字符输入直接放行；没有批量改写命令（P3 §3.3 已冻结）。
+- 新增 `src/editor/protection.ts` 共享判定（P3-AC-14）：`protectedAt` = `protectedLineSet`（front matter、围栏/缩进代码、公式块、分割线）+ `inlineProtected`（行内代码、HTML 标签/注释、链接图片地址、autolink、行内公式）。`includeMath` 参数让数学工具把公式从判定中排除——数学命令要在公式内部运行，而块级 `$$` 仍由 `protectedLineSet` 保护；`mathProtected` 改为 `protectedAt(text,pos,false)`，三个扫描器用同一份判定不会漂移。
+- 规则实现：`"` 仅在前或后是 CJK 时转换，开括号/空白/行首出 `“`，其余 `”`；`'` 只在两个 CJK 之间转换（`don't` 保持半角）；`...` → `…`；`--` → `–`、`--`+`-`（含已有 `–`+`-`）→ `—`，全行只有横线与空格的行（分割线/front matter 线）不转换。
+- 设置链：`appstate.Settings.SmartPunctuation *bool`（老文件无字段默认 false）→ `SettingsView`/`SettingsChange` 加字段 → `SaveSettings` 持久化并在变化时广播；编辑菜单新增「智能标点」子菜单（一项 checkbox 与设置同步），设置对话框「编辑」组加复选框。
+- 测试：smartpunct 纯变换（CJK 上下文、开闭引号、`don't`、省略号、`--`/`---`、保护区域、IME/多字符放行）、protection 共享判定一致性、appstate 默认值与往返、service `settingsChanged` 广播、App 菜单勾选态与持久化；原生验收见 `docs/develop/M6-3-验收记录.md`。

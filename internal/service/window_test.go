@@ -775,6 +775,49 @@ func TestSettingsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSmartPunctuationRoundTripAndChange(t *testing.T) {
+	s, _ := newTestService(1, true)
+	withState(t, s)
+	var broadcast contract.SettingsChange
+	calls := 0
+	s.settingsChanged = func(change contract.SettingsChange) {
+		calls++
+		broadcast = change
+	}
+
+	// A save that only flips smartPunctuation still reports both fields so a
+	// late-joining window learns the whole preference pair (P3-AC-07).
+	out, err := s.SaveSettings(context.Background(), contract.SettingsView{
+		Startup:          appstate.StartupBlank,
+		Appearance:       appstate.AppearanceSystem,
+		ShowStatusBar:    true,
+		SmartPunctuation: true,
+	})
+	if err != nil || out.Failure != nil {
+		t.Fatalf("SaveSettings = %+v, %v", out, err)
+	}
+	if calls != 1 || !broadcast.SmartPunctuation || !broadcast.ShowStatusBar {
+		t.Fatalf("settingsChanged = %+v x%d, want both fields on", broadcast, calls)
+	}
+	got, _ := s.GetSettings(context.Background())
+	if !got.Settings.SmartPunctuation {
+		t.Fatalf("settings = %+v, want smartPunctuation saved", got.Settings)
+	}
+
+	// Saving the same value again must not re-broadcast.
+	if _, err := s.SaveSettings(context.Background(), contract.SettingsView{
+		Startup:          appstate.StartupBlank,
+		Appearance:       appstate.AppearanceSystem,
+		ShowStatusBar:    true,
+		SmartPunctuation: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("settingsChanged fired %d times, want 1", calls)
+	}
+}
+
 func TestSettingsSaveFailureKeepsTheOldValue(t *testing.T) {
 	s, _ := newTestService(1, true)
 	store := withState(t, s)

@@ -323,10 +323,11 @@ type RecentEntry struct {
 
 // SettingsView is what the page shows and edits.
 type SettingsView struct {
-	Startup       string        `json:"startup"`
-	Appearance    string        `json:"appearance"`
-	ShowStatusBar bool          `json:"showStatusBar"`
-	Recent        []RecentEntry `json:"recent"`
+	Startup          string        `json:"startup"`
+	Appearance       string        `json:"appearance"`
+	ShowStatusBar    bool          `json:"showStatusBar"`
+	SmartPunctuation bool          `json:"smartPunctuation"`
+	Recent           []RecentEntry `json:"recent"`
 }
 
 // WindowViewState is the per-window state the view menu shows (M5-7).
@@ -354,7 +355,8 @@ type WindowCount struct {
 
 // SettingsChange tells every window that a shared preference changed.
 type SettingsChange struct {
-	ShowStatusBar bool `json:"showStatusBar"`
+	ShowStatusBar    bool `json:"showStatusBar"`
+	SmartPunctuation bool `json:"smartPunctuation"`
 }
 
 // SettingsResult answers the settings read. Corrupt is true when the file

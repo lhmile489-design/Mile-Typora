@@ -64,12 +64,16 @@ type Settings struct {
 	// ShowStatusBar is the shared status-bar preference (M5-7 VIEW-09).
 	// A pointer keeps old files without the field defaulting to shown.
 	ShowStatusBar *bool `json:"showStatusBar,omitempty"`
+	// SmartPunctuation converts newly typed input to CJK punctuation
+	// (M6-3 EDIT-18). A pointer keeps old files defaulting to off.
+	SmartPunctuation *bool `json:"smartPunctuation,omitempty"`
 }
 
 // Defaults are what a fresh install uses.
 func Defaults() Settings {
 	show := true
-	return Settings{Startup: StartupBlank, Appearance: AppearanceSystem, Recent: nil, ShowStatusBar: &show}
+	off := false
+	return Settings{Startup: StartupBlank, Appearance: AppearanceSystem, Recent: nil, ShowStatusBar: &show, SmartPunctuation: &off}
 }
 
 // Store owns the settings file. It is safe for concurrent use: native events
@@ -242,6 +246,10 @@ func normalize(s Settings) Settings {
 		show := true
 		s.ShowStatusBar = &show
 	}
+	if s.SmartPunctuation == nil {
+		off := false
+		s.SmartPunctuation = &off
+	}
 
 	seen := make(map[string]struct{}, len(s.Recent))
 	recent := make([]Recent, 0, len(s.Recent))
@@ -293,6 +301,10 @@ func copyOf(s Settings) Settings {
 	if s.ShowStatusBar != nil {
 		show := *s.ShowStatusBar
 		out.ShowStatusBar = &show
+	}
+	if s.SmartPunctuation != nil {
+		punct := *s.SmartPunctuation
+		out.SmartPunctuation = &punct
 	}
 	return out
 }
