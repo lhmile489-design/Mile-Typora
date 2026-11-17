@@ -154,7 +154,7 @@ function parseBlock(line: string): Block {
 type ProtectedRange = { start: number; end: number; kind: "front" | "fence" | "math" | "rule" | "code" };
 
 /** indentColumns counts a tab as the next 4-column stop. */
-function indentColumns(text: string): number {
+export function indentColumns(text: string): number {
   let columns = 0;
   for (const char of text) {
     if (char === " ") columns++;

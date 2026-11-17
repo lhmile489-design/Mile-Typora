@@ -36,6 +36,7 @@ type AssistModule = typeof import("../editor/editassist");
 type MathModule = typeof import("../editor/mathtools");
 type SmartPunctModule = typeof import("../editor/smartpunct");
 type SpellCheckModule = typeof import("../editor/spellcheck");
+type CodeToolsModule = typeof import("../editor/codetools");
 
 /** Commands the app and, later, the Edit menu call on the editor. */
 export type SourceCommands = {
@@ -107,6 +108,11 @@ export type SourceCommands = {
   insertMathSnippet(kind: import("../editor/mathtools").MathSnippet): boolean;
   convertMathDelimiter(target: import("../editor/mathtools").MathDelimiter): boolean;
   mathInfo(): { tex: string; display: boolean; kind: "inline" | "block" } | null;
+  /** Code tools (P3 M6-5 PARA-08). Each is one undo step. */
+  codeIndentSpaces(width: 2 | 4): boolean;
+  /** Returns the count of lines that kept their indent (not a 4-column multiple). */
+  codeIndentTabs(): { applied: boolean; skipped: number };
+  codeLowercaseLanguage(): boolean;
   /** Editing aids (M5-8 EDIT-16/20). */
   deleteWord(): boolean;
   deleteLine(): boolean;
@@ -164,6 +170,12 @@ export type EditorContext = {
   inMath: boolean;
   /** The caret is in code, front matter or another math-blocked region. */
   mathBlocked: boolean;
+  /** The caret or selection sits inside one fenced code block (M6-5). */
+  inFence: boolean;
+  /** Lowercased info token of that fence ("" when not in a fence or no info). */
+  fenceLanguage: string;
+  /** The selection crosses a fence boundary; commands must refuse (M6-5). */
+  crossFence: boolean;
 };
 
 /**
@@ -195,6 +207,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
   const lineops = useRef<LineOpsModule | null>(null);
   const assist = useRef<AssistModule | null>(null);
   const mathTools = useRef<MathModule | null>(null);
+  const codeTools = useRef<CodeToolsModule | null>(null);
   const smartPunct = useRef<SmartPunctModule | null>(null);
   const isolateHistory = useRef<AnnotationType<"after" | "before" | "full"> | null>(null);
   const stateCtor = useRef<typeof import("@codemirror/state").EditorState | null>(null);
@@ -307,6 +320,15 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
   const runMath = (transform: (mod: MathModule, snapshot: Snapshot) => ParagraphEdit): boolean => {
     const view = viewRef.current;
     const mod = mathTools.current;
+    if (!view || !mod) return false;
+    const range = view.state.selection.main;
+    return applyEdit(transform(mod, { text: view.state.doc.toString(), anchor: range.anchor, head: range.head }));
+  };
+
+  /** runCodeTools is the same contract for the fenced-code helpers (M6-5). */
+  const runCodeTools = (transform: (mod: CodeToolsModule, snapshot: Snapshot) => ParagraphEdit): boolean => {
+    const view = viewRef.current;
+    const mod = codeTools.current;
     if (!view || !mod) return false;
     const range = view.state.selection.main;
     return applyEdit(transform(mod, { text: view.state.doc.toString(), anchor: range.anchor, head: range.head }));
@@ -540,6 +562,20 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
         const range = view.state.selection.main;
         return mod.mathInfo({ text: view.state.doc.toString(), anchor: range.anchor, head: range.head });
       },
+      codeIndentSpaces(width) {
+        return runCodeTools((mod, snapshot) => mod.reindent(snapshot, width));
+      },
+      codeIndentTabs() {
+        const view = viewRef.current;
+        const mod = codeTools.current;
+        if (!view || !mod) return { applied: false, skipped: 0 };
+        const range = view.state.selection.main;
+        const { edit, skipped } = mod.toTabs({ text: view.state.doc.toString(), anchor: range.anchor, head: range.head });
+        return { applied: applyEdit(edit), skipped };
+      },
+      codeLowercaseLanguage() {
+        return runCodeTools((mod, snapshot) => mod.lowercaseLanguage(snapshot));
+      },
       deleteWord() {
         return runAssist((mod, snapshot) => mod.deleteWord(snapshot));
       },
@@ -721,6 +757,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
         lineopsModule,
         assistModule,
         mathModule,
+        codeToolsModule,
         smartPunctModule,
         spellCheckModuleResult,
       ] = await Promise.all([
@@ -734,6 +771,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
         import("../editor/lineops"),
         import("../editor/editassist"),
         import("../editor/mathtools"),
+        import("../editor/codetools"),
         import("../editor/smartpunct"),
         import("../editor/spellcheck"),
       ]);
@@ -746,6 +784,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
       lineops.current = lineopsModule;
       assist.current = assistModule;
       mathTools.current = mathModule;
+      codeTools.current = codeToolsModule;
       smartPunct.current = smartPunctModule;
       spellCheckModule.current = spellCheckModuleResult;
       stateCtor.current = EditorState;
@@ -959,6 +998,15 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
           blocked: mod.mathProtected(text, position),
         };
       };
+      /** codeContextAt reports fenced-code state for the code-tools submenu. */
+      const codeContextAt = (text: string, anchor: number, head: number) => {
+        const mod = codeTools.current;
+        if (!mod) return { inFence: false, fenceLanguage: "", crossFence: false };
+        const target = mod.fenceAt({ text, anchor, head });
+        if (!target) return { inFence: false, fenceLanguage: "", crossFence: false };
+        if (target.kind === "cross") return { inFence: false, fenceLanguage: "", crossFence: true };
+        return { inFence: true, fenceLanguage: target.fence.language, crossFence: false };
+      };
       const editorExtensions: Extension[] = [
         lineNumbers(),
         history(),
@@ -1077,15 +1125,20 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
           }
           if (update.docChanged && !applying.current) changeRef.current(update.state.doc.toString());
           const text = update.state.doc.toString();
-          const head = update.state.selection.main.head;
+          const range = update.state.selection.main;
+          const head = range.head;
           const math = mathContextAt(text, head);
+          const code = codeContextAt(text, range.anchor, range.head);
           contextRef.current?.(contextAt(
             text,
             head,
-            !update.state.selection.main.empty,
+            !range.empty,
             update.view.hasFocus,
             math.inMath,
             math.blocked,
+            code.inFence,
+            code.fenceLanguage,
+            code.crossFence,
           ));
           if (typewriterRef.current) scrollTypewriter();
         }),
@@ -1099,13 +1152,15 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
       if (typewriterRef.current) scrollTypewriter();
       view.focus();
       const initialMath = mathContextAt(valueRef.current, 0);
-      contextRef.current?.(contextAt(valueRef.current, 0, false, view.hasFocus, initialMath.inMath, initialMath.blocked));
+      const initialCode = codeContextAt(valueRef.current, 0, 0);
+      contextRef.current?.(contextAt(valueRef.current, 0, false, view.hasFocus, initialMath.inMath, initialMath.blocked, initialCode.inFence, initialCode.fenceLanguage, initialCode.crossFence));
       const reportFocus = (focused: boolean) => {
         if (!alive || viewRef.current !== view) return;
         const range = view.state.selection.main;
         const text = view.state.doc.toString();
         const math = mathContextAt(text, range.head);
-        contextRef.current?.(contextAt(text, range.head, !range.empty, focused, math.inMath, math.blocked));
+        const code = codeContextAt(text, range.anchor, range.head);
+        contextRef.current?.(contextAt(text, range.head, !range.empty, focused, math.inMath, math.blocked, code.inFence, code.fenceLanguage, code.crossFence));
       };
       const onFocus = () => reportFocus(true);
       const onBlur = (event: FocusEvent) => {
@@ -1178,6 +1233,9 @@ export function contextAt(
   focused = false,
   inMath = false,
   mathBlocked = false,
+  inFence = false,
+  fenceLanguage = "",
+  crossFence = false,
 ): EditorContext {
   const snapshot = { text, anchor: position, head: position };
   return {
@@ -1188,6 +1246,9 @@ export function contextAt(
     focused,
     inMath,
     mathBlocked,
+    inFence,
+    fenceLanguage,
+    crossFence,
   };
 }
 

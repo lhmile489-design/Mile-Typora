@@ -108,6 +108,9 @@ type MenuState = {
   editorFocused: boolean;
   editorInMath: boolean;
   editorMathBlocked: boolean;
+  editorInFence: boolean;
+  editorFenceLanguage: string;
+  editorCrossFence: boolean;
   lineEnding: string;
   appearance: string;
   readerSelection: boolean;
@@ -495,6 +498,50 @@ function buildMenus(state: MenuState): MenuGroup[] {
         editing("quote", "引用", "Ctrl+Shift+Q"),
         editing("formula-block", "公式块", "Ctrl+Shift+M"),
         editing("code-block", "代码块", "Ctrl+Shift+K"),
+        {
+          id: "code-tools",
+          label: "代码工具",
+          disabled: !state.editing || (!state.editorInFence && !state.editorCrossFence),
+          reason: !state.editing ? reason : "光标不在围栏代码块内",
+          children: [
+            {
+              id: "code-indent-2",
+              label: "缩进整理（2 空格）",
+              disabled: !state.editing || !state.editorInFence || state.editorFenceLanguage === "makefile" || state.editorFenceLanguage === "make",
+              reason: !state.editing
+                ? reason
+                : state.editorCrossFence
+                  ? "选区跨围栏代码块边界"
+                  : state.editorFenceLanguage === "makefile" || state.editorFenceLanguage === "make"
+                    ? "Makefile 配方行必须保留制表符"
+                    : "光标不在围栏代码块内",
+            },
+            {
+              id: "code-indent-4",
+              label: "缩进整理（4 空格）",
+              disabled: !state.editing || !state.editorInFence || state.editorFenceLanguage === "makefile" || state.editorFenceLanguage === "make",
+              reason: !state.editing
+                ? reason
+                : state.editorCrossFence
+                  ? "选区跨围栏代码块边界"
+                  : state.editorFenceLanguage === "makefile" || state.editorFenceLanguage === "make"
+                    ? "Makefile 配方行必须保留制表符"
+                    : "光标不在围栏代码块内",
+            },
+            {
+              id: "code-indent-tabs",
+              label: "转换为制表符缩进",
+              disabled: !state.editing || !state.editorInFence,
+              reason: !state.editing ? reason : state.editorCrossFence ? "选区跨围栏代码块边界" : "光标不在围栏代码块内",
+            },
+            {
+              id: "code-language-lowercase",
+              label: "代码块语言名小写",
+              disabled: !state.editing || !state.editorInFence,
+              reason: !state.editing ? reason : state.editorCrossFence ? "选区跨围栏代码块边界" : "光标不在围栏代码块内",
+            },
+          ],
+        },
         sep,
         editing("ordered-list", "有序列表", "Ctrl+Shift+["),
         editing("unordered-list", "无序列表", "Ctrl+Shift+]"),
@@ -760,6 +807,9 @@ export function App({ transport }: { transport: Transport }) {
   const [editorFocused, setEditorFocused] = useState(false);
   const [editorInMath, setEditorInMath] = useState(false);
   const [editorMathBlocked, setEditorMathBlocked] = useState(false);
+  const [editorInFence, setEditorInFence] = useState(false);
+  const [editorFenceLanguage, setEditorFenceLanguage] = useState("");
+  const [editorCrossFence, setEditorCrossFence] = useState(false);
   const [readerSelectionActive, setReaderSelectionActive] = useState(false);
   const [readerImageActive, setReaderImageActive] = useState(false);
   const [linkDialog, setLinkDialog] = useState<{ address: string; reference: boolean } | null>(null);
@@ -2862,6 +2912,22 @@ export function App({ transport }: { transport: Transport }) {
         case "quote": run((c) => c.toggleQuote()); return;
         case "formula-block": run((c) => c.insertFormulaBlock()); return;
         case "code-block": run((c) => c.insertCodeBlock()); return;
+        case "code-indent-2": run((c) => c.codeIndentSpaces(2)); return;
+        case "code-indent-4": run((c) => c.codeIndentSpaces(4)); return;
+        case "code-indent-tabs": {
+          run((c) => {
+            const { applied, skipped } = c.codeIndentTabs();
+            if (!applied && skipped === 0) setNotice("光标不在围栏代码块内");
+            else if (skipped > 0) setNotice(`${skipped} 行缩进不是 4 的倍数，已保留原样`);
+          });
+          return;
+        }
+        case "code-language-lowercase": {
+          run((c) => {
+            if (!c.codeLowercaseLanguage()) setNotice("语言名已是小写或不支持");
+          });
+          return;
+        }
         case "ordered-list": run((c) => c.toggleOrderedList()); return;
         case "unordered-list": run((c) => c.toggleUnorderedList()); return;
         case "task-list": run((c) => c.toggleTaskList()); return;
@@ -3322,6 +3388,9 @@ export function App({ transport }: { transport: Transport }) {
           editorFocused,
           editorInMath,
           editorMathBlocked,
+          editorInFence,
+          editorFenceLanguage,
+          editorCrossFence,
           lineEnding: doc?.lineEnding ?? "LF",
           appearance: settings.appearance,
           readerSelection: readerSelectionActive,
@@ -3530,6 +3599,9 @@ export function App({ transport }: { transport: Transport }) {
                 setEditorFocused(context.focused);
                 setEditorInMath(context.inMath);
                 setEditorMathBlocked(context.mathBlocked);
+                setEditorInFence(context.inFence);
+                setEditorFenceLanguage(context.fenceLanguage);
+                setEditorCrossFence(context.crossFence);
               }}
               readClipboard={async () => {
                 const result = await transport.readClipboardText();

@@ -1711,3 +1711,52 @@ describe("M6-2 math tools", () => {
     expect(math.getAttribute("aria-disabled")).toBe("true");
   });
 });
+
+describe("M6-5 code tools", () => {
+  const fenceDoc = {
+    kind: "loaded" as const,
+    doc: { ...loadedDoc.doc, text: "```ts\n\tlet a = 1\n\t\tlet b = 2\n```", html: "<p>code</p>" },
+  };
+
+  it("reindents a fenced block to 2 spaces from the paragraph menu", async () => {
+    render(<App transport={fakeTransport({ openFile: async () => fenceDoc })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByText("code");
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    content.focus();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "段落" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "代码工具" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /缩进整理（2 空格）/ }));
+    await waitFor(() => expect(content.textContent).toContain("  let a = 1"));
+    await waitFor(() => expect(content.textContent).toContain("    let b = 2"));
+  });
+
+  it("lowercases the fence language from the paragraph menu", async () => {
+    const upperDoc = {
+      kind: "loaded" as const,
+      doc: { ...loadedDoc.doc, text: "```TS\nlet a = 1\n```", html: "<p>x</p>" },
+    };
+    render(<App transport={fakeTransport({ openFile: async () => upperDoc })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByText("x");
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    content.focus();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "段落" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "代码工具" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "代码块语言名小写" }));
+    await waitFor(() => expect(content.textContent).toContain("```ts"));
+  });
+
+  it("keeps code tools disabled outside source editing", async () => {
+    render(<App transport={fakeTransport({ openFile: async () => fenceDoc })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByText("code");
+    fireEvent.click(screen.getByRole("menuitem", { name: "段落" }));
+    const tools = screen.getByRole("menuitem", { name: "代码工具" });
+    expect(tools.getAttribute("aria-disabled")).toBe("true");
+  });
+});
