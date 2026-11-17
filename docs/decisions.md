@@ -534,3 +534,12 @@ M1 需验证：mermaid 12 的 `securityLevel: "strict"` 与 `%%{init}%%` 指令�
 - 右键菜单：自绘页面级浮层，仅在右键落在被标单词上时出现；至多 5 条建议 + 「忽略本次」（会话级 Set，不持久化）。点建议是一次可撤销编辑；点空白、Esc 或换词关闭。
 - 设置链：`appstate.Settings.SpellCheck *bool`（老文件无字段默认 false）→ `SettingsView`/`SettingsChange` 加字段 → `SaveSettings` 持久化并在变化时广播；编辑菜单新增「拼写检查」子菜单（一项 checkbox 与设置同步），设置对话框「编辑」组加复选框。
 - 测试：spellcheck 纯函数（错词标记、CJK 跳过、保护区域、5000 词上限、`wordAt` 边界与保护区、忽略清单、建议、hasWordChars）、appstate 默认值与往返、service `settingsChanged` 广播、App 菜单勾选态与持久化；原生验收见 `docs/develop/M6-4-验收记录.md`。
+
+### D-T61 · M6-5 代码工具：围栏内纯变换 + 上下文禁用
+
+- 新增 `src/editor/codetools.ts` 纯变换：`codeFences` 自扫围栏（跳过 front matter、同字符/更长 closing、未闭合跑到文末、缩进代码块不算）；`fenceAt` 返回 `ok`/`cross`/null 区分「在块内」「选区跨界」「不在块内」。四个命令：`reindent`（行首 tab 按 4 列展开 → `round(列/4)` 级 × 2/4 空格，公共缩进自然保留、空白行不动）、`toTabs`（仅 4 的倍数列转行首 tab，不可整除行保留并计数）、`lowercaseLanguage`（只改 info 串首 token，未知语言/已小写/无 info 返回 null）、`isMakefile`。
+- `makefile`/`make` 块菜单禁用两条缩进整理（配方行必须保留 tab），reason 写明；制表符转换仍可用。选区跨围栏边界时 `EditorContext.crossFence` 为 true，菜单禁用并显示原因，命令本身也返回不执行（双保险）。
+- `EditorContext` 新增 `inFence`/`fenceLanguage`/`crossFence`，由 SourceEditor 的 `codeContextAt` 在 updateListener、初始与焦点上报三处计算；App 新增同名三个 state 进 `MenuState`，段落菜单「代码工具」子菜单按契约 §3.5 启用/禁用。
+- 命令经既有 `runCodeTools` → `applyEdit` 一次 dispatch 一步撤销；无变化返回 null 不标脏。只处理围栏代码块正文行，不改 fence 字符、fence 长度、info 其余属性与行内空白；不做语言级格式化、不执行代码、不引外部格式化器；与 M5-8 行尾清理正交。
+- `paragraph.ts` 的 `indentColumns` 从私有改为导出复用（tab 按下一 4 列制表位计列）；fence 扫描器在 codetools 内独立实现，不改 mathtools/paragraph 的既有保护判定。
+- 测试：codetools 30 项纯变换（围栏定位、边界、重排、tab 转换、语言名、未闭合、front matter、缩进代码块）、App 3 项菜单（命令生效、禁用态）；原生验收见 `docs/develop/M6-5-验收记录.md`。
