@@ -35,6 +35,7 @@ const ORDER: Array<[Command, string]> = [
   ["inline-code", "行内代码"],
   ["strikethrough", "删除线"],
   ["link", "链接"],
+  ["underline", "下划线"],
   ["clear-format", "清除样式"],
   ["move-line-up", "上移行"],
   ["move-line-down", "下移行"],

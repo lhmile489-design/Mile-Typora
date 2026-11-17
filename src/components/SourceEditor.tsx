@@ -2,6 +2,24 @@ import { useEffect, useImperativeHandle, useRef } from "react";
 import type { EditorView } from "@codemirror/view";
 import type { AnnotationType, Extension } from "@codemirror/state";
 import type { HeadingLevel, ParagraphEdit, Snapshot } from "../editor/paragraph";
+import {
+  insertAlert,
+  insertComment,
+  insertFootnote,
+  insertFrontMatter,
+  insertLinkReference,
+  insertTable,
+  insertTOC,
+  tableAddColumn,
+  tableAddRow,
+  tableAlign,
+  tableDelete,
+  tableDeleteColumn,
+  tableDeleteRow,
+  toggleUnderline,
+  type AlertType,
+  type TableAlign,
+} from "../editor/extended";
 
 type ParagraphModule = typeof import("../editor/paragraph");
 type InlineModule = typeof import("../editor/inline");
@@ -47,6 +65,22 @@ export type SourceCommands = {
   toggleStrikethrough(): boolean;
   insertLink(): boolean;
   clearFormatting(): boolean;
+  /** P2 table commands (M5-3 PARA-05). */
+  insertTable(rows: number, columns: number): boolean;
+  tableAddRow(where: "above" | "below"): boolean;
+  tableAddColumn(where: "left" | "right"): boolean;
+  tableDeleteRow(): boolean;
+  tableDeleteColumn(): boolean;
+  tableDelete(): boolean;
+  tableAlign(align: TableAlign): boolean;
+  /** P2 extended block and inline commands (M5-3). */
+  insertFootnote(): boolean;
+  insertAlert(type: AlertType): boolean;
+  insertLinkReference(): boolean;
+  insertTOC(): boolean;
+  insertFrontMatter(): boolean;
+  toggleUnderline(): boolean;
+  insertComment(): boolean;
   selectAll(): void;
   selectLine(): boolean;
   selectParagraph(): boolean;
@@ -68,6 +102,8 @@ type Props = {
   /** Clipboard through the app's native binding, not the WebView permission. */
   readClipboard: () => Promise<string | null>;
   writeClipboard: (text: string) => Promise<boolean>;
+  /** Reports whether the caret is inside a pipe table, for menu enablement. */
+  onContext?: (inTable: boolean) => void;
   ref?: React.Ref<SourceCommands>;
 };
 
@@ -76,9 +112,10 @@ type Props = {
  * when editing starts, so reading pays nothing for it. The buffer is the
  * editor's document; preview renders the same string through Go.
  */
-export function SourceEditor({ value, onChange, readClipboard, writeClipboard, ref }: Props) {
-  const host = useRef<HTMLDivElement>(null);
+export function SourceEditor({ value, onChange, readClipboard, writeClipboard, onContext, ref }: Props) {  const host = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const contextRef = useRef(onContext);
+  contextRef.current = onContext;
   const valueRef = useRef(value);
   valueRef.current = value;
   const changeRef = useRef(onChange);
@@ -150,6 +187,14 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, r
     if (!view || !mod) return false;
     const range = view.state.selection.main;
     return applyEdit(transform(mod, { text: view.state.doc.toString(), anchor: range.anchor, head: range.head }));
+  };
+
+  /** runExtended applies a pure P2 transform to the current buffer. */
+  const runExtended = (transform: (snapshot: Snapshot) => ParagraphEdit): boolean => {
+    const view = viewRef.current;
+    if (!view) return false;
+    const range = view.state.selection.main;
+    return applyEdit(transform({ text: view.state.doc.toString(), anchor: range.anchor, head: range.head }));
   };
 
   useImperativeHandle(
@@ -270,6 +315,48 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, r
       },
       clearFormatting() {
         return runInline((mod, snapshot) => mod.clearFormatting(snapshot));
+      },
+      insertTable(rows, columns) {
+        return runExtended((snapshot) => insertTable(snapshot, rows, columns));
+      },
+      tableAddRow(where) {
+        return runExtended((snapshot) => tableAddRow(snapshot, where));
+      },
+      tableAddColumn(where) {
+        return runExtended((snapshot) => tableAddColumn(snapshot, where));
+      },
+      tableDeleteRow() {
+        return runExtended((snapshot) => tableDeleteRow(snapshot));
+      },
+      tableDeleteColumn() {
+        return runExtended((snapshot) => tableDeleteColumn(snapshot));
+      },
+      tableDelete() {
+        return runExtended((snapshot) => tableDelete(snapshot));
+      },
+      tableAlign(align) {
+        return runExtended((snapshot) => tableAlign(snapshot, align));
+      },
+      insertFootnote() {
+        return runExtended((snapshot) => insertFootnote(snapshot));
+      },
+      insertAlert(type) {
+        return runExtended((snapshot) => insertAlert(snapshot, type));
+      },
+      insertLinkReference() {
+        return runExtended((snapshot) => insertLinkReference(snapshot));
+      },
+      insertTOC() {
+        return runExtended((snapshot) => insertTOC(snapshot));
+      },
+      insertFrontMatter() {
+        return runExtended((snapshot) => insertFrontMatter(snapshot));
+      },
+      toggleUnderline() {
+        return runExtended((snapshot) => toggleUnderline(snapshot));
+      },
+      insertComment() {
+        return runExtended((snapshot) => insertComment(snapshot));
       },
       selectAll() {
         const view = viewRef.current;
@@ -442,8 +529,9 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, r
         theme,
         EditorView.contentAttributes.of({ "aria-label": "Markdown 源码" }),
         EditorView.updateListener.of((update) => {
-          if (!update.docChanged || applying.current) return;
-          changeRef.current(update.state.doc.toString());
+          if (!update.docChanged && !update.selectionSet) return;
+          if (update.docChanged && !applying.current) changeRef.current(update.state.doc.toString());
+          contextRef.current?.(inTableAt(update.state.doc.toString(), update.state.selection.main.head));
         }),
       ];
       extensions.current = editorExtensions;
@@ -452,6 +540,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, r
         state: EditorState.create({ doc: valueRef.current, extensions: editorExtensions }),
       });
       viewRef.current = view;
+      contextRef.current?.(inTableAt(valueRef.current, 0));
       view.focus();
     })();
 
@@ -490,4 +579,26 @@ function selectedText(view: EditorView): string {
   const range = view.state.selection.main;
   if (range.empty) return "";
   return view.state.sliceDoc(range.from, range.to);
+}
+
+const TABLE_ROW = /^\s*\|.*\|\s*$/;
+const TABLE_DELIMITER = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/;
+
+/** inTableAt is a cheap local check for menu enablement, not a full parse. */
+export function inTableAt(text: string, position: number): boolean {
+  let lineStart = text.lastIndexOf("\n", Math.max(0, position - 1)) + 1;
+  const lineEnd = text.indexOf("\n", position);
+  const current = text.slice(lineStart, lineEnd === -1 ? text.length : lineEnd);
+  if (!TABLE_ROW.test(current)) return false;
+  while (lineStart > 0) {
+    const previousEnd = lineStart - 1;
+    const previousStart = text.lastIndexOf("\n", previousEnd - 1) + 1;
+    if (!TABLE_ROW.test(text.slice(previousStart, previousEnd))) break;
+    lineStart = previousStart;
+  }
+  const firstEnd = text.indexOf("\n", lineStart);
+  const secondStart = firstEnd === -1 ? text.length : firstEnd + 1;
+  const secondEnd = text.indexOf("\n", secondStart);
+  const second = text.slice(secondStart, secondEnd === -1 ? text.length : secondEnd);
+  return TABLE_DELIMITER.test(second);
 }

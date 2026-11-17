@@ -344,6 +344,7 @@ function cleanInline(source: string): string {
     if (text === previous) break;
   }
   let restored = text;
+  restored = restored.replace(/<\/?u>/gi, "");
   for (let i = 0; i < spans.length; i++) {
     restored = restored.split(`\u0000${i}\u0001`).join(spans[i] ?? "");
   }
@@ -427,7 +428,12 @@ function expandClearingRange(text: string, from: number, to: number): { from: nu
 export function clearFormatting(snapshot: Snapshot): InlineEdit {
   if (snapshot.anchor === snapshot.head) return null;
   const range = selectionOf(snapshot);
-  const expanded = expandClearingRange(range.text, range.from, range.to);
+  let expanded = expandClearingRange(range.text, range.from, range.to);
+  const open = range.text.lastIndexOf("<u>", expanded.from);
+  const close = range.text.indexOf("</u>", expanded.to);
+  if (open >= 0 && close >= 0 && open < expanded.from && close + 4 > expanded.to) {
+    expanded = { from: open, to: close + 4 };
+  }
   const source = range.text.slice(expanded.from, expanded.to);
   const cleaned = cleanInline(source);
   if (cleaned === source) return null;

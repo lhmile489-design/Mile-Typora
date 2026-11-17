@@ -423,6 +423,29 @@ describe("file operations", () => {
     expect(editOrder).toBeLessThan(moveOrder);
   });
 
+  it("inserts a table and an alert from the paragraph menu", async () => {
+    render(<App transport={fakeTransport({ openFile: async () => loadedDoc })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    content.focus();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "段落" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /插入表格/ }));
+    const dialog = await screen.findByRole("dialog", { name: "插入表格" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "插入" }));
+    await waitFor(() => expect(content.textContent).toContain("| 列 1 | 列 2 |"));
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "段落" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /注意框/ }));
+    await waitFor(() => expect(content.textContent).toContain("> [!NOTE]"));
+
+    content.focus();
+    fireEvent.keyDown(content, { key: "u", ctrlKey: true });
+    await waitFor(() => expect(content.textContent).toContain("<u></u>"));
+  });
+
   it("attaches the parent folder when showing a single file in the sidebar", async () => {
     const attachParentFolder = vi.fn(async () => ({
       kind: "attached" as const,

@@ -81,11 +81,16 @@ func New() *Renderer {
 	r.md = goldmark.New(
 		goldmark.WithExtensions(
 			extension.GFM,
+			extension.Footnote,
 			Math(),
 		),
 		goldmark.WithParserOptions(
 			// Anchors keep Chinese; the ids themselves are made per document.
 			parser.WithAutoHeadingID(),
+			parser.WithASTTransformers(
+				util.Prioritized(&alertTransformer{}, 100),
+				util.Prioritized(&tocTransformer{}, 200),
+			),
 		),
 		goldmark.WithRendererOptions(
 			renderer.WithNodeRenderers(util.Prioritized(r, 100)),
@@ -134,7 +139,10 @@ func (r *Renderer) Render(ctx context.Context, src []byte, images ImageResolver)
 		}
 		// The whitelist is the last line of defence: whatever the renderer
 		// emitted, only known tags and attributes reach the page.
-		done <- outcome{res: Result{HTML: r.policy.Sanitize(rendered), Counts: counts}}
+		clean := r.policy.Sanitize(rendered)
+		// P2 FORMAT-06 asks for a text backlink, not the arrow glyph.
+		clean = footnoteBacklink.ReplaceAllString(clean, `<a$1>返回</a>`)
+		done <- outcome{res: Result{HTML: clean, Counts: counts}}
 	}()
 
 	select {
@@ -153,6 +161,8 @@ func (r *Renderer) Render(ctx context.Context, src []byte, images ImageResolver)
 func (r *Renderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
 	reg.Register(ast.KindHTMLBlock, r.renderRawBlock)
 	reg.Register(ast.KindRawHTML, r.renderRawInline)
+	reg.Register(KindAlert, r.renderAlert)
+	reg.Register(KindTOC, r.renderTOC)
 	reg.Register(KindMathInline, r.renderMathInline)
 	reg.Register(ast.KindFencedCodeBlock, r.renderFence)
 	reg.Register(ast.KindImage, r.renderImage)
@@ -166,6 +176,9 @@ func (r *Renderer) renderRawBlock(w util.BufWriter, source []byte, node ast.Node
 	}
 	block, ok := node.(*ast.HTMLBlock)
 	if !ok {
+		return ast.WalkContinue, nil
+	}
+	if isCommentBlock(source, block) {
 		return ast.WalkContinue, nil
 	}
 	_, _ = w.WriteString(`<pre class="raw-html">`)
@@ -185,11 +198,23 @@ func (r *Renderer) renderRawInline(w util.BufWriter, source []byte, node ast.Nod
 	if !ok {
 		return ast.WalkContinue, nil
 	}
-	_, _ = w.WriteString(`<code class="raw-html">`)
+	// A complete HTML comment is hidden in reading and preview. An exact
+	// <u> or </u> is the one raw tag the whitelist lets through (P2 FORMAT-03).
+	var value strings.Builder
 	for i := range raw.Segments.Len() {
 		segment := raw.Segments.At(i)
-		_, _ = w.Write(util.EscapeHTML(segment.Value(source)))
+		value.Write(segment.Value(source))
 	}
+	segmentText := value.String()
+	if inlineComment.MatchString(segmentText) {
+		return ast.WalkContinue, nil
+	}
+	if underlineTag(segmentText) {
+		_, _ = w.WriteString(segmentText)
+		return ast.WalkContinue, nil
+	}
+	_, _ = w.WriteString(`<code class="raw-html">`)
+	_, _ = w.Write(util.EscapeHTML([]byte(segmentText)))
 	_, _ = w.WriteString(`</code>`)
 	return ast.WalkContinue, nil
 }
@@ -330,7 +355,9 @@ func limitReason(size, maxSize, count, maxCount int) string {
 
 // classNames are the only class values this package emits; the whitelist keeps
 // any others out (a document cannot invent a class of its own).
-var classNames = regexp.MustCompile(`^(raw-html|math|mermaid-src|limited|code|fm|chroma)$`)
+var classNames = regexp.MustCompile(`^(raw-html|math|mermaid-src|limited|code|fm|chroma|alert|alert-title|alert-note|alert-tip|alert-important|alert-warning|alert-caution|alert alert-(note|tip|important|warning|caution)|toc|toc-list|toc-item|toc-level-[1-6]|toc-link|footnotes|footnote-ref|footnote-backref)$`)
+var roleNames = regexp.MustCompile(`^(doc-noteref|doc-backlink|doc-endnotes)$`)
+var alertTypesAttr = regexp.MustCompile(`^(note|tip|important|warning|caution)$`)
 
 // tokenClass is the shape of chroma's token classes, as "k", "s1" or "nf".
 // They only choose a colour: no behaviour hangs on them.
@@ -347,12 +374,14 @@ func newPolicy() *bluemonday.Policy {
 		"blockquote", "ul", "ol", "li",
 		"table", "thead", "tbody", "tr", "th", "td",
 		"hr", "br", "img", "span", "div", "input",
-		"details", "summary",
+		"details", "summary", "nav", "sup", "u",
 	)
 	p.AllowAttrs("href").OnElements("a")
 	p.AllowAttrs("src", "alt", "title", "loading").OnElements("img")
-	p.AllowAttrs("id").OnElements("h1", "h2", "h3", "h4", "h5", "h6")
-	p.AllowAttrs("class").Matching(classNames).OnElements("div", "pre", "code", "details")
+	p.AllowAttrs("id").OnElements("h1", "h2", "h3", "h4", "h5", "h6", "sup", "li")
+	p.AllowAttrs("class").Matching(classNames).OnElements("div", "pre", "code", "details", "a", "li", "nav", "p")
+	p.AllowAttrs("role").Matching(roleNames).OnElements("a", "div", "li")
+	p.AllowAttrs("data-type").Matching(alertTypesAttr).OnElements("div")
 	// Syntax highlighting names its tokens with short classes of its own.
 	p.AllowAttrs("class").Matching(tokenClass).OnElements("span", "pre")
 	p.AllowAttrs("data-display").OnElements("span", "div")

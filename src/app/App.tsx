@@ -45,6 +45,7 @@ import { FilePropertiesDialog } from "../components/FilePropertiesDialog";
 import { DocumentList } from "../components/DocumentList";
 import { OutlineView } from "../components/OutlineView";
 import { SearchPanel } from "../components/SearchPanel";
+import { TableDialog } from "../components/TableDialog";
 import { SettingsDialog } from "../components/SettingsDialog";
 import { UnsavedDialog } from "../components/UnsavedDialog";
 import { FindBar } from "../components/FindBar";
@@ -86,6 +87,7 @@ type MenuState = {
   leftView: LeftView;
   showLeft: boolean;
   showRight: boolean;
+  inTable: boolean;
   saveAllRunning: boolean;
   saving: boolean;
   promptOpen: boolean;
@@ -224,6 +226,29 @@ function buildMenus(state: MenuState): MenuGroup[] {
         editing("paragraph-above", "在上方插入段落"),
         editing("paragraph-below", "在下方插入段落"),
         editing("horizontal-rule", "水平分割线"),
+        sep,
+        editing("table-insert", "插入表格…"),
+        editing("table-row-above", "在上方插入行", undefined, !state.editing || !state.inTable, "光标不在表格内"),
+        editing("table-row-below", "在下方插入行", undefined, !state.editing || !state.inTable, "光标不在表格内"),
+        editing("table-column-left", "在左侧插入列", undefined, !state.editing || !state.inTable, "光标不在表格内"),
+        editing("table-column-right", "在右侧插入列", undefined, !state.editing || !state.inTable, "光标不在表格内"),
+        editing("table-row-delete", "删除当前行", undefined, !state.editing || !state.inTable, "光标不在表格内"),
+        editing("table-column-delete", "删除当前列", undefined, !state.editing || !state.inTable, "光标不在表格内"),
+        editing("table-delete", "删除表格", undefined, !state.editing || !state.inTable, "光标不在表格内"),
+        editing("table-align-left", "表格列左对齐", undefined, !state.editing || !state.inTable, "光标不在表格内"),
+        editing("table-align-center", "表格列居中", undefined, !state.editing || !state.inTable, "光标不在表格内"),
+        editing("table-align-right", "表格列右对齐", undefined, !state.editing || !state.inTable, "光标不在表格内"),
+        sep,
+        editing("alert-note", "注意框"),
+        editing("alert-tip", "提示框"),
+        editing("alert-important", "重要框"),
+        editing("alert-warning", "警告框"),
+        editing("alert-caution", "小心框"),
+        sep,
+        editing("footnote-insert", "脚注"),
+        editing("link-reference", "链接引用"),
+        editing("toc-insert", "内容目录"),
+        editing("front-matter", "文档元信息"),
       ],
     },
     {
@@ -235,6 +260,8 @@ function buildMenus(state: MenuState): MenuGroup[] {
         editing("inline-code", "代码", "Ctrl+Shift+反引号"),
         editing("strikethrough", "删除线", "Alt+Shift+5"),
         editing("link", "超链接", "Ctrl+K"),
+        editing("underline", "下划线", "Ctrl+U"),
+        editing("comment-insert", "注释"),
         editing("clear-format", "清除样式", "Ctrl+\\"),
       ],
     },
@@ -321,6 +348,7 @@ const EDITOR_ACTIONS: Partial<Record<Command, (editor: SourceCommands) => boolea
   strikethrough: (editor) => editor.toggleStrikethrough(),
   link: (editor) => editor.insertLink(),
   "clear-format": (editor) => editor.clearFormatting(),
+  underline: (editor) => editor.toggleUnderline(),
   "move-line-up": (editor) => editor.moveLine("up"),
   "move-line-down": (editor) => editor.moveLine("down"),
 };
@@ -332,6 +360,7 @@ export function App({ transport }: { transport: Transport }) {
   const [doc, setDoc] = useState<OpenedDoc | null>(null);
   // M4-1: one buffer per window; preview renders the same string through Go.
   const [mode, setMode] = useState<ViewMode>("reading");
+  const [editorInTable, setEditorInTable] = useState(false);
   const [buffer, setBuffer] = useState("");
   const [preview, setPreview] = useState<{ html: string; counts: OpenedDoc["counts"] } | null>(null);
   // M4-2: the buffer is dirty when it differs from the last saved/loaded text.
@@ -399,6 +428,7 @@ export function App({ transport }: { transport: Transport }) {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchConfirm, setSearchConfirm] = useState(false);
   const [listConfirm, setListConfirm] = useState(false);
+  const [tableOpen, setTableOpen] = useState(false);
   const searchAbort = useRef<{ abort: () => void } | null>(null);
   const searchToken = useRef(0);
   const pendingSearch = useRef<{ path: string; query: string; isName: boolean; mode: ViewMode; line: number } | null>(null);
@@ -1894,11 +1924,33 @@ export function App({ transport }: { transport: Transport }) {
         case "paragraph-above": run((c) => c.insertParagraph("above")); return;
         case "paragraph-below": run((c) => c.insertParagraph("below")); return;
         case "horizontal-rule": run((c) => c.insertHorizontalRule()); return;
+        case "table-insert": setTableOpen(true); return;
+        case "table-row-above": run((c) => c.tableAddRow("above")); return;
+        case "table-row-below": run((c) => c.tableAddRow("below")); return;
+        case "table-column-left": run((c) => c.tableAddColumn("left")); return;
+        case "table-column-right": run((c) => c.tableAddColumn("right")); return;
+        case "table-row-delete": run((c) => c.tableDeleteRow()); return;
+        case "table-column-delete": run((c) => c.tableDeleteColumn()); return;
+        case "table-delete": run((c) => c.tableDelete()); return;
+        case "table-align-left": run((c) => c.tableAlign("left")); return;
+        case "table-align-center": run((c) => c.tableAlign("center")); return;
+        case "table-align-right": run((c) => c.tableAlign("right")); return;
+        case "alert-note": run((c) => c.insertAlert("NOTE")); return;
+        case "alert-tip": run((c) => c.insertAlert("TIP")); return;
+        case "alert-important": run((c) => c.insertAlert("IMPORTANT")); return;
+        case "alert-warning": run((c) => c.insertAlert("WARNING")); return;
+        case "alert-caution": run((c) => c.insertAlert("CAUTION")); return;
+        case "footnote-insert": run((c) => c.insertFootnote()); return;
+        case "link-reference": run((c) => c.insertLinkReference()); return;
+        case "toc-insert": run((c) => c.insertTOC()); return;
+        case "front-matter": run((c) => c.insertFrontMatter()); return;
+        case "comment-insert": run((c) => c.insertComment()); return;
         case "bold": run((c) => c.toggleBold()); return;
         case "italic": run((c) => c.toggleItalic()); return;
         case "inline-code": run((c) => c.toggleInlineCode()); return;
         case "strikethrough": run((c) => c.toggleStrikethrough()); return;
         case "link": run((c) => c.insertLink()); return;
+        case "underline": run((c) => c.toggleUnderline()); return;
         case "clear-format": run((c) => c.clearFormatting()); return;
         case "toggle-source": void toggleSource(); return;
         case "help-shortcuts": setHelpKind("shortcuts"); return;
@@ -2022,7 +2074,7 @@ export function App({ transport }: { transport: Transport }) {
       if (e.defaultPrevented) return;
       const command = commandFor(e);
       if (!command) return;
-      if ((settingsOpen || unsavedOpen || conflict !== null || reloadOpen || deleteTarget !== null || properties !== null || sidebarConfirm || searchConfirm || listConfirm || saveAllSummary !== null || recentOpen || helpKind !== null) && command !== "dismiss") return;
+      if ((settingsOpen || unsavedOpen || conflict !== null || reloadOpen || deleteTarget !== null || properties !== null || sidebarConfirm || searchConfirm || listConfirm || tableOpen || saveAllSummary !== null || recentOpen || helpKind !== null) && command !== "dismiss") return;
       const editorAction = EDITOR_ACTIONS[command];
       if (editorAction) {
         const active = document.activeElement;
@@ -2175,6 +2227,7 @@ export function App({ transport }: { transport: Transport }) {
     sidebarConfirm,
     searchConfirm,
     listConfirm,
+    tableOpen,
     saveAllSummary,
     recentOpen,
     helpKind,
@@ -2197,6 +2250,7 @@ export function App({ transport }: { transport: Transport }) {
           leftView,
           showLeft,
           showRight,
+          inTable: editorInTable,
           saveAllRunning,
           saving,
           promptOpen: unsavedOpen || conflict !== null,
@@ -2383,6 +2437,7 @@ export function App({ transport }: { transport: Transport }) {
               ref={editorRef}
               value={buffer}
               onChange={setBuffer}
+              onContext={setEditorInTable}
               readClipboard={async () => {
                 const result = await transport.readClipboardText();
                 return result.ok ? result.value : null;
@@ -2636,6 +2691,15 @@ export function App({ transport }: { transport: Transport }) {
           properties={properties.props}
           unsaved={properties.unsaved}
           onClose={() => setProperties(null)}
+        />
+      )}
+      {tableOpen && (
+        <TableDialog
+          onInsert={(rows, columns) => {
+            setTableOpen(false);
+            editorRef.current?.insertTable(rows, columns);
+          }}
+          onCancel={() => setTableOpen(false)}
         />
       )}
       {saveAllSummary && (

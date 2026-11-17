@@ -43,6 +43,7 @@ export type Command =
   | "strikethrough"
   | "link"
   | "clear-format"
+  | "underline"
   | "move-line-up"
   | "move-line-down"
   | "dismiss";
@@ -109,6 +110,7 @@ export function commandFor(e: KeyPress): Command | null {
   if (!shift && key === "b") return "bold";
   if (!shift && key === "i") return "italic";
   if (!shift && key === "k") return "link";
+  if (!shift && key === "u") return "underline";
   if (!shift && key === "\\") return "clear-format";
   if (shift && (key === "`" || key === "~")) return "inline-code";
   if (!shift && key === ",") return "settings";
@@ -160,6 +162,7 @@ export const SHORTCUT_HINT: Partial<Record<Command, string>> = {
   "inline-code": "Ctrl+Shift+`",
   strikethrough: "Alt+Shift+5",
   link: "Ctrl+K",
+  underline: "Ctrl+U",
   "clear-format": "Ctrl+\\",
   "move-line-up": "Alt+↑",
   "move-line-down": "Alt+↓",

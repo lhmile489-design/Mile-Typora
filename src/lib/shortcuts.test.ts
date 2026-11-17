@@ -50,6 +50,7 @@ describe("the P0 shortcut table", () => {
     ["b", { ctrlKey: true }, "bold"],
     ["i", { ctrlKey: true }, "italic"],
     ["k", { ctrlKey: true }, "link"],
+    ["u", { ctrlKey: true }, "underline"],
     ["`", { ctrlKey: true, shiftKey: true }, "inline-code"],
     ["~", { ctrlKey: true, shiftKey: true }, "inline-code"],
     ["\\", { ctrlKey: true }, "clear-format"],

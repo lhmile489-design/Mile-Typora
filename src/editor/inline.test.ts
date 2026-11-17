@@ -66,6 +66,11 @@ describe("bold, italic and strikethrough", () => {
     expect(clearFormatting(snap(source, 0, 5, 0, 10))).toBeNull();
   });
 
+  it("removes underline tags with clear formatting", () => {
+    const edit = clearFormatting(snap("<u>文字</u>", 0, 3, 0, 5));
+    expect(textOf(edit)).toBe("文字");
+  });
+
 
   it("removes two stars from a combined bold-italic span", () => {
     expect(textOf(toggleEmphasis(snap("***text***", 0, 0, 0, 10), "bold"))).toBe("*text*");
