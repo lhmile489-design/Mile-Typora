@@ -12,6 +12,9 @@ type Props = {
   /** Converts newly typed input to CJK punctuation (M6-3 EDIT-18). */
   smartPunctuation: boolean;
   onChangeSmartPunctuation: (value: boolean) => void;
+  /** Underlines misspelled English words in the source editor (M6-4 EDIT-21). */
+  spellCheck: boolean;
+  onChangeSpellCheck: (value: boolean) => void;
   onCancel: () => void;
   onSave: () => void;
   saving?: boolean;
@@ -52,6 +55,8 @@ export function SettingsDialog({
   onChangeShowStatusBar,
   smartPunctuation,
   onChangeSmartPunctuation,
+  spellCheck,
+  onChangeSpellCheck,
   onCancel,
   onSave,
   saving,
@@ -160,6 +165,17 @@ export function SettingsDialog({
                 <span className="txt">
                   <span className="label">智能标点</span>
                   <span className="hint">输入时把英文引号、三个句点和连续横线转成中文标点，只影响新输入的内容。</span>
+                </span>
+              </label>
+              <label className="radio-row">
+                <input
+                  type="checkbox"
+                  checked={spellCheck}
+                  onChange={(e) => onChangeSpellCheck(e.target.checked)}
+                />
+                <span className="txt">
+                  <span className="label">拼写检查</span>
+                  <span className="hint">在源码编辑区用波浪线标出拼错的英文单词，只检查英文，不联网。</span>
                 </span>
               </label>
             </fieldset>

@@ -67,13 +67,16 @@ type Settings struct {
 	// SmartPunctuation converts newly typed input to CJK punctuation
 	// (M6-3 EDIT-18). A pointer keeps old files defaulting to off.
 	SmartPunctuation *bool `json:"smartPunctuation,omitempty"`
+	// SpellCheck underlines misspelled English words in the source editor
+	// (M6-4 EDIT-21). A pointer keeps old files defaulting to off.
+	SpellCheck *bool `json:"spellCheck,omitempty"`
 }
 
 // Defaults are what a fresh install uses.
 func Defaults() Settings {
 	show := true
 	off := false
-	return Settings{Startup: StartupBlank, Appearance: AppearanceSystem, Recent: nil, ShowStatusBar: &show, SmartPunctuation: &off}
+	return Settings{Startup: StartupBlank, Appearance: AppearanceSystem, Recent: nil, ShowStatusBar: &show, SmartPunctuation: &off, SpellCheck: &off}
 }
 
 // Store owns the settings file. It is safe for concurrent use: native events
@@ -250,6 +253,10 @@ func normalize(s Settings) Settings {
 		off := false
 		s.SmartPunctuation = &off
 	}
+	if s.SpellCheck == nil {
+		off := false
+		s.SpellCheck = &off
+	}
 
 	seen := make(map[string]struct{}, len(s.Recent))
 	recent := make([]Recent, 0, len(s.Recent))
@@ -305,6 +312,10 @@ func copyOf(s Settings) Settings {
 	if s.SmartPunctuation != nil {
 		punct := *s.SmartPunctuation
 		out.SmartPunctuation = &punct
+	}
+	if s.SpellCheck != nil {
+		spell := *s.SpellCheck
+		out.SpellCheck = &spell
 	}
 	return out
 }

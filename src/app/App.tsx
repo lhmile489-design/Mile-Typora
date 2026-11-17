@@ -100,6 +100,7 @@ type MenuState = {
   zoom: number;
   showStatusBar: boolean;
   smartPunctuation: boolean;
+  spellCheck: boolean;
   inTable: boolean;
   inLink: boolean;
   inImage: boolean;
@@ -342,6 +343,21 @@ function buildMenus(state: MenuState): MenuGroup[] {
               id: "toggle-smart-punct",
               label: "启用智能标点",
               checked: state.smartPunctuation,
+              disabled: !state.editing,
+              reason,
+            },
+          ],
+        },
+        {
+          id: "spell-check",
+          label: "拼写检查",
+          disabled: !state.editing,
+          reason,
+          children: [
+            {
+              id: "toggle-spell-check",
+              label: "启用拼写检查",
+              checked: state.spellCheck,
               disabled: !state.editing,
               reason,
             },
@@ -846,11 +862,12 @@ export function App({ transport }: { transport: Transport }) {
   const [findIndex, setFindIndex] = useState(0);
   const [findCount, setFindCount] = useState(0);
   const [recent, setRecent] = useState<RecentEntry[]>([]);
-  const [settings, setSettings] = useState<{ startup: string; appearance: string; showStatusBar: boolean; smartPunctuation: boolean }>({
+  const [settings, setSettings] = useState<{ startup: string; appearance: string; showStatusBar: boolean; smartPunctuation: boolean; spellCheck: boolean }>({
     startup: "blank",
     appearance: "system",
     showStatusBar: true,
     smartPunctuation: false,
+    spellCheck: false,
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
@@ -1022,6 +1039,7 @@ export function App({ transport }: { transport: Transport }) {
         ...current,
         showStatusBar: change.showStatusBar,
         smartPunctuation: change.smartPunctuation,
+        spellCheck: change.spellCheck,
       }));
     });
   }, [transport]);
@@ -1204,6 +1222,7 @@ export function App({ transport }: { transport: Transport }) {
       appearance: result.settings.appearance,
       showStatusBar: result.settings.showStatusBar !== false,
       smartPunctuation: result.settings.smartPunctuation === true,
+      spellCheck: result.settings.spellCheck === true,
     });
     applyTheme(result.settings.appearance);
     if (result.notice) setNotice(result.notice);
@@ -1558,6 +1577,7 @@ export function App({ transport }: { transport: Transport }) {
       appearance: settings.appearance,
       showStatusBar: settings.showStatusBar,
       smartPunctuation: settings.smartPunctuation,
+      spellCheck: settings.spellCheck,
       recent: [],
     });
     setSettingsSaving(false);
@@ -2628,13 +2648,14 @@ export function App({ transport }: { transport: Transport }) {
       appearance: settings.appearance,
       showStatusBar: next,
       smartPunctuation: settings.smartPunctuation,
+      spellCheck: settings.spellCheck,
       recent: [],
     });
     if (!result.ok) {
       setSettings((current) => ({ ...current, showStatusBar: !next }));
       setNotice(result.message);
     }
-  }, [settings.appearance, settings.showStatusBar, settings.smartPunctuation, settings.startup, transport]);
+  }, [settings.appearance, settings.showStatusBar, settings.smartPunctuation, settings.spellCheck, settings.startup, transport]);
 
   // M6-3 EDIT-18: one checkbox under 编辑 → 智能标点, shared across windows.
   const toggleSmartPunct = useCallback(async () => {
@@ -2645,13 +2666,32 @@ export function App({ transport }: { transport: Transport }) {
       appearance: settings.appearance,
       showStatusBar: settings.showStatusBar,
       smartPunctuation: next,
+      spellCheck: settings.spellCheck,
       recent: [],
     });
     if (!result.ok) {
       setSettings((current) => ({ ...current, smartPunctuation: !next }));
       setNotice(result.message);
     }
-  }, [settings.appearance, settings.showStatusBar, settings.smartPunctuation, settings.startup, transport]);
+  }, [settings.appearance, settings.showStatusBar, settings.smartPunctuation, settings.spellCheck, settings.startup, transport]);
+
+  // M6-4 EDIT-21: one checkbox under 编辑 → 拼写检查, shared across windows.
+  const toggleSpellCheck = useCallback(async () => {
+    const next = !settings.spellCheck;
+    setSettings((current) => ({ ...current, spellCheck: next }));
+    const result = await transport.saveSettings({
+      startup: settings.startup,
+      appearance: settings.appearance,
+      showStatusBar: settings.showStatusBar,
+      smartPunctuation: settings.smartPunctuation,
+      spellCheck: next,
+      recent: [],
+    });
+    if (!result.ok) {
+      setSettings((current) => ({ ...current, spellCheck: !next }));
+      setNotice(result.message);
+    }
+  }, [settings.appearance, settings.showStatusBar, settings.smartPunctuation, settings.spellCheck, settings.startup, transport]);
 
   // The 主题 menu shares the settings appearance preference: all windows
   // switch at once and the choice persists (P2 §11, P2-AC-27).
@@ -2666,6 +2706,7 @@ export function App({ transport }: { transport: Transport }) {
         appearance,
         showStatusBar: settings.showStatusBar,
         smartPunctuation: settings.smartPunctuation,
+        spellCheck: settings.spellCheck,
         recent: [],
       });
       if (!result.ok) {
@@ -2674,7 +2715,7 @@ export function App({ transport }: { transport: Transport }) {
         setNotice(result.message);
       }
     },
-    [applyTheme, settings.appearance, settings.showStatusBar, settings.smartPunctuation, settings.startup, transport],
+    [applyTheme, settings.appearance, settings.showStatusBar, settings.smartPunctuation, settings.spellCheck, settings.startup, transport],
   );
 
   const onMenuCommand = useCallback(
@@ -2736,6 +2777,7 @@ export function App({ transport }: { transport: Transport }) {
         case "word-count": void requestWordCount(); return;
         case "toggle-statusbar": void toggleStatusBar(); return;
         case "toggle-smart-punct": void toggleSmartPunct(); return;
+        case "toggle-spell-check": void toggleSpellCheck(); return;
         case "undo": run((c) => c.undo()); return;
         case "redo": run((c) => c.redo()); return;
         case "cut": run((c) => void c.cut()); return;
@@ -3272,6 +3314,7 @@ export function App({ transport }: { transport: Transport }) {
           zoom: viewState.zoom,
           showStatusBar: settings.showStatusBar,
           smartPunctuation: settings.smartPunctuation,
+          spellCheck: settings.spellCheck,
           inTable: editorInTable,
           inLink: editorInLink,
           inImage: editorInImage,
@@ -3475,6 +3518,7 @@ export function App({ transport }: { transport: Transport }) {
               typewriter={typewriter}
               lineEnding={doc.lineEnding}
               smartPunctuation={settings.smartPunctuation}
+              spellCheck={settings.spellCheck}
               onLineEndingChange={(next) => {
                 setDoc((prev) => (prev ? { ...prev, lineEnding: next } : prev));
               }}
@@ -3845,6 +3889,8 @@ export function App({ transport }: { transport: Transport }) {
           onChangeShowStatusBar={(showStatusBar) => setSettings({ ...settings, showStatusBar })}
           smartPunctuation={settings.smartPunctuation}
           onChangeSmartPunctuation={(smartPunctuation) => setSettings({ ...settings, smartPunctuation })}
+          spellCheck={settings.spellCheck}
+          onChangeSpellCheck={(spellCheck) => setSettings({ ...settings, spellCheck })}
           onCancel={() => setSettingsOpen(false)}
           onSave={() => void saveSettings()}
           saving={settingsSaving}

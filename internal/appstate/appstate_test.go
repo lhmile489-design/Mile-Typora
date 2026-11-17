@@ -86,6 +86,47 @@ func TestSmartPunctuationRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSpellCheckDefaultsOff(t *testing.T) {
+	// A settings file written before M6-4 has no spellCheck key; it must read as
+	// off rather than crash or default on (P3 §4).
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	body := []byte(`{"startup":"blank","appearance":"system","recent":[]}`)
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	got := store.Get()
+	if got.SpellCheck == nil || *got.SpellCheck {
+		t.Fatalf("spellCheck = %v, want a saved false", got.SpellCheck)
+	}
+}
+
+func TestSpellCheckRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	store, _ := Open(dir)
+	on := true
+	want := Settings{
+		Startup:    StartupResume,
+		Appearance: AppearanceDark,
+		SpellCheck: &on,
+	}
+	if err := store.Save(want); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	again, err := Open(dir)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	got := again.Get()
+	if got.SpellCheck == nil || !*got.SpellCheck {
+		t.Fatalf("reloaded spellCheck = %v, want true", got.SpellCheck)
+	}
+}
+
 func TestDamagedFileIsPreserved(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")

@@ -38,7 +38,7 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     openLink: async () => ({ kind: "none" as const }),
     getSettings: async () => ({
       kind: "ok" as const,
-      settings: { startup: "blank", appearance: "system", showStatusBar: true, smartPunctuation: false, recent: [] },
+      settings: { startup: "blank", appearance: "system", showStatusBar: true, smartPunctuation: false, spellCheck: false, recent: [] },
       corrupt: false,
     }),
     saveSettings: async () => ({ ok: true as const, value: undefined }),

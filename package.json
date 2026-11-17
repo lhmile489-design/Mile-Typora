@@ -24,7 +24,8 @@
     "mermaid": "12.3.0",
     "mygo-runtime": "0.9.0",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "typo-js": "2.0.0"
   },
   "devDependencies": {
     "@testing-library/react": "16.3.3",

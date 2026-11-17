@@ -120,3 +120,39 @@ export function protectedAt(text: string, position: number, includeMath = true):
   if (protectedLineSet(text).has(index)) return true;
   return inlineProtected(text, position, includeMath);
 }
+
+/**
+ * protectedMask paints the shared verdict across a whole range at once so a
+ * scanner does not pay one full-document pass per word. It returns a boolean
+ * array indexed by `offset - from` covering `[from, to)`; a true entry means
+ * that offset is protected (block line, inline code/HTML/link destination, or
+ * an inline math span when includeMath is set).
+ */
+export function protectedMask(text: string, from: number, to: number, includeMath = true): boolean[] {
+  const length = Math.max(0, to - from);
+  const mask = new Array<boolean>(length).fill(false);
+  if (length === 0) return mask;
+  const lines = splitLines(text);
+  const protectedLines = protectedLineSet(text);
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]!;
+    if (line.end < from || line.start >= to) continue;
+    const inline = protectedLines.has(index) ? null : inlineMask(line.text);
+    const start = Math.max(line.start, from);
+    const end = Math.min(line.end, to);
+    for (let i = start; i < end; i++) {
+      const offset = i - line.start;
+      if (inline === null || inline[offset] || (offset > 0 && inline[offset - 1])) {
+        mask[i - from] = true;
+      }
+    }
+  }
+  if (!includeMath) return mask;
+  for (const formula of mathRanges(text)) {
+    if (formula.kind !== "inline") continue;
+    const start = Math.max(formula.start + 1, from);
+    const end = Math.min(formula.end, to);
+    for (let i = start; i < end; i++) mask[i - from] = true;
+  }
+  return mask;
+}

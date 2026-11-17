@@ -392,6 +392,7 @@ export interface SearchMatch {
 export interface SettingsChange {
   showStatusBar: boolean;
   smartPunctuation: boolean;
+  spellCheck: boolean;
 }
 
 /**
@@ -410,6 +411,7 @@ export interface SettingsView {
   appearance: string;
   showStatusBar: boolean;
   smartPunctuation: boolean;
+  spellCheck: boolean;
   recent: RecentEntry[];
 }
 

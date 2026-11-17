@@ -1,6 +1,6 @@
 import { useEffect, useImperativeHandle, useRef } from "react";
 import type { EditorView } from "@codemirror/view";
-import type { Decoration as DecorationType } from "@codemirror/view";
+import type { Decoration as DecorationType, DecorationSet } from "@codemirror/view";
 import type { AnnotationType, Extension, StateEffect } from "@codemirror/state";
 import type { HeadingLevel, ParagraphEdit, Snapshot } from "../editor/paragraph";
 import {
@@ -35,6 +35,7 @@ type LineOpsModule = typeof import("../editor/lineops");
 type AssistModule = typeof import("../editor/editassist");
 type MathModule = typeof import("../editor/mathtools");
 type SmartPunctModule = typeof import("../editor/smartpunct");
+type SpellCheckModule = typeof import("../editor/spellcheck");
 
 /** Commands the app and, later, the Edit menu call on the editor. */
 export type SourceCommands = {
@@ -147,6 +148,8 @@ type Props = {
   onLineEndingChange?: (lineEnding: string) => void;
   /** Converts new typed input to CJK punctuation (M6-3 EDIT-18). */
   smartPunctuation?: boolean;
+  /** Underlines misspelled English words in the source editor (M6-4 EDIT-21). */
+  spellCheck?: boolean;
   ref?: React.Ref<SourceCommands>;
 };
 
@@ -168,7 +171,7 @@ export type EditorContext = {
  * when editing starts, so reading pays nothing for it. The buffer is the
  * editor's document; preview renders the same string through Go.
  */
-export function SourceEditor({ value, onChange, readClipboard, writeClipboard, onContext, focusMode = false, typewriter = false, lineEnding = "LF", onLineEndingChange, smartPunctuation = false, ref }: Props) {
+export function SourceEditor({ value, onChange, readClipboard, writeClipboard, onContext, focusMode = false, typewriter = false, lineEnding = "LF", onLineEndingChange, smartPunctuation = false, spellCheck = false, ref }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const contextRef = useRef(onContext);
@@ -204,6 +207,20 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
   lineEndingRef.current = lineEnding;
   const smartPunctuationRef = useRef(smartPunctuation);
   smartPunctuationRef.current = smartPunctuation;
+  const spellCheckRef = useRef(spellCheck);
+  spellCheckRef.current = spellCheck;
+  const spellChecker = useRef<{ check(word: string): boolean; suggest(word: string, limit?: number): string[] } | null>(null);
+  const spellCheckModule = useRef<SpellCheckModule | null>(null);
+  const spellScanTimer = useRef<number | null>(null);
+  const spellMenu = useRef<{ open: boolean; word: string; suggestions: string[] } | null>(null);
+  // Live handles assigned inside the mount effect so the enable/disable effects
+  // (declared before it) can still reach them (M6-4 EDIT-21).
+  const spellFieldRef = useRef<import("@codemirror/state").StateField<DecorationSet> | null>(null);
+  const scheduleScanRef = useRef<((view: EditorView, delay?: number) => void) | null>(null);
+  const closeSpellMenuRef = useRef<() => void>(() => {});
+  // Runtime bindings stored after the lazy imports resolve so the toggle-off
+  // effect can clear decorations without re-importing CodeMirror.
+  const clearSpellMarksRef = useRef<((view: EditorView) => void) | null>(null);
   const onLineEndingChangeRef = useRef(onLineEndingChange);
   onLineEndingChangeRef.current = onLineEndingChange;
   // A conversion changes no text, so CodeMirror's history cannot hold it.
@@ -664,6 +681,32 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
     if (typewriter) scrollTypewriterRef.current?.();
   }, [typewriter]);
 
+  // M6-4 EDIT-21: lazy-load the dictionary the first time the setting turns on;
+  // a failed load just leaves the checker off rather than blocking the editor.
+  useEffect(() => {
+    if (!spellCheck) return;
+    let alive = true;
+    void spellCheckModule.current?.loadDictionary().then((checker) => {
+      if (!alive || !checker) return;
+      spellChecker.current = checker;
+      const view = viewRef.current;
+      if (view) scheduleScanRef.current?.(view, 0);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [spellCheck]);
+
+  useEffect(() => {
+    if (spellCheck) return;
+    closeSpellMenuRef.current();
+    // Clearing the marks needs an explicit field re-init: the field's update
+    // only maps decorations on transactions, so toggling off would leave stale
+    // underlines until the next keystroke without it (M6-4 EDIT-21).
+    const view = viewRef.current;
+    if (view) clearSpellMarksRef.current?.(view);
+  }, [spellCheck]);
+
   useEffect(() => {
     let alive = true;
     void (async () => {
@@ -679,6 +722,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
         assistModule,
         mathModule,
         smartPunctModule,
+        spellCheckModuleResult,
       ] = await Promise.all([
         import("@codemirror/view"),
         import("@codemirror/state"),
@@ -691,6 +735,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
         import("../editor/editassist"),
         import("../editor/mathtools"),
         import("../editor/smartpunct"),
+        import("../editor/spellcheck"),
       ]);
       if (!alive || !host.current) return;
       historyActions.current = { undo, redo };
@@ -702,6 +747,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
       assist.current = assistModule;
       mathTools.current = mathModule;
       smartPunct.current = smartPunctModule;
+      spellCheckModule.current = spellCheckModuleResult;
       stateCtor.current = EditorState;
 
       const theme = EditorView.theme({
@@ -802,6 +848,109 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
       };
       scrollTypewriterRef.current = scrollTypewriter;
 
+      // M6-4 EDIT-21: spell-check helpers shared by the field, the plugin and
+      // the context-menu handler. Live handles are published through the
+      // component-level refs so the enable/disable effects can reach them.
+      const spellMenuEl = { current: null as HTMLDivElement | null };
+      const closeSpellMenu = () => {
+        spellMenuEl.current?.remove();
+        spellMenuEl.current = null;
+        spellMenu.current = null;
+      };
+      closeSpellMenuRef.current = closeSpellMenu;
+      const buildSpellDecorations = (view: EditorView): DecorationSet => {
+        const mod = spellCheckModule.current;
+        const checker = spellChecker.current;
+        if (!mod || !checker) return Decoration.none;
+        const errors: import("../editor/spellcheck").SpellError[] = [];
+        for (const range of view.visibleRanges) {
+          errors.push(...mod.scanRange(view.state.doc.toString(), range.from, range.to, checker));
+        }
+        const builder = new RangeSetBuilder<DecorationType>();
+        for (const error of errors) builder.add(error.from, error.to, Decoration.mark({ class: "cm-spell-error" }));
+        return builder.finish();
+      };
+      const scheduleScan = (view: EditorView, delay = 400) => {
+        if (!spellCheckRef.current || !spellChecker.current) return;
+        if (spellScanTimer.current !== null) window.clearTimeout(spellScanTimer.current);
+        spellScanTimer.current = window.setTimeout(() => {
+          spellScanTimer.current = null;
+          if (!spellCheckRef.current || !spellChecker.current || !spellFieldRef.current) return;
+          const decorations = buildSpellDecorations(view);
+          view.dispatch({ effects: StateEffect.appendConfig.of([spellFieldRef.current.init(() => decorations)]) });
+        }, delay);
+      };
+      scheduleScanRef.current = scheduleScan;
+      clearSpellMarksRef.current = (view: EditorView) => {
+        const field = spellFieldRef.current;
+        if (field) view.dispatch({ effects: StateEffect.appendConfig.of([field.init(() => Decoration.none)]) });
+      };
+      const openSpellMenu = (view: EditorView, error: import("../editor/spellcheck").SpellError) => {
+        closeSpellMenu();
+        const mod = spellCheckModule.current;
+        const checker = spellChecker.current;
+        if (!mod || !checker) return;
+        const suggestions = mod.suggestions(checker, error.word, 5);
+        spellMenu.current = { open: true, word: error.word, suggestions };
+        const el = document.createElement("div");
+        el.className = "cm-spell-menu";
+        el.setAttribute("role", "menu");
+        const rect = view.coordsAtPos(error.from);
+        if (rect) {
+          el.style.left = `${rect.left}px`;
+          el.style.top = `${rect.bottom + 4}px`;
+        } else {
+          const caret = view.coordsAtPos(view.state.selection.main.head);
+          el.style.left = caret ? `${caret.left}px` : "0";
+          el.style.top = caret ? `${caret.bottom + 4}px` : "0";
+        }
+        const dismiss = () => closeSpellMenu();
+        for (const suggestion of suggestions) {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "cm-spell-menu-item";
+          btn.setAttribute("role", "menuitem");
+          btn.textContent = suggestion;
+          btn.addEventListener("click", () => {
+            view.dispatch({
+              changes: { from: error.from, to: error.to, insert: suggestion },
+              selection: { anchor: error.from + suggestion.length },
+              scrollIntoView: true,
+            });
+            closeSpellMenu();
+            view.focus();
+          });
+          el.appendChild(btn);
+        }
+        const ignore = document.createElement("button");
+        ignore.type = "button";
+        ignore.className = "cm-spell-menu-item cm-spell-menu-ignore";
+        ignore.setAttribute("role", "menuitem");
+        ignore.textContent = "忽略本次";
+        ignore.addEventListener("click", () => {
+          mod.ignoreForSession(error.word);
+          closeSpellMenu();
+          scheduleScan(view, 0);
+        });
+        el.appendChild(ignore);
+        el.addEventListener("pointerdown", (event) => event.stopPropagation());
+        document.body.appendChild(el);
+        spellMenuEl.current = el;
+        const onDocClick = (event: PointerEvent) => {
+          if (spellMenuEl.current && !spellMenuEl.current.contains(event.target as Node)) dismiss();
+        };
+        document.addEventListener("pointerdown", onDocClick, true);
+        const onKey = (event: KeyboardEvent) => {
+          if (event.key === "Escape") dismiss();
+        };
+        document.addEventListener("keydown", onKey, true);
+        const removeListeners = () => {
+          document.removeEventListener("pointerdown", onDocClick, true);
+          document.removeEventListener("keydown", onKey, true);
+        };
+        el.addEventListener("remove", removeListeners, { once: true });
+      };
+
       const mathContextAt = (text: string, position: number) => {
         const mod = mathTools.current;
         if (!mod) return { inMath: false, blocked: false };
@@ -877,8 +1026,47 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
           });
           return true;
         }),
+        // M6-4 EDIT-21: self-drawn spell check. A ViewPlugin scans the visible
+        // viewport 400 ms after the last change, draws wavy underlines via
+        // Decoration.mark, and shows a right-click suggestion menu only when the
+        // caret lands on a misspelled word. The checker is lazy-loaded on first
+        // enable; the WebView2 native checker is disabled so the two never fight.
+        (() => {
+          const field = StateField.define<DecorationSet>({
+            create: () => Decoration.none,
+            update: (deco, transaction) => {
+              if (!spellCheckRef.current || !spellChecker.current) return Decoration.none;
+              return deco.map(transaction.changes);
+            },
+            provide: (f) => EditorView.decorations.from(f),
+          });
+          spellFieldRef.current = field;
+          const plugin = ViewPlugin.fromClass(
+            class {
+              constructor(view: EditorView) {
+                if (spellCheckRef.current) scheduleScan(view, 0);
+              }
+              update(update: import("@codemirror/view").ViewUpdate) {
+                if (!spellCheckRef.current) return;
+                if (update.docChanged || update.viewportChanged) scheduleScan(update.view);
+              }
+            },
+          );
+          const contextMenu = EditorView.domEventHandlers({
+            contextmenu(event, view) {
+              if (!spellCheckRef.current || !spellChecker.current || !spellCheckModule.current) return;
+              const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+              if (pos === null) return;
+              const error = spellCheckModule.current.wordAt(view.state.doc.toString(), pos);
+              if (!error || spellCheckModule.current.checkWord(spellChecker.current, error.word)) return;
+              event.preventDefault();
+              openSpellMenu(view, error);
+            },
+          });
+          return [field, plugin, contextMenu];
+        })(),
         theme,
-        EditorView.contentAttributes.of({ "aria-label": "Markdown 源码" }),
+        EditorView.contentAttributes.of({ "aria-label": "Markdown 源码", spellcheck: "false" }),
         EditorView.updateListener.of((update) => {
           if (!update.docChanged && !update.selectionSet) return;
           // Typing after a conversion makes that conversion no longer the
@@ -930,6 +1118,9 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
       view.dom.addEventListener("focus", onFocus, true);
       view.dom.addEventListener("blur", onBlur, true);
       viewCleanup.current = () => {
+        closeSpellMenu();
+        if (spellScanTimer.current !== null) window.clearTimeout(spellScanTimer.current);
+        spellScanTimer.current = null;
         view.dom.removeEventListener("focus", onFocus, true);
         view.dom.removeEventListener("blur", onBlur, true);
       };

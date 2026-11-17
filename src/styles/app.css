@@ -485,6 +485,26 @@ body {
 .source-editor { flex: 1; min-height: 0; overflow: hidden; background: var(--bg-app); }
 .source-editor .cm-editor { height: 100%; }
 
+/* 拼写检查（M6-4 EDIT-21）：波浪线与右键建议浮层 */
+.source-editor .cm-spell-error {
+  text-decoration: underline wavy var(--danger) 1px;
+  text-underline-offset: 3px;
+}
+.cm-spell-menu {
+  position: fixed; z-index: var(--z-toast);
+  display: flex; flex-direction: column; min-width: 160px;
+  padding: var(--sp-1) 0;
+  background: var(--bg-raised); border: 1px solid var(--line-strong);
+  border-radius: var(--r-md); box-shadow: var(--shadow-1);
+}
+.cm-spell-menu-item {
+  display: block; width: 100%; padding: var(--sp-1) var(--sp-3);
+  border: 0; background: transparent; color: var(--text);
+  font: inherit; font-size: var(--ui-sm); text-align: left;
+}
+.cm-spell-menu-item:hover { background: var(--bg-hover); }
+.cm-spell-menu-ignore { color: var(--text-muted); border-top: 1px solid var(--line); margin-top: var(--sp-1); padding-top: var(--sp-1); }
+
 .dialog-text { margin: 0 0 var(--sp-3); color: var(--text-soft); }
 
 .dialog-field { display: flex; flex-direction: column; gap: var(--sp-2); font-size: var(--ui-sm); color: var(--text-soft); }

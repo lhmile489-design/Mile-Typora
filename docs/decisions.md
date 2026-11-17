@@ -524,3 +524,13 @@ M1 需验证：mermaid 12 的 `securityLevel: "strict"` 与 `%%{init}%%` 指令�
 - 规则实现：`"` 仅在前或后是 CJK 时转换，开括号/空白/行首出 `“`，其余 `”`；`'` 只在两个 CJK 之间转换（`don't` 保持半角）；`...` → `…`；`--` → `–`、`--`+`-`（含已有 `–`+`-`）→ `—`，全行只有横线与空格的行（分割线/front matter 线）不转换。
 - 设置链：`appstate.Settings.SmartPunctuation *bool`（老文件无字段默认 false）→ `SettingsView`/`SettingsChange` 加字段 → `SaveSettings` 持久化并在变化时广播；编辑菜单新增「智能标点」子菜单（一项 checkbox 与设置同步），设置对话框「编辑」组加复选框。
 - 测试：smartpunct 纯变换（CJK 上下文、开闭引号、`don't`、省略号、`--`/`---`、保护区域、IME/多字符放行）、protection 共享判定一致性、appstate 默认值与往返、service `settingsChanged` 广播、App 菜单勾选态与持久化；原生验收见 `docs/develop/M6-3-验收记录.md`。
+
+### D-T60 · M6-4 拼写检查：typo-js 词典 + 自绘波浪线 + 区域扫描去抖
+
+- 词库：`typo-js@2.0.0`（Hunspell 风格）+ 包内自带 `en_US.aff/.dic`，经 Vite `?url` 静态资源引入、`fetch` 取内容交给 `new Typo("en_US", aff, dic)`；不联网、不调系统检查器、不支持其他语言（CJK 永不标记）。`.dic`（约 540 KB） emit 为独立 asset，`.aff`（约 3 KB）被 Vite 内联成 data URI，`fetch` 两者都成立。
+- 懒加载：`src/editor/spellcheck.ts` 的 `loadDictionary()` 只在设置首次打开时跑一次（模块级 promise 缓存），失败返回 `null` 不抛错——词典缺失时检查器安静地保持关闭而不是拖垮编辑器。源码区 `contentAttributes` 固定 `spellcheck="false"` 关掉 WebView2 原生检查器，避免双下划线。
+- 自绘：StateField 持有 `Decoration.mark`（`cm-spell-error`，CSS 波浪线 `underline wavy var(--danger)`）；ViewPlugin 在 `docChanged`/`viewportChanged` 后 400 ms 去抖扫可见视口，单次最多 5000 个英文词，滚动与换文档触发重扫。关闭设置时显式 `field.init(() => Decoration.none)` 清标记，不靠下一次输入。
+- 范围：只扫正文/标题/列表文本；跳过围栏与缩进代码、行内代码、行内/块级公式、front matter、链接图片地址、HTML 标签/注释、Markdown 标记——复用 `protectedAt` 共享判定（P3-AC-14），并新增 `protectedMask` 批量版本：范围扫描一次预计算，替代逐词全文扫描（6000 词从超时降到亚秒）。
+- 右键菜单：自绘页面级浮层，仅在右键落在被标单词上时出现；至多 5 条建议 + 「忽略本次」（会话级 Set，不持久化）。点建议是一次可撤销编辑；点空白、Esc 或换词关闭。
+- 设置链：`appstate.Settings.SpellCheck *bool`（老文件无字段默认 false）→ `SettingsView`/`SettingsChange` 加字段 → `SaveSettings` 持久化并在变化时广播；编辑菜单新增「拼写检查」子菜单（一项 checkbox 与设置同步），设置对话框「编辑」组加复选框。
+- 测试：spellcheck 纯函数（错词标记、CJK 跳过、保护区域、5000 词上限、`wordAt` 边界与保护区、忽略清单、建议、hasWordChars）、appstate 默认值与往返、service `settingsChanged` 广播、App 菜单勾选态与持久化；原生验收见 `docs/develop/M6-4-验收记录.md`。

@@ -818,6 +818,47 @@ func TestSmartPunctuationRoundTripAndChange(t *testing.T) {
 	}
 }
 
+func TestSpellCheckRoundTripAndChange(t *testing.T) {
+	s, _ := newTestService(1, true)
+	withState(t, s)
+	var broadcast contract.SettingsChange
+	calls := 0
+	s.settingsChanged = func(change contract.SettingsChange) {
+		calls++
+		broadcast = change
+	}
+
+	// A save that only flips spellCheck still reports every field so a
+	// late-joining window learns the whole preference set (P3-AC-09).
+	out, err := s.SaveSettings(context.Background(), contract.SettingsView{
+		Startup:    appstate.StartupBlank,
+		Appearance: appstate.AppearanceSystem,
+		SpellCheck: true,
+	})
+	if err != nil || out.Failure != nil {
+		t.Fatalf("SaveSettings = %+v, %v", out, err)
+	}
+	if calls != 1 || !broadcast.SpellCheck {
+		t.Fatalf("settingsChanged = %+v x%d, want spellCheck on", broadcast, calls)
+	}
+	got, _ := s.GetSettings(context.Background())
+	if !got.Settings.SpellCheck {
+		t.Fatalf("settings = %+v, want spellCheck saved", got.Settings)
+	}
+
+	// Saving the same value again must not re-broadcast.
+	if _, err := s.SaveSettings(context.Background(), contract.SettingsView{
+		Startup:    appstate.StartupBlank,
+		Appearance: appstate.AppearanceSystem,
+		SpellCheck: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("settingsChanged fired %d times, want 1", calls)
+	}
+}
+
 func TestSettingsSaveFailureKeepsTheOldValue(t *testing.T) {
 	s, _ := newTestService(1, true)
 	store := withState(t, s)

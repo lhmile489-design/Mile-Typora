@@ -37,12 +37,17 @@ func (s *WindowService) GetSettings(ctx context.Context) (contract.SettingsResul
 	if stored.SmartPunctuation != nil {
 		smartPunctuation = *stored.SmartPunctuation
 	}
+	spellCheck := false
+	if stored.SpellCheck != nil {
+		spellCheck = *stored.SpellCheck
+	}
 	result := contract.SettingsResult{
 		Settings: contract.SettingsView{
 			Startup:          stored.Startup,
 			Appearance:       stored.Appearance,
 			ShowStatusBar:    showStatusBar,
 			SmartPunctuation: smartPunctuation,
+			SpellCheck:       spellCheck,
 			Recent:           recentView(stored.Recent),
 		},
 		Corrupt: corrupt,
@@ -77,12 +82,14 @@ func (s *WindowService) SaveSettings(ctx context.Context, view contract.Settings
 	}
 	show := view.ShowStatusBar
 	punct := view.SmartPunctuation
+	spell := view.SpellCheck
 	current := s.state.Get()
 	next := appstate.Settings{
 		Startup:          view.Startup,
 		Appearance:       view.Appearance,
 		ShowStatusBar:    &show,
 		SmartPunctuation: &punct,
+		SpellCheck:       &spell,
 		Recent:           current.Recent, // the page never replaces the list
 		Resume:           current.Resume, // nor the resume target
 	}
@@ -99,10 +106,12 @@ func (s *WindowService) SaveSettings(ctx context.Context, view contract.Settings
 	}
 	statusBarChanged := current.ShowStatusBar == nil || view.ShowStatusBar != *current.ShowStatusBar
 	punctuationChanged := current.SmartPunctuation == nil || view.SmartPunctuation != *current.SmartPunctuation
-	if s.settingsChanged != nil && (statusBarChanged || punctuationChanged) {
+	spellChanged := current.SpellCheck == nil || view.SpellCheck != *current.SpellCheck
+	if s.settingsChanged != nil && (statusBarChanged || punctuationChanged || spellChanged) {
 		s.settingsChanged(contract.SettingsChange{
 			ShowStatusBar:    view.ShowStatusBar,
 			SmartPunctuation: view.SmartPunctuation,
+			SpellCheck:       view.SpellCheck,
 		})
 	}
 	return contract.SaveOutcome{}, nil

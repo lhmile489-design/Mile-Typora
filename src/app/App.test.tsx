@@ -19,7 +19,7 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     openLink: async () => ({ kind: "none" }),
     getSettings: async () => ({
       kind: "ok" as const,
-      settings: { startup: "blank", appearance: "system", showStatusBar: true, smartPunctuation: false, recent: [] },
+      settings: { startup: "blank", appearance: "system", showStatusBar: true, smartPunctuation: false, spellCheck: false, recent: [] },
       corrupt: false,
     }),
     saveSettings: async () => ({ ok: true as const, value: undefined }),
@@ -853,7 +853,7 @@ describe("file operations", () => {
           ready: async () => ({ ok: false as const, message: "绑定不可用" }),
           getSettings: async () => ({
             kind: "ok" as const,
-            settings: { startup: "blank", appearance: "system", showStatusBar: false, smartPunctuation: false, recent: [] },
+            settings: { startup: "blank", appearance: "system", showStatusBar: false, smartPunctuation: false, spellCheck: false, recent: [] },
             corrupt: false,
           }),
         })}
@@ -909,6 +909,7 @@ describe("file operations", () => {
               appearance: "system",
               showStatusBar: true,
               smartPunctuation: true,
+              spellCheck: false,
               recent: [],
             },
             corrupt: false,
@@ -924,6 +925,57 @@ describe("file operations", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "智能标点" }));
     const toggle = await screen.findByRole("menuitemcheckbox", { name: "启用智能标点" });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+  });
+
+  // M6-4 EDIT-21: the 编辑 → 拼写检查 submenu mirrors the shared setting and
+  // persists the toggle (P3-AC-09).
+  it("persists the spell check toggle from the edit menu", async () => {
+    const saveSettings = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    render(<App transport={fakeTransport({ openFile: async () => loadedDoc, saveSettings })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "拼写检查" }));
+    const toggle = await screen.findByRole("menuitemcheckbox", { name: "启用拼写检查" });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({ spellCheck: true })),
+    );
+  });
+
+  it("shows the spell check checkbox checked when the setting is on", async () => {
+    render(
+      <App
+        transport={fakeTransport({
+          openFile: async () => loadedDoc,
+          getSettings: async () => ({
+            kind: "ok" as const,
+            settings: {
+              startup: "blank",
+              appearance: "system",
+              showStatusBar: true,
+              smartPunctuation: false,
+              spellCheck: true,
+              recent: [],
+            },
+            corrupt: false,
+          }),
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "拼写检查" }));
+    const toggle = await screen.findByRole("menuitemcheckbox", { name: "启用拼写检查" });
     expect(toggle.getAttribute("aria-checked")).toBe("true");
   });
 
@@ -1374,6 +1426,7 @@ describe("the recent list", () => {
       appearance: "system",
       showStatusBar: true,
       smartPunctuation: false,
+      spellCheck: false,
       recent: [
         { path: "E:/notes\a.md", name: "a.md", isDir: false },
         { path: "E:/notes", name: "notes", isDir: true },
@@ -1401,7 +1454,7 @@ describe("the recent list", () => {
   it("says when the settings could not be read", async () => {
     const broken = {
       kind: "ok" as const,
-      settings: { startup: "blank", appearance: "system", showStatusBar: true, smartPunctuation: false, recent: [] },
+      settings: { startup: "blank", appearance: "system", showStatusBar: true, smartPunctuation: false, spellCheck: false, recent: [] },
       corrupt: true,
       notice: "设置文件损坏，已按默认设置启动，原文件已保留",
     };
@@ -1458,7 +1511,7 @@ describe("the appearance preference", () => {
   it("applies the saved preference once the settings load", async () => {
     const settings = {
       kind: "ok" as const,
-      settings: { startup: "blank", appearance: "dark", showStatusBar: true, smartPunctuation: false, recent: [] },
+      settings: { startup: "blank", appearance: "dark", showStatusBar: true, smartPunctuation: false, spellCheck: false, recent: [] },
       corrupt: false,
     };
     render(<App transport={fakeTransport({ getSettings: async () => settings })} />);

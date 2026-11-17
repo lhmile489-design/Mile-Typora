@@ -327,6 +327,7 @@ type SettingsView struct {
 	Appearance       string        `json:"appearance"`
 	ShowStatusBar    bool          `json:"showStatusBar"`
 	SmartPunctuation bool          `json:"smartPunctuation"`
+	SpellCheck       bool          `json:"spellCheck"`
 	Recent           []RecentEntry `json:"recent"`
 }
 
@@ -357,6 +358,7 @@ type WindowCount struct {
 type SettingsChange struct {
 	ShowStatusBar    bool `json:"showStatusBar"`
 	SmartPunctuation bool `json:"smartPunctuation"`
+	SpellCheck       bool `json:"spellCheck"`
 }
 
 // SettingsResult answers the settings read. Corrupt is true when the file
