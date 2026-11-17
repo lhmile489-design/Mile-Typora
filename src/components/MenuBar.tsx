@@ -6,6 +6,7 @@ export type MenuChild = {
   label: string;
   disabled?: boolean;
   reason?: string;
+  checked?: boolean;
 };
 
 export type MenuItem =
@@ -221,7 +222,8 @@ export function MenuBar({ menus, onCommand }: Props) {
                             <button
                               className="menu-item"
                               type="button"
-                              role="menuitem"
+                              role={child.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+                              aria-checked={child.checked}
                               key={child.id}
                               aria-disabled={childDisabled || undefined}
                               title={childDisabled ? child.reason : undefined}
@@ -236,7 +238,11 @@ export function MenuBar({ menus, onCommand }: Props) {
                         e.currentTarget.focus();
                       }}
                             >
-                              <span className="menu-check" aria-hidden="true" />
+                              {child.checked ? (
+                                <Check className="menu-check" aria-hidden="true" />
+                              ) : (
+                                <span className="menu-check" aria-hidden="true" />
+                              )}
                               <span className="label">{child.label}</span>
                             </button>
                           );

@@ -93,7 +93,7 @@ func Read(path string) (*Doc, *Failure) {
 	}
 
 	sum := sha256.Sum256(data)
-	doc := &Doc{Size: int64(len(data)), LineEnding: "LF", Hash: hex.EncodeToString(sum[:])}
+	doc := &Doc{Size: int64(len(data)), LineEnding: DetectLineEnding(data), Hash: hex.EncodeToString(sum[:])}
 	if bytes.HasPrefix(data, []byte{0xEF, 0xBB, 0xBF}) {
 		doc.HasBOM = true
 		data = data[3:]
@@ -102,9 +102,32 @@ func Read(path string) (*Doc, *Failure) {
 		return nil, &Failure{Code: "encoding", Detail: "暂不支持此文件编码，请转换为 UTF-8"}
 	}
 	if bytes.Contains(data, []byte("\r\n")) {
-		doc.LineEnding = "CRLF"
 		data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
 	}
 	doc.Text = string(data)
 	return doc, nil
+}
+
+// DetectLineEnding tells LF, CRLF and mixed files apart. The editor normalizes
+// its buffer to LF; the open path and the properties dialog both use this.
+func DetectLineEnding(data []byte) string {
+	crlf, lf := 0, 0
+	for i := 0; i < len(data); i++ {
+		if data[i] != '\n' {
+			continue
+		}
+		if i > 0 && data[i-1] == '\r' {
+			crlf++
+		} else {
+			lf++
+		}
+	}
+	switch {
+	case crlf > 0 && lf > 0:
+		return "混合"
+	case crlf > 0:
+		return "CRLF"
+	default:
+		return "LF"
+	}
 }

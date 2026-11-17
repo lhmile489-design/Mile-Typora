@@ -2,6 +2,7 @@ package markdown
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -171,6 +172,24 @@ func TestMaliciousSamples(t *testing.T) {
 	if seen < 4 {
 		t.Fatalf("only %d samples were checked", seen)
 	}
+}
+
+func TestLargeTableRendersCompletely(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("| 序号 | 名称 | 说明 | 值 |\n| --- | --- | --- | --- |\n")
+	for i := 0; i < 2000; i++ {
+		fmt.Fprintf(&b, "| %d | 条目 %d | 说明 %d | %d |\n", i, i, i, i*2)
+	}
+	start := time.Now()
+	out := render(t, b.String())
+	took := time.Since(start)
+	if strings.Count(out, "<tr>") != 2001 {
+		t.Fatalf("rendered %d rows, want 2001", strings.Count(out, "<tr>"))
+	}
+	if !strings.Contains(out, "<table>") {
+		t.Fatal("the table wrapper is missing")
+	}
+	t.Logf("2000-row table rendered in %v", took)
 }
 
 func TestRenderStopsWhenTheContextEnds(t *testing.T) {

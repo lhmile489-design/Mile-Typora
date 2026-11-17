@@ -2,10 +2,12 @@ package search
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeFile(t *testing.T, dir, name, content string) {
@@ -73,6 +75,27 @@ func TestSearchHonoursCancellation(t *testing.T) {
 	cancel()
 	if _, err := Search(ctx, dir, "needle", Options{}); err == nil {
 		t.Fatal("a cancelled search returned no error")
+	}
+}
+
+func TestSearchCancelTakesEffectWithinOneSecond(t *testing.T) {
+	dir := t.TempDir()
+	for i := 0; i < 400; i++ {
+		writeFile(t, dir, filepath.Join("d", fmt.Sprintf("f%03d.md", i)), "needle\n")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	start := time.Now()
+	_, err := Run(ctx, dir, "needle", Options{}, func([]Match) error {
+		cancel()
+		return nil
+	})
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("a cancelled search returned no error")
+	}
+	if elapsed >= time.Second {
+		t.Fatalf("cancellation took %v", elapsed)
 	}
 }
 

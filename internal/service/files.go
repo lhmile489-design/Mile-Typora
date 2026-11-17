@@ -162,37 +162,12 @@ func (s *WindowService) DocumentProperties(ctx context.Context, rel string) (con
 		}
 		properties.LineEnding = doc.LineEnding
 		if raw, err := os.ReadFile(target); err == nil {
-			properties.LineEnding = detectedLineEnding(raw)
+			properties.LineEnding = docread.DetectLineEnding(raw)
 		}
 	} else {
 		properties.LineEnding = "未知"
 	}
 	return properties, nil
-}
-
-// detectedLineEnding tells LF, CRLF and mixed files apart for the properties
-// dialog. The editor itself normalizes to LF; only this read view needs the
-// distinction.
-func detectedLineEnding(data []byte) string {
-	crlf, lf := 0, 0
-	for i := 0; i < len(data); i++ {
-		if data[i] != '\n' {
-			continue
-		}
-		if i > 0 && data[i-1] == '\r' {
-			crlf++
-		} else {
-			lf++
-		}
-	}
-	switch {
-	case crlf > 0 && lf > 0:
-		return "混合"
-	case crlf > 0:
-		return "CRLF"
-	default:
-		return "LF"
-	}
 }
 
 // RevealDocument selects the current document in Windows Explorer (M5-1

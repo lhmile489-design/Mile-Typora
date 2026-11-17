@@ -1437,3 +1437,99 @@ describe("the appearance preference", () => {
     expect(document.documentElement.dataset.theme).toBe("dark");
   });
 });
+
+describe("M5-8 editing aids and the theme menu", () => {
+  it("switches and persists the appearance from the 主题 menu", async () => {
+    const saveSettings = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    render(<App transport={fakeTransport({ saveSettings })} />);
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe("light"));
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "主题" }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "深色" }));
+
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({ appearance: "dark" }));
+  });
+
+  it("converts line endings, undoes the conversion, and saves the chosen ending", async () => {
+    const saveDocument = vi.fn(async () => ({
+      kind: "saved" as const,
+      path: "E:/notes/笔记.md",
+      name: "笔记.md",
+      size: 2048,
+      hash: "hash-2",
+      hasBom: false,
+      lineEnding: "CRLF",
+    }));
+    render(<App transport={fakeTransport({ openFile: async () => loadedDoc, saveDocument })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    content.focus();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /换行符：/ }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "转换为 CRLF" }));
+    await waitFor(() => expect(document.title).toBe("笔记.md •"));
+
+    content.focus();
+    fireEvent.keyDown(content, { key: "z", ctrlKey: true });
+    await waitFor(() => expect(document.title).toBe("笔记.md"));
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /换行符：LF/ }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "转换为 CRLF" }));
+    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+    await waitFor(() => expect(saveDocument).toHaveBeenCalled());
+    await waitFor(() => expect(document.title).toBe("笔记.md"));
+    expect(screen.getByText("CRLF")).toBeTruthy();
+  });
+
+  it("deletes the current line only while the editor has focus", async () => {
+    render(<App transport={fakeTransport({ openFile: async () => loadedDoc })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    content.focus();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "删除范围" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "删除当前行" }));
+    await waitFor(() => expect(content.textContent).toBe("正文"));
+    expect(content.querySelectorAll(".cm-line").length).toBe(2);
+
+    fireEvent.blur(content);
+    fireEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
+    const range = screen.getByRole("menuitem", { name: "删除范围" });
+    expect(range.getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("trims trailing spaces, ensures a final newline, and shows the Win+. hint", async () => {
+    const spacedDoc = {
+      kind: "loaded" as const,
+      doc: { ...loadedDoc.doc, text: "正文 ", html: "<p>正文</p>" },
+    };
+    render(<App transport={fakeTransport({ openFile: async () => spacedDoc })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByText("正文", { selector: "p" });
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    content.focus();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "空格与换行" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "确保文件末尾换行" }));
+    await waitFor(() => expect(content.querySelectorAll(".cm-line").length).toBe(2));
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "空格与换行" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "清理行尾空格" }));
+    await waitFor(() => expect(content.textContent).toBe("正文"));
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "表情与符号" }));
+    expect(await screen.findByText(/Windows 表情面板/)).toBeTruthy();
+  });
+});

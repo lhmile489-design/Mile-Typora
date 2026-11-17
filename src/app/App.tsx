@@ -102,6 +102,9 @@ type MenuState = {
   inLink: boolean;
   inImage: boolean;
   editorSelection: boolean;
+  editorFocused: boolean;
+  lineEnding: string;
+  appearance: string;
   readerSelection: boolean;
   readerImage: boolean;
   saveAllRunning: boolean;
@@ -253,6 +256,71 @@ function buildMenus(state: MenuState): MenuGroup[] {
         editing("move-line-up", "上移该行", "Alt+↑"),
         editing("move-line-down", "下移该行", "Alt+↓"),
         editing("delete", "删除"),
+        sep,
+        {
+          id: "delete-range",
+          label: "删除范围",
+          disabled: !state.editing || !state.editorFocused,
+          reason: !state.editing ? reason : "先把光标放进源码编辑区",
+          children: [
+            {
+              id: "delete-word",
+              label: "删除词",
+              disabled: !state.editing || !state.editorFocused,
+              reason: !state.editing ? reason : "先把光标放进源码编辑区",
+            },
+            {
+              id: "delete-line",
+              label: "删除当前行",
+              disabled: !state.editing || !state.editorFocused,
+              reason: !state.editing ? reason : "先把光标放进源码编辑区",
+            },
+            {
+              id: "delete-paragraph",
+              label: "删除当前段落",
+              disabled: !state.editing || !state.editorFocused,
+              reason: !state.editing ? reason : "先把光标放进源码编辑区",
+            },
+          ],
+        },
+        {
+          id: "line-endings",
+          label: `换行符：${state.lineEnding || "LF"}`,
+          disabled: !state.editing,
+          reason,
+          children: [
+            {
+              id: "line-ending-lf",
+              label: "转换为 LF",
+              checked: state.lineEnding === "LF",
+              disabled: !state.editing || state.lineEnding === "LF",
+              reason: !state.editing ? reason : "当前已是 LF",
+            },
+            {
+              id: "line-ending-crlf",
+              label: "转换为 CRLF",
+              checked: state.lineEnding === "CRLF",
+              disabled: !state.editing || state.lineEnding === "CRLF",
+              reason: !state.editing ? reason : "当前已是 CRLF",
+            },
+          ],
+        },
+        {
+          id: "space-cleanup",
+          label: "空格与换行",
+          disabled: !state.editing,
+          reason,
+          children: [
+            { id: "trim-trailing", label: "清理行尾空格", disabled: !state.editing, reason },
+            { id: "final-newline", label: "确保文件末尾换行", disabled: !state.editing, reason },
+          ],
+        },
+        {
+          id: "emoji-panel",
+          label: "表情与符号",
+          disabled: !state.editing,
+          reason,
+        },
         sep,
         item("find", "查找和替换…", "Ctrl+F"),
       ],
@@ -454,6 +522,27 @@ function buildMenus(state: MenuState): MenuGroup[] {
       ],
     },
     {
+      id: "theme",
+      label: "主题",
+      items: [
+        {
+          id: "theme-light",
+          label: "浅色",
+          checked: state.appearance === "light",
+        },
+        {
+          id: "theme-dark",
+          label: "深色",
+          checked: state.appearance === "dark",
+        },
+        {
+          id: "theme-system",
+          label: "跟随系统",
+          checked: state.appearance === "system",
+        },
+      ],
+    },
+    {
       id: "help",
       label: "帮助",
       items: [item("help-shortcuts", "快捷键说明"), item("help-about", "关于 Mile Typora")],
@@ -487,6 +576,13 @@ const EDITOR_ACTIONS: Partial<Record<Command, (editor: SourceCommands) => boolea
   underline: (editor) => editor.toggleUnderline(),
   "move-line-up": (editor) => editor.moveLine("up"),
   "move-line-down": (editor) => editor.moveLine("down"),
+  "delete-word": (editor) => editor.deleteWord(),
+  "delete-line": (editor) => editor.deleteLine(),
+  "delete-paragraph": (editor) => editor.deleteParagraph(),
+  "trim-trailing": (editor) => editor.trimTrailingWhitespace(),
+  "final-newline": (editor) => editor.ensureFinalNewline(),
+  "line-ending-lf": (editor) => editor.convertLineEnding("LF"),
+  "line-ending-crlf": (editor) => editor.convertLineEnding("CRLF"),
 };
 
 export function App({ transport }: { transport: Transport }) {
@@ -509,6 +605,7 @@ export function App({ transport }: { transport: Transport }) {
   const [editorInLink, setEditorInLink] = useState(false);
   const [editorInImage, setEditorInImage] = useState(false);
   const [editorHasSelection, setEditorHasSelection] = useState(false);
+  const [editorFocused, setEditorFocused] = useState(false);
   const [readerSelectionActive, setReaderSelectionActive] = useState(false);
   const [readerImageActive, setReaderImageActive] = useState(false);
   const [linkDialog, setLinkDialog] = useState<{ address: string; reference: boolean } | null>(null);
@@ -522,6 +619,9 @@ export function App({ transport }: { transport: Transport }) {
   const [preview, setPreview] = useState<{ html: string; counts: OpenedDoc["counts"] } | null>(null);
   // M4-2: the buffer is dirty when it differs from the last saved/loaded text.
   const [savedText, setSavedText] = useState("");
+  // The line ending the file had at its last load or save; a conversion makes
+  // the buffer dirty without touching its text (M5-8 EDIT-19).
+  const [savedLineEnding, setSavedLineEnding] = useState("LF");
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportNotice, setExportNotice] = useState<{
@@ -563,7 +663,9 @@ export function App({ transport }: { transport: Transport }) {
   reloadOpenRef.current = reloadOpen;
   // Guards a preview render that can finish after another external reload.
   const previewToken = useRef(0);
-  const dirty = mode !== "reading" && (buffer !== savedText || externalLost);
+  const dirty =
+    mode !== "reading" &&
+    (buffer !== savedText || (doc?.lineEnding ?? "LF") !== savedLineEnding || externalLost);
   const [refreshing, setRefreshing] = useState(false);
   // updatedAt is the status bar's "已更新 14:32" (DESIGN.md §8.8).
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
@@ -639,6 +741,8 @@ export function App({ transport }: { transport: Transport }) {
   const modeRef = useRef<ViewMode>("reading");
   const bufferRef = useRef("");
   const dirtyRef = useRef(false);
+  const savedLineEndingRef = useRef("LF");
+  savedLineEndingRef.current = savedLineEnding;
   const refreshingRef = useRef(false);
   // The newest document update applied; an older one arrives too late.
   const updateSeq = useRef(0);
@@ -764,7 +868,10 @@ export function App({ transport }: { transport: Transport }) {
   }, []);
 
   useEffect(() => {
-    return transport.onThemeChange((change) => applyTheme(change.appearance));
+    return transport.onThemeChange((change) => {
+      setSettings((current) => ({ ...current, appearance: change.appearance }));
+      applyTheme(change.appearance);
+    });
   }, [applyTheme, transport]);
 
   useEffect(() => {
@@ -849,6 +956,7 @@ export function App({ transport }: { transport: Transport }) {
     setExternalLost(false);
     setBuffer("");
     setSavedText("");
+    setSavedLineEnding("LF");
     setMode("editing");
     setPreview(null);
     setLoadError(null);
@@ -869,6 +977,7 @@ export function App({ transport }: { transport: Transport }) {
       setDoc(next);
       setBuffer(next.text);
       setSavedText(next.text);
+      setSavedLineEnding(next.lineEnding);
       dirtyRef.current = false;
       setStale(null);
       setLoadError(null);
@@ -984,6 +1093,7 @@ export function App({ transport }: { transport: Transport }) {
           setMode(targetMode);
           setBuffer(result.doc.text);
           setSavedText(result.doc.text);
+          setSavedLineEnding(result.doc.lineEnding);
           setPreview(null);
           if (targetMode === "preview") {
             void transport.renderSource(result.doc.text).then((preview) => {
@@ -1172,6 +1282,7 @@ export function App({ transport }: { transport: Transport }) {
       setMode("reading");
       setBuffer(result.doc.text);
       setSavedText(result.doc.text);
+      setSavedLineEnding(result.doc.lineEnding);
       setPreview(null);
       setLoadError(null);
       setStale(null);
@@ -1727,6 +1838,7 @@ export function App({ transport }: { transport: Transport }) {
         : prev,
     );
     setSavedText(text);
+    setSavedLineEnding(result.lineEnding);
     dirtyRef.current = bufferRef.current !== text;
     setExternalChange(null);
     setReloadOpen(false);
@@ -1943,6 +2055,8 @@ export function App({ transport }: { transport: Transport }) {
     if (current) {
       setBuffer(current.text);
       setSavedText(current.text);
+      // A pending line-ending conversion is discarded with the text.
+      setDoc((prev) => (prev ? { ...prev, lineEnding: savedLineEndingRef.current } : prev));
     }
     setExternalLost(false);
     dirtyRef.current = false;
@@ -2341,6 +2455,29 @@ export function App({ transport }: { transport: Transport }) {
     }
   }, [settings.appearance, settings.showStatusBar, settings.startup, transport]);
 
+  // The 主题 menu shares the settings appearance preference: all windows
+  // switch at once and the choice persists (P2 §11, P2-AC-27).
+  const changeAppearance = useCallback(
+    async (appearance: string) => {
+      if (appearance === settings.appearance) return;
+      const previous = settings.appearance;
+      setSettings((current) => ({ ...current, appearance }));
+      applyTheme(appearance);
+      const result = await transport.saveSettings({
+        startup: settings.startup,
+        appearance,
+        showStatusBar: settings.showStatusBar,
+        recent: [],
+      });
+      if (!result.ok) {
+        setSettings((current) => ({ ...current, appearance: previous }));
+        applyTheme(previous);
+        setNotice(result.message);
+      }
+    },
+    [applyTheme, settings.appearance, settings.showStatusBar, settings.startup, transport],
+  );
+
   const onMenuCommand = useCallback(
     (id: string) => {
       const editor = editorRef.current;
@@ -2427,6 +2564,19 @@ export function App({ transport }: { transport: Transport }) {
         case "move-line-up": run((c) => c.moveLine("up")); return;
         case "move-line-down": run((c) => c.moveLine("down")); return;
         case "delete": run((c) => c.deleteForward()); return;
+        case "delete-word": run((c) => c.deleteWord()); return;
+        case "delete-line": run((c) => c.deleteLine()); return;
+        case "delete-paragraph": run((c) => c.deleteParagraph()); return;
+        case "trim-trailing": run((c) => c.trimTrailingWhitespace()); return;
+        case "final-newline": run((c) => c.ensureFinalNewline()); return;
+        case "line-ending-lf": run((c) => c.convertLineEnding("LF")); return;
+        case "line-ending-crlf": run((c) => c.convertLineEnding("CRLF")); return;
+        case "emoji-panel":
+          setNotice("按 Win+. 打开 Windows 表情面板");
+          return;
+        case "theme-light": void changeAppearance("light"); return;
+        case "theme-dark": void changeAppearance("dark"); return;
+        case "theme-system": void changeAppearance("system"); return;
         case "find":
           setFindOpen(true);
           requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".find-bar input")?.focus());
@@ -2511,7 +2661,7 @@ export function App({ transport }: { transport: Transport }) {
         case "help-about": setHelpKind("about"); return;
       }
     },
-    [newDocument, newWindow, openFile, openFolder, openList, openSearch, requestClose, requestDelete, requestMove, requestProperties, revealFile, revealInSidebar, save, saveAs, startSaveAll, toggleRight, toggleSource, chooseImage, pasteAuto, pasteImageFromClipboard, copyImage, copyPlainText, copyHTMLFragment, runExport, toggleFocusMode, toggleTypewriter, toggleFullScreen, toggleAlwaysOnTop, changeZoom, requestWordCount, toggleStatusBar, viewState.zoom, transport],
+    [newDocument, newWindow, openFile, openFolder, openList, openSearch, requestClose, requestDelete, requestMove, requestProperties, revealFile, revealInSidebar, save, saveAs, startSaveAll, toggleRight, toggleSource, chooseImage, pasteAuto, pasteImageFromClipboard, copyImage, copyPlainText, copyHTMLFragment, runExport, toggleFocusMode, toggleTypewriter, toggleFullScreen, toggleAlwaysOnTop, changeZoom, requestWordCount, toggleStatusBar, changeAppearance, viewState.zoom, transport],
   );
 
   // Links in the preview do not replace the buffer before M4-2's protection.
@@ -2898,6 +3048,9 @@ export function App({ transport }: { transport: Transport }) {
           inLink: editorInLink,
           inImage: editorInImage,
           editorSelection: editorHasSelection,
+          editorFocused,
+          lineEnding: doc?.lineEnding ?? "LF",
+          appearance: settings.appearance,
           readerSelection: readerSelectionActive,
           readerImage: readerImageActive,
           saveAllRunning,
@@ -3089,11 +3242,16 @@ export function App({ transport }: { transport: Transport }) {
               onChange={setBuffer}
               focusMode={focusMode}
               typewriter={typewriter}
+              lineEnding={doc.lineEnding}
+              onLineEndingChange={(next) => {
+                setDoc((prev) => (prev ? { ...prev, lineEnding: next } : prev));
+              }}
               onContext={(context) => {
                 setEditorInTable(context.inTable);
                 setEditorInLink(context.inLink);
                 setEditorInImage(context.inImage);
                 setEditorHasSelection(context.hasSelection);
+                setEditorFocused(context.focused);
               }}
               readClipboard={async () => {
                 const result = await transport.readClipboardText();

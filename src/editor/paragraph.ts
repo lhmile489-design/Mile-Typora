@@ -255,6 +255,11 @@ function fencedLines(lines: LineInfo[]): Set<number> {
   return protectedLines;
 }
 
+/** protectedLineSet marks front matter, fences, math and rules by line index. */
+export function protectedLineSet(text: string): Set<number> {
+  return fencedLines(splitLines(text));
+}
+
 function lineIndexAt(lines: LineInfo[], position: number): number {
   if (position <= 0) return 0;
   for (let i = lines.length - 1; i >= 0; i--) {

@@ -32,6 +32,7 @@ type ParagraphModule = typeof import("../editor/paragraph");
 type InlineModule = typeof import("../editor/inline");
 type SearchModule = typeof import("../editor/search");
 type LineOpsModule = typeof import("../editor/lineops");
+type AssistModule = typeof import("../editor/editassist");
 
 /** Commands the app and, later, the Edit menu call on the editor. */
 export type SourceCommands = {
@@ -98,6 +99,14 @@ export type SourceCommands = {
   imageInfo(): { alt: string; url: string } | null;
   insertImage(markdown: string, alt: string): boolean;
   replaceImage(markdown: string): boolean;
+  /** Editing aids (M5-8 EDIT-16/20). */
+  deleteWord(): boolean;
+  deleteLine(): boolean;
+  deleteParagraph(): boolean;
+  trimTrailingWhitespace(): boolean;
+  ensureFinalNewline(): boolean;
+  /** Switches the whole buffer's line ending (M5-8 EDIT-19). */
+  convertLineEnding(ending: "LF" | "CRLF"): boolean;
   selectAll(): void;
   selectLine(): boolean;
   selectParagraph(): boolean;
@@ -125,17 +134,28 @@ type Props = {
   focusMode?: boolean;
   /** Keeps the caret line at about 40% of the viewport (VIEW-08). */
   typewriter?: boolean;
+  /** The document's current line ending: LF, CRLF, or 混合 (M5-8). */
+  lineEnding?: string;
+  /** Reports a line-ending conversion so the app can mark the buffer dirty. */
+  onLineEndingChange?: (lineEnding: string) => void;
   ref?: React.Ref<SourceCommands>;
 };
 
-export type EditorContext = { inTable: boolean; inLink: boolean; inImage: boolean; hasSelection: boolean };
+export type EditorContext = {
+  inTable: boolean;
+  inLink: boolean;
+  inImage: boolean;
+  hasSelection: boolean;
+  /** The editor owns keyboard focus (M5-8 delete ranges need it). */
+  focused: boolean;
+};
 
 /**
  * The Markdown source editor (PRD 10.1, M4-1). CodeMirror is imported only
  * when editing starts, so reading pays nothing for it. The buffer is the
  * editor's document; preview renders the same string through Go.
  */
-export function SourceEditor({ value, onChange, readClipboard, writeClipboard, onContext, focusMode = false, typewriter = false, ref }: Props) {
+export function SourceEditor({ value, onChange, readClipboard, writeClipboard, onContext, focusMode = false, typewriter = false, lineEnding = "LF", onLineEndingChange, ref }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const contextRef = useRef(onContext);
@@ -157,6 +177,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
   const inline = useRef<InlineModule | null>(null);
   const search = useRef<SearchModule | null>(null);
   const lineops = useRef<LineOpsModule | null>(null);
+  const assist = useRef<AssistModule | null>(null);
   const isolateHistory = useRef<AnnotationType<"after" | "before" | "full"> | null>(null);
   const stateCtor = useRef<typeof import("@codemirror/state").EditorState | null>(null);
   const extensions = useRef<Extension[] | null>(null);
@@ -164,8 +185,20 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
   focusModeRef.current = focusMode;
   const typewriterRef = useRef(typewriter);
   typewriterRef.current = typewriter;
+  const lineEndingRef = useRef(lineEnding);
+  lineEndingRef.current = lineEnding;
+  const onLineEndingChangeRef = useRef(onLineEndingChange);
+  onLineEndingChangeRef.current = onLineEndingChange;
+  // A conversion changes no text, so CodeMirror's history cannot hold it.
+  // These hold the one conversion that is still the latest action.
+  const lineUndo = useRef<{ from: string; to: string } | null>(null);
+  const lineRedo = useRef<{ from: string; to: string } | null>(null);
+  // The line ending this editor last set itself. A different prop value means
+  // the document was loaded or discarded, so the conversion history is stale.
+  const expectedLineEnding = useRef(lineEnding);
   const focusEffectRef = useRef<((value: boolean) => StateEffect<boolean>) | null>(null);
   const scrollTypewriterRef = useRef<(() => void) | null>(null);
+  const viewCleanup = useRef<(() => void) | null>(null);
 
   /** applyEdit dispatches one transaction so one command is one undo step. */
   const applyEdit = (edit: ParagraphEdit, focus = true): boolean => {
@@ -227,6 +260,15 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
     return applyEdit(transform({ text: view.state.doc.toString(), anchor: range.anchor, head: range.head }));
   };
 
+  /** runAssist is runExtended for the lazily loaded editing aids (M5-8). */
+  const runAssist = (transform: (mod: AssistModule, snapshot: Snapshot) => ParagraphEdit): boolean => {
+    const view = viewRef.current;
+    const mod = assist.current;
+    if (!view || !mod) return false;
+    const range = view.state.selection.main;
+    return applyEdit(transform(mod, { text: view.state.doc.toString(), anchor: range.anchor, head: range.head }));
+  };
+
   useImperativeHandle(
     ref,
     (): SourceCommands => ({
@@ -234,12 +276,30 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
         viewRef.current?.focus();
       },
       undo() {
+        const conversion = lineUndo.current;
+        if (conversion) {
+          lineUndo.current = null;
+          lineRedo.current = conversion;
+          expectedLineEnding.current = conversion.from;
+          onLineEndingChangeRef.current?.(conversion.from);
+          viewRef.current?.focus();
+          return;
+        }
         const view = viewRef.current;
         if (!view || !historyActions.current) return;
         historyActions.current.undo(view);
         view.focus();
       },
       redo() {
+        const conversion = lineRedo.current;
+        if (conversion) {
+          lineRedo.current = null;
+          lineUndo.current = conversion;
+          expectedLineEnding.current = conversion.to;
+          onLineEndingChangeRef.current?.(conversion.to);
+          viewRef.current?.focus();
+          return;
+        }
         const view = viewRef.current;
         if (!view || !historyActions.current) return;
         historyActions.current.redo(view);
@@ -421,6 +481,31 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
       replaceImage(markdown) {
         return runExtended((snapshot) => replaceImageAt(snapshot, markdown));
       },
+      deleteWord() {
+        return runAssist((mod, snapshot) => mod.deleteWord(snapshot));
+      },
+      deleteLine() {
+        return runAssist((mod, snapshot) => mod.deleteLine(snapshot));
+      },
+      deleteParagraph() {
+        return runAssist((mod, snapshot) => mod.deleteParagraph(snapshot));
+      },
+      trimTrailingWhitespace() {
+        return runAssist((mod, snapshot) => mod.trimTrailingWhitespace(snapshot));
+      },
+      ensureFinalNewline() {
+        return runAssist((mod, snapshot) => mod.ensureFinalNewline(snapshot));
+      },
+      convertLineEnding(ending) {
+        const current = lineEndingRef.current;
+        if (!current || current === ending) return false;
+        lineRedo.current = null;
+        lineUndo.current = { from: current, to: ending };
+        expectedLineEnding.current = ending;
+        onLineEndingChangeRef.current?.(ending);
+        viewRef.current?.focus();
+        return true;
+      },
       selectAll() {
         const view = viewRef.current;
         if (!view) return;
@@ -519,6 +604,15 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
   );
 
   useEffect(() => {
+    if (lineEnding === expectedLineEnding.current) return;
+    // The document itself changed its ending (load, discard, save from another
+    // state): a conversion recorded against the old document is meaningless.
+    lineUndo.current = null;
+    lineRedo.current = null;
+    expectedLineEnding.current = lineEnding;
+  }, [lineEnding]);
+
+  useEffect(() => {
     const view = viewRef.current;
     const effect = focusEffectRef.current;
     if (view && effect) view.dispatch({ effects: effect(focusMode) });
@@ -540,6 +634,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
         inlineModule,
         searchModule,
         lineopsModule,
+        assistModule,
       ] = await Promise.all([
         import("@codemirror/view"),
         import("@codemirror/state"),
@@ -549,6 +644,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
         import("../editor/inline"),
         import("../editor/search"),
         import("../editor/lineops"),
+        import("../editor/editassist"),
       ]);
       if (!alive || !host.current) return;
       historyActions.current = { undo, redo };
@@ -557,6 +653,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
       inline.current = inlineModule;
       search.current = searchModule;
       lineops.current = lineopsModule;
+      assist.current = assistModule;
       stateCtor.current = EditorState;
 
       const theme = EditorView.theme({
@@ -666,17 +763,63 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
         focusPlugin,
         EditorView.lineWrapping,
         EditorView.lineWrapping,
-        keymap.of([...defaultKeymap.filter((binding) => binding.key !== "Mod-/"), ...historyKeymap]),
+        keymap.of([
+          {
+            key: "Mod-z",
+            run: () => {
+              const conversion = lineUndo.current;
+              if (!conversion) return false;
+              lineUndo.current = null;
+              lineRedo.current = conversion;
+              expectedLineEnding.current = conversion.from;
+              onLineEndingChangeRef.current?.(conversion.from);
+              return true;
+            },
+          },
+          {
+            key: "Mod-y",
+            run: () => {
+              const conversion = lineRedo.current;
+              if (!conversion) return false;
+              lineRedo.current = null;
+              lineUndo.current = conversion;
+              expectedLineEnding.current = conversion.to;
+              onLineEndingChangeRef.current?.(conversion.to);
+              return true;
+            },
+          },
+          {
+            key: "Mod-Shift-z",
+            run: () => {
+              const conversion = lineRedo.current;
+              if (!conversion) return false;
+              lineRedo.current = null;
+              lineUndo.current = conversion;
+              expectedLineEnding.current = conversion.to;
+              onLineEndingChangeRef.current?.(conversion.to);
+              return true;
+            },
+          },
+          ...defaultKeymap.filter((binding) => binding.key !== "Mod-/"),
+          ...historyKeymap,
+        ]),
         markdown(),
         theme,
         EditorView.contentAttributes.of({ "aria-label": "Markdown 源码" }),
         EditorView.updateListener.of((update) => {
           if (!update.docChanged && !update.selectionSet) return;
+          // Typing after a conversion makes that conversion no longer the
+          // latest action; Ctrl+Z must undo the text first (M5-8 EDIT-19).
+          if (update.docChanged) {
+            lineUndo.current = null;
+            lineRedo.current = null;
+          }
           if (update.docChanged && !applying.current) changeRef.current(update.state.doc.toString());
           contextRef.current?.(contextAt(
             update.state.doc.toString(),
             update.state.selection.main.head,
             !update.state.selection.main.empty,
+            update.view.hasFocus,
           ));
           if (typewriterRef.current) scrollTypewriter();
         }),
@@ -688,12 +831,33 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
       });
       viewRef.current = view;
       if (typewriterRef.current) scrollTypewriter();
-      contextRef.current?.(contextAt(valueRef.current, 0, false));
       view.focus();
+      contextRef.current?.(contextAt(valueRef.current, 0, false, view.hasFocus));
+      const reportFocus = (focused: boolean) => {
+        if (!alive || viewRef.current !== view) return;
+        const range = view.state.selection.main;
+        contextRef.current?.(contextAt(view.state.doc.toString(), range.head, !range.empty, focused));
+      };
+      const onFocus = () => reportFocus(true);
+      const onBlur = (event: FocusEvent) => {
+        // Opening a menu or using a toolbar button must not disable commands
+        // that need the editor's focus; the command itself returns focus.
+        const next = event.relatedTarget as HTMLElement | null;
+        if (next && typeof next.closest === "function" && next.closest(".menubar, .toolbar")) return;
+        reportFocus(false);
+      };
+      view.dom.addEventListener("focus", onFocus, true);
+      view.dom.addEventListener("blur", onBlur, true);
+      viewCleanup.current = () => {
+        view.dom.removeEventListener("focus", onFocus, true);
+        view.dom.removeEventListener("blur", onBlur, true);
+      };
     })();
 
     return () => {
       alive = false;
+      viewCleanup.current?.();
+      viewCleanup.current = null;
       viewRef.current?.destroy();
       viewRef.current = null;
     };
@@ -706,6 +870,8 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
     const view = viewRef.current;
     if (!view || !stateCtor.current || !extensions.current) return;
     if (view.state.doc.toString() === value) return;
+    lineUndo.current = null;
+    lineRedo.current = null;
     const previous = view.state.selection.main;
     const scrollTop = view.scrollDOM.scrollTop;
     const hadFocus = view.hasFocus;
@@ -733,13 +899,14 @@ const TABLE_ROW = /^\s*\|.*\|\s*$/;
 const TABLE_DELIMITER = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/;
 
 /** contextAt reports what the caret touches, for menu enablement (M5-4). */
-export function contextAt(text: string, position: number, hasSelection = false): EditorContext {
+export function contextAt(text: string, position: number, hasSelection = false, focused = false): EditorContext {
   const snapshot = { text, anchor: position, head: position };
   return {
     inTable: inTableAt(text, position),
     inLink: linkAt(snapshot) !== null,
     inImage: imageAt(snapshot) !== null,
     hasSelection,
+    focused,
   };
 }
 

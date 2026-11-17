@@ -184,7 +184,12 @@ func (s *WindowService) saveText(w *winctx.Window, path, text string, force, as 
 		}
 	}
 
-	data := encode(text, hasBOM, lineEnding)
+	writtenEnding := lineEnding
+	if writtenEnding == "混合" {
+		// P1 writes a mixed file as CRLF when it is saved without conversion.
+		writtenEnding = "CRLF"
+	}
+	data := encode(text, hasBOM, writtenEnding)
 	if len(data) > docread.MaxBytes+4 {
 		return contract.SaveResult{Failure: &contract.Failure{
 			Code:   "too_large",
@@ -203,7 +208,7 @@ func (s *WindowService) saveText(w *winctx.Window, path, text string, force, as 
 
 	sum := sha256.Sum256(data)
 	newHash := hex.EncodeToString(sum[:])
-	w.SetEditState(false, newHash, hasBOM, lineEnding)
+	w.SetEditState(false, newHash, hasBOM, writtenEnding)
 	w.SetSavedHash(newHash)
 	if !as {
 		s.recordRecent(path, false)
@@ -215,7 +220,7 @@ func (s *WindowService) saveText(w *winctx.Window, path, text string, force, as 
 		Size:       int64(len(data)),
 		Hash:       newHash,
 		HasBOM:     hasBOM,
-		LineEnding: lineEnding,
+		LineEnding: writtenEnding,
 	}
 }
 

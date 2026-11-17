@@ -56,6 +56,13 @@ export type Command =
   | "underline"
   | "move-line-up"
   | "move-line-down"
+  | "delete-word"
+  | "delete-line"
+  | "delete-paragraph"
+  | "trim-trailing"
+  | "final-newline"
+  | "line-ending-lf"
+  | "line-ending-crlf"
   | "dismiss";
 
 /** The keyboard fields the table reads. */

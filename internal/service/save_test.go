@@ -83,6 +83,52 @@ func TestSaveKeepsBOMAndLineEndings(t *testing.T) {
 	}
 }
 
+func TestSaveWritesConvertedLineEnding(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mixed.md")
+	if err := os.WriteFile(path, []byte("一\n二\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := newRefreshHarness(t, 55)
+	if got, _ := h.service.openPath(context.Background(), h.window, path); got.Failure != nil {
+		t.Fatalf("openPath: %+v", got.Failure)
+	}
+	// The page chose LF after opening the mixed file; the buffer is LF either way.
+	h.window.SetEditState(true, "", false, "LF")
+	saved, _ := h.service.SaveDocument(context.Background(), "一\n二\n", false)
+	if saved.Failure != nil {
+		t.Fatalf("save: %+v", saved.Failure)
+	}
+	if saved.LineEnding != "LF" {
+		t.Fatalf("reported line ending = %q, want LF", saved.LineEnding)
+	}
+	if data, _ := os.ReadFile(path); string(data) != "一\n二\n" {
+		t.Fatalf("content = %q, want LF", data)
+	}
+}
+
+func TestSaveMixedWithoutConversionWritesCRLF(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mixed.md")
+	if err := os.WriteFile(path, []byte("一\n二\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := newRefreshHarness(t, 56)
+	if got, _ := h.service.openPath(context.Background(), h.window, path); got.Failure != nil {
+		t.Fatalf("openPath: %+v", got.Failure)
+	}
+	saved, _ := h.service.SaveDocument(context.Background(), "一\n二\n", false)
+	if saved.Failure != nil {
+		t.Fatalf("save: %+v", saved.Failure)
+	}
+	if saved.LineEnding != "CRLF" {
+		t.Fatalf("reported line ending = %q, want CRLF", saved.LineEnding)
+	}
+	if data, _ := os.ReadFile(path); string(data) != "一\r\n二\r\n" {
+		t.Fatalf("content = %q, want CRLF", data)
+	}
+}
+
 func TestSaveDocumentAsUsesTheChosenPath(t *testing.T) {
 	dir := t.TempDir()
 	path := writeSample(t, dir, "note.md", []byte("# old\n"))
