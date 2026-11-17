@@ -507,3 +507,12 @@ M1 需验证：mermaid 12 的 `securityLevel: "strict"` 与 `%%{init}%%` 指令�
 - 导入结果写入新缓冲：调用窗口没有打开文件且不脏时直接载入；否则新建窗口，通过 `ReadyInfo.startText` / `startName` 移交文本。`winctx.Window` 增加一次性 start text 状态，`ClearStartUntitled` 同时清理它；不改变 Ctrl+N 的现有行为。
 - 新绑定与契约：`contract.ImportResult`、`ReadyInfo.startText/startName`；`src/mygo.ts` 由 `bun run generate` 重建。前端 `transport.importDocument()` 统一返回 `imported` / `cancelled` / `failed`，导入期间禁用再次触发，警告用独立对话框展示。
 - 测试：HTML/DOCX 转换、恶意输入、路径穿越、宏/页眉忽略、容量与取消、空窗口导入与新窗口移交；原生系统文件对话框无法脚本化，完整点击流程按既有约定留给用户桌面验收。
+
+### D-T58 · M6-2 数学工具：纯文本变换，KaTeX 只做检查
+
+- 新增 `src/editor/mathtools.ts` 纯变换：行内公式包裹/解包、公式模板、四种定界符转换与公式信息读取。命令经 SourceEditor 的一次 dispatch + isolateHistory 应用，一步撤销；不做 CAS、求解、公式 OCR 或源码内实时预览。
+- 公式识别支持 `$…$`、`\(…\)`、`$$` 块与 `\[…\]` 块；跳过 front matter、围栏/缩进代码、行内代码、HTML 注释、分隔线与保护行。菜单新增 `inMath` / `mathBlocked` 上下文：转换与检查要求光标在公式内，模板在代码或 front matter 内禁用并说明原因。
+- `检查当前公式` 复用 `src/render/math.ts` 新增的 `validateMath`，参数与阅读渲染一致（`trust: false`、`strict: warn`、`maxSize: 50`、`maxExpand: 1000`）；只把 KaTeX 的真实错误显示在非阻塞提示中，不自动修改公式。
+- 公式模板为有界清单：分数、根号、上标、下标、矩阵、分段函数、多行对齐、求和、积分、极限；插入后选中第一个占位内容。块级公式复用既有 `insertFence` 公式块命令（`Ctrl+Shift+M`），不新增快捷键。
+- 数学模块与编辑辅助一样按需加载，避免把 CodeMirror 相关代码带进阅读首包；`contextAt` 增加 `inMath` / `mathBlocked` 供菜单使能，不改变既有表格、链接、图片上下文。
+- 测试：mathtools 纯变换、KaTeX 校验、页面数学子菜单与只读禁用；原生验收见 `docs/develop/M6-2-验收记录.md`。

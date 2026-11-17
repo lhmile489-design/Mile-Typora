@@ -1573,3 +1573,37 @@ describe("M6-1 import", () => {
     expect(document.title).toBe("笔记.md");
   });
 });
+
+describe("M6-2 math tools", () => {
+  it("inserts inline formulas and templates from the math submenu", async () => {
+    const mathDoc = {
+      kind: "loaded" as const,
+      doc: { ...loadedDoc.doc, text: "前后", html: "<p>前后</p>" },
+    };
+    render(<App transport={fakeTransport({ openFile: async () => mathDoc })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByText("前后");
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    content.focus();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "数学工具" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "行内公式" }));
+    await waitFor(() => expect(content.textContent).toContain("$公式$"));
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "数学工具" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "分数" }));
+    await waitFor(() => expect(content.textContent).toContain("frac{分子}"));
+  });
+
+  it("disables math tools outside source editing", async () => {
+    render(<App transport={fakeTransport({ openFile: async () => loadedDoc })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
+    const math = screen.getByRole("menuitem", { name: "数学工具" });
+    expect(math.getAttribute("aria-disabled")).toBe("true");
+  });
+});

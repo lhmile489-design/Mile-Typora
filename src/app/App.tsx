@@ -58,7 +58,7 @@ import { FindBar } from "../components/FindBar";
 import { SourceEditor, type SourceCommands } from "../components/SourceEditor";
 import { advance, clearHighlights, collectRanges, paint, scrollToRange } from "../render/find";
 import { capture, metricsOf, restore, type Position } from "../render/position";
-import { renderMath } from "../render/math";
+import { renderMath, validateMath } from "../render/math";
 import { renderDiagrams, rerenderDiagrams } from "../render/mermaid";
 import { commandFor, SHORTCUT_HINT, type Command } from "../lib/shortcuts";
 
@@ -104,6 +104,8 @@ type MenuState = {
   inImage: boolean;
   editorSelection: boolean;
   editorFocused: boolean;
+  editorInMath: boolean;
+  editorMathBlocked: boolean;
   lineEnding: string;
   appearance: string;
   readerSelection: boolean;
@@ -328,6 +330,116 @@ function buildMenus(state: MenuState): MenuGroup[] {
           label: "表情与符号",
           disabled: !state.editing,
           reason,
+        },
+        {
+          id: "math-tools",
+          label: "数学工具",
+          disabled: !state.editing,
+          reason,
+          children: [
+            {
+              id: "math-inline",
+              label: "行内公式",
+              disabled: !state.editing || state.editorMathBlocked,
+              reason: !state.editing ? reason : "光标位于代码或 front matter 内",
+            },
+            {
+              id: "math-block",
+              label: "块级公式",
+              disabled: !state.editing || state.editorMathBlocked,
+              reason: !state.editing ? reason : "光标位于代码或 front matter 内",
+            },
+            {
+              id: "math-fraction",
+              label: "分数",
+              disabled: !state.editing || state.editorMathBlocked,
+              reason: !state.editing ? reason : "光标位于代码或 front matter 内",
+            },
+            {
+              id: "math-sqrt",
+              label: "根号",
+              disabled: !state.editing || state.editorMathBlocked,
+              reason: !state.editing ? reason : "光标位于代码或 front matter 内",
+            },
+            {
+              id: "math-superscript",
+              label: "上标",
+              disabled: !state.editing || state.editorMathBlocked,
+              reason: !state.editing ? reason : "光标位于代码或 front matter 内",
+            },
+            {
+              id: "math-subscript",
+              label: "下标",
+              disabled: !state.editing || state.editorMathBlocked,
+              reason: !state.editing ? reason : "光标位于代码或 front matter 内",
+            },
+            {
+              id: "math-matrix",
+              label: "矩阵",
+              disabled: !state.editing || state.editorMathBlocked,
+              reason: !state.editing ? reason : "光标位于代码或 front matter 内",
+            },
+            {
+              id: "math-cases",
+              label: "分段函数",
+              disabled: !state.editing || state.editorMathBlocked,
+              reason: !state.editing ? reason : "光标位于代码或 front matter 内",
+            },
+            {
+              id: "math-aligned",
+              label: "多行对齐",
+              disabled: !state.editing || state.editorMathBlocked,
+              reason: !state.editing ? reason : "光标位于代码或 front matter 内",
+            },
+            {
+              id: "math-sum",
+              label: "求和",
+              disabled: !state.editing || state.editorMathBlocked,
+              reason: !state.editing ? reason : "光标位于代码或 front matter 内",
+            },
+            {
+              id: "math-integral",
+              label: "积分",
+              disabled: !state.editing || state.editorMathBlocked,
+              reason: !state.editing ? reason : "光标位于代码或 front matter 内",
+            },
+            {
+              id: "math-limit",
+              label: "极限",
+              disabled: !state.editing || state.editorMathBlocked,
+              reason: !state.editing ? reason : "光标位于代码或 front matter 内",
+            },
+            {
+              id: "math-convert-dollar",
+              label: "转换为行内 $...$",
+              disabled: !state.editing || !state.editorInMath,
+              reason: !state.editing ? reason : "光标不在公式内",
+            },
+            {
+              id: "math-convert-paren",
+              label: "转换为行内 \\(...\\)",
+              disabled: !state.editing || !state.editorInMath,
+              reason: !state.editing ? reason : "光标不在公式内",
+            },
+            {
+              id: "math-convert-block-dollar",
+              label: "转换为块级 $$...$$",
+              disabled: !state.editing || !state.editorInMath,
+              reason: !state.editing ? reason : "光标不在公式内",
+            },
+            {
+              id: "math-convert-block-bracket",
+              label: "转换为块级 \\[...\\]",
+              disabled: !state.editing || !state.editorInMath,
+              reason: !state.editing ? reason : "光标不在公式内",
+            },
+            {
+              id: "math-check",
+              label: "检查当前公式",
+              disabled: !state.editing || !state.editorInMath,
+              reason: !state.editing ? reason : "光标不在公式内",
+            },
+          ],
         },
         sep,
         item("find", "查找和替换…", "Ctrl+F"),
@@ -614,6 +726,8 @@ export function App({ transport }: { transport: Transport }) {
   const [editorInImage, setEditorInImage] = useState(false);
   const [editorHasSelection, setEditorHasSelection] = useState(false);
   const [editorFocused, setEditorFocused] = useState(false);
+  const [editorInMath, setEditorInMath] = useState(false);
+  const [editorMathBlocked, setEditorMathBlocked] = useState(false);
   const [readerSelectionActive, setReaderSelectionActive] = useState(false);
   const [readerImageActive, setReaderImageActive] = useState(false);
   const [linkDialog, setLinkDialog] = useState<{ address: string; reference: boolean } | null>(null);
@@ -2618,6 +2732,32 @@ export function App({ transport }: { transport: Transport }) {
         case "emoji-panel":
           setNotice("按 Win+. 打开 Windows 表情面板");
           return;
+        case "math-inline": run((c) => c.insertInlineMath()); return;
+        case "math-block": run((c) => c.insertFormulaBlock()); return;
+        case "math-fraction": run((c) => c.insertMathSnippet("fraction")); return;
+        case "math-sqrt": run((c) => c.insertMathSnippet("sqrt")); return;
+        case "math-superscript": run((c) => c.insertMathSnippet("superscript")); return;
+        case "math-subscript": run((c) => c.insertMathSnippet("subscript")); return;
+        case "math-matrix": run((c) => c.insertMathSnippet("matrix")); return;
+        case "math-cases": run((c) => c.insertMathSnippet("cases")); return;
+        case "math-aligned": run((c) => c.insertMathSnippet("aligned")); return;
+        case "math-sum": run((c) => c.insertMathSnippet("sum")); return;
+        case "math-integral": run((c) => c.insertMathSnippet("integral")); return;
+        case "math-limit": run((c) => c.insertMathSnippet("limit")); return;
+        case "math-convert-dollar": run((c) => c.convertMathDelimiter("dollar")); return;
+        case "math-convert-paren": run((c) => c.convertMathDelimiter("paren")); return;
+        case "math-convert-block-dollar": run((c) => c.convertMathDelimiter("block-dollar")); return;
+        case "math-convert-block-bracket": run((c) => c.convertMathDelimiter("block-bracket")); return;
+        case "math-check": {
+          const info = editorRef.current?.mathInfo() ?? null;
+          if (!info) {
+            setNotice("光标不在公式内");
+            return;
+          }
+          const check = validateMath(info.tex, info.display);
+          setNotice(check.ok ? "公式有效" : `公式错误：${check.error ?? "无法解析"}`);
+          return;
+        }
         case "theme-light": void changeAppearance("light"); return;
         case "theme-dark": void changeAppearance("dark"); return;
         case "theme-system": void changeAppearance("system"); return;
@@ -3093,6 +3233,8 @@ export function App({ transport }: { transport: Transport }) {
           inImage: editorInImage,
           editorSelection: editorHasSelection,
           editorFocused,
+          editorInMath,
+          editorMathBlocked,
           lineEnding: doc?.lineEnding ?? "LF",
           appearance: settings.appearance,
           readerSelection: readerSelectionActive,
@@ -3297,6 +3439,8 @@ export function App({ transport }: { transport: Transport }) {
                 setEditorInImage(context.inImage);
                 setEditorHasSelection(context.hasSelection);
                 setEditorFocused(context.focused);
+                setEditorInMath(context.inMath);
+                setEditorMathBlocked(context.mathBlocked);
               }}
               readClipboard={async () => {
                 const result = await transport.readClipboardText();

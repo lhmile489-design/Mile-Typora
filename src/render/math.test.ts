@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderMath } from "./math";
+import { renderMath, validateMath } from "./math";
 
 function article(html: string): HTMLElement {
   const el = document.createElement("article");
@@ -51,5 +51,14 @@ describe("renderMath", () => {
     renderMath(root);
     // trust: false turns it into a failure rather than a link.
     expect(root.querySelector("a[href]")).toBeNull();
+  });
+});
+
+describe("validateMath", () => {
+  it("accepts a valid formula and reports KaTeX errors", () => {
+    expect(validateMath("x^2 + 1", false).ok).toBe(true);
+    const bad = validateMath("\\nope", false);
+    expect(bad.ok).toBe(false);
+    expect(bad.error).toBeTruthy();
   });
 });

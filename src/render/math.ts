@@ -4,6 +4,24 @@
 import katex from "katex";
 import "katex/dist/katex.min.css";
 
+/** validateMath parses one formula without touching the document (M6-2). */
+export function validateMath(tex: string, displayMode: boolean): { ok: boolean; error?: string } {
+  try {
+    katex.renderToString(tex, {
+      displayMode,
+      throwOnError: true,
+      trust: false,
+      strict: "warn",
+      maxSize: 50,
+      maxExpand: 1000,
+      output: "htmlAndMathml",
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 /** renderMath typesets every `.math` node under root. Returns how many did. */
 export function renderMath(root: ParentNode): number {
   const nodes = root.querySelectorAll<HTMLElement>(".math");

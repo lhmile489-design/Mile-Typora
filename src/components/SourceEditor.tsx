@@ -33,6 +33,7 @@ type InlineModule = typeof import("../editor/inline");
 type SearchModule = typeof import("../editor/search");
 type LineOpsModule = typeof import("../editor/lineops");
 type AssistModule = typeof import("../editor/editassist");
+type MathModule = typeof import("../editor/mathtools");
 
 /** Commands the app and, later, the Edit menu call on the editor. */
 export type SourceCommands = {
@@ -99,6 +100,11 @@ export type SourceCommands = {
   imageInfo(): { alt: string; url: string } | null;
   insertImage(markdown: string, alt: string): boolean;
   replaceImage(markdown: string): boolean;
+  /** Math tools (M6-2 EDIT-17). */
+  insertInlineMath(): boolean;
+  insertMathSnippet(kind: import("../editor/mathtools").MathSnippet): boolean;
+  convertMathDelimiter(target: import("../editor/mathtools").MathDelimiter): boolean;
+  mathInfo(): { tex: string; display: boolean; kind: "inline" | "block" } | null;
   /** Editing aids (M5-8 EDIT-16/20). */
   deleteWord(): boolean;
   deleteLine(): boolean;
@@ -148,6 +154,10 @@ export type EditorContext = {
   hasSelection: boolean;
   /** The editor owns keyboard focus (M5-8 delete ranges need it). */
   focused: boolean;
+  /** The caret is inside a math formula (M6-2). */
+  inMath: boolean;
+  /** The caret is in code, front matter or another math-blocked region. */
+  mathBlocked: boolean;
 };
 
 /**
@@ -178,6 +188,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
   const search = useRef<SearchModule | null>(null);
   const lineops = useRef<LineOpsModule | null>(null);
   const assist = useRef<AssistModule | null>(null);
+  const mathTools = useRef<MathModule | null>(null);
   const isolateHistory = useRef<AnnotationType<"after" | "before" | "full"> | null>(null);
   const stateCtor = useRef<typeof import("@codemirror/state").EditorState | null>(null);
   const extensions = useRef<Extension[] | null>(null);
@@ -264,6 +275,15 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
   const runAssist = (transform: (mod: AssistModule, snapshot: Snapshot) => ParagraphEdit): boolean => {
     const view = viewRef.current;
     const mod = assist.current;
+    if (!view || !mod) return false;
+    const range = view.state.selection.main;
+    return applyEdit(transform(mod, { text: view.state.doc.toString(), anchor: range.anchor, head: range.head }));
+  };
+
+  /** runMath is runExtended for the lazily loaded math helpers (M6-2). */
+  const runMath = (transform: (mod: MathModule, snapshot: Snapshot) => ParagraphEdit): boolean => {
+    const view = viewRef.current;
+    const mod = mathTools.current;
     if (!view || !mod) return false;
     const range = view.state.selection.main;
     return applyEdit(transform(mod, { text: view.state.doc.toString(), anchor: range.anchor, head: range.head }));
@@ -481,6 +501,22 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
       replaceImage(markdown) {
         return runExtended((snapshot) => replaceImageAt(snapshot, markdown));
       },
+      insertMathSnippet(kind) {
+        return runMath((mod, snapshot) => mod.insertMathSnippet(snapshot, kind));
+      },
+      insertInlineMath() {
+        return runMath((mod, snapshot) => mod.insertInlineMath(snapshot));
+      },
+      convertMathDelimiter(target) {
+        return runMath((mod, snapshot) => mod.convertMathDelimiter(snapshot, target));
+      },
+      mathInfo() {
+        const view = viewRef.current;
+        const mod = mathTools.current;
+        if (!view || !mod) return null;
+        const range = view.state.selection.main;
+        return mod.mathInfo({ text: view.state.doc.toString(), anchor: range.anchor, head: range.head });
+      },
       deleteWord() {
         return runAssist((mod, snapshot) => mod.deleteWord(snapshot));
       },
@@ -635,6 +671,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
         searchModule,
         lineopsModule,
         assistModule,
+        mathModule,
       ] = await Promise.all([
         import("@codemirror/view"),
         import("@codemirror/state"),
@@ -645,6 +682,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
         import("../editor/search"),
         import("../editor/lineops"),
         import("../editor/editassist"),
+        import("../editor/mathtools"),
       ]);
       if (!alive || !host.current) return;
       historyActions.current = { undo, redo };
@@ -654,6 +692,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
       search.current = searchModule;
       lineops.current = lineopsModule;
       assist.current = assistModule;
+      mathTools.current = mathModule;
       stateCtor.current = EditorState;
 
       const theme = EditorView.theme({
@@ -754,6 +793,14 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
       };
       scrollTypewriterRef.current = scrollTypewriter;
 
+      const mathContextAt = (text: string, position: number) => {
+        const mod = mathTools.current;
+        if (!mod) return { inMath: false, blocked: false };
+        return {
+          inMath: mod.mathAt({ text, anchor: position, head: position }) !== null,
+          blocked: mod.mathProtected(text, position),
+        };
+      };
       const editorExtensions: Extension[] = [
         lineNumbers(),
         history(),
@@ -815,11 +862,16 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
             lineRedo.current = null;
           }
           if (update.docChanged && !applying.current) changeRef.current(update.state.doc.toString());
+          const text = update.state.doc.toString();
+          const head = update.state.selection.main.head;
+          const math = mathContextAt(text, head);
           contextRef.current?.(contextAt(
-            update.state.doc.toString(),
-            update.state.selection.main.head,
+            text,
+            head,
             !update.state.selection.main.empty,
             update.view.hasFocus,
+            math.inMath,
+            math.blocked,
           ));
           if (typewriterRef.current) scrollTypewriter();
         }),
@@ -832,11 +884,14 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
       viewRef.current = view;
       if (typewriterRef.current) scrollTypewriter();
       view.focus();
-      contextRef.current?.(contextAt(valueRef.current, 0, false, view.hasFocus));
+      const initialMath = mathContextAt(valueRef.current, 0);
+      contextRef.current?.(contextAt(valueRef.current, 0, false, view.hasFocus, initialMath.inMath, initialMath.blocked));
       const reportFocus = (focused: boolean) => {
         if (!alive || viewRef.current !== view) return;
         const range = view.state.selection.main;
-        contextRef.current?.(contextAt(view.state.doc.toString(), range.head, !range.empty, focused));
+        const text = view.state.doc.toString();
+        const math = mathContextAt(text, range.head);
+        contextRef.current?.(contextAt(text, range.head, !range.empty, focused, math.inMath, math.blocked));
       };
       const onFocus = () => reportFocus(true);
       const onBlur = (event: FocusEvent) => {
@@ -899,7 +954,14 @@ const TABLE_ROW = /^\s*\|.*\|\s*$/;
 const TABLE_DELIMITER = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/;
 
 /** contextAt reports what the caret touches, for menu enablement (M5-4). */
-export function contextAt(text: string, position: number, hasSelection = false, focused = false): EditorContext {
+export function contextAt(
+  text: string,
+  position: number,
+  hasSelection = false,
+  focused = false,
+  inMath = false,
+  mathBlocked = false,
+): EditorContext {
   const snapshot = { text, anchor: position, head: position };
   return {
     inTable: inTableAt(text, position),
@@ -907,6 +969,8 @@ export function contextAt(text: string, position: number, hasSelection = false, 
     inImage: imageAt(snapshot) !== null,
     hasSelection,
     focused,
+    inMath,
+    mathBlocked,
   };
 }
 
