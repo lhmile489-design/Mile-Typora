@@ -21,6 +21,8 @@ import type {
   FileProperties,
   FileTrashed,
   OpenedDoc,
+  OutlineHeading,
+  SearchMatch,
   OpenRequest,
   ReadyInfo,
   RecentEntry,
@@ -40,6 +42,9 @@ import { RecentDialog } from "../components/RecentDialog";
 import { HelpDialog } from "../components/HelpDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { FilePropertiesDialog } from "../components/FilePropertiesDialog";
+import { DocumentList } from "../components/DocumentList";
+import { OutlineView } from "../components/OutlineView";
+import { SearchPanel } from "../components/SearchPanel";
 import { SettingsDialog } from "../components/SettingsDialog";
 import { UnsavedDialog } from "../components/UnsavedDialog";
 import { FindBar } from "../components/FindBar";
@@ -57,6 +62,7 @@ type ReadyState =
 
 type LoadError = { code: string; message: string; kind: "file" | "folder" };
 type ViewMode = "reading" | "editing" | "preview";
+type LeftView = "tree" | "list" | "outline" | "search";
 type ExternalChange = {
   kind: "changed" | "deleted" | "unreadable" | "trashed";
   message: string;
@@ -76,6 +82,10 @@ type MenuState = {
   hasPath: boolean;
   fileTarget: boolean;
   propertiesTarget: boolean;
+  hasFolder: boolean;
+  leftView: LeftView;
+  showLeft: boolean;
+  showRight: boolean;
   saveAllRunning: boolean;
   saving: boolean;
   promptOpen: boolean;
@@ -232,6 +242,51 @@ function buildMenus(state: MenuState): MenuGroup[] {
       id: "view",
       label: "视图",
       items: [
+        {
+          id: "toggle-left",
+          label: state.showLeft ? "隐藏侧边栏" : "显示侧边栏",
+          shortcut: "Ctrl+Shift+L",
+          checked: state.showLeft,
+        },
+        {
+          id: "toggle-right",
+          label: "显示预留侧栏",
+          checked: state.showRight,
+        },
+        sep,
+        {
+          id: "view-outline",
+          label: "大纲",
+          shortcut: "Ctrl+Shift+1",
+          checked: state.leftView === "outline",
+          disabled: !state.hasDoc,
+          reason: "尚未打开文档",
+        },
+        {
+          id: "view-list",
+          label: "文档列表",
+          shortcut: "Ctrl+Shift+2",
+          checked: state.leftView === "list",
+          disabled: !state.hasFolder && !state.hasDoc,
+          reason: "尚未打开文档或目录",
+        },
+        {
+          id: "view-tree",
+          label: "文件树",
+          shortcut: "Ctrl+Shift+3",
+          checked: state.leftView === "tree",
+          disabled: !state.hasFolder,
+          reason: "尚未打开目录",
+        },
+        {
+          id: "search-folder",
+          label: "搜索…",
+          shortcut: "Ctrl+Shift+F",
+          checked: state.leftView === "search",
+          disabled: !state.hasDoc && !state.hasFolder,
+          reason: "尚未打开文档或目录",
+        },
+        sep,
         editing("toggle-source", "源码 / 预览模式", "Ctrl+/", !state.hasDoc, "尚未打开文档"),
       ],
     },
@@ -332,6 +387,22 @@ export function App({ transport }: { transport: Transport }) {
   const [deleteTarget, setDeleteTarget] = useState<{ rel: string; name: string } | null>(null);
   const [properties, setProperties] = useState<{ props: FileProperties; unsaved: boolean } | null>(null);
   const [sidebarConfirm, setSidebarConfirm] = useState(false);
+  // Left pane: tree, flat list, outline, or directory search (M5-2).
+  const [leftView, setLeftView] = useState<LeftView>("tree");
+  const [outline, setOutline] = useState<OutlineHeading[]>([]);
+  const [outlineTruncated, setOutlineTruncated] = useState(false);
+  const outlineToken = useRef(0);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchMatch[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searchTruncated, setSearchTruncated] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchConfirm, setSearchConfirm] = useState(false);
+  const [listConfirm, setListConfirm] = useState(false);
+  const searchAbort = useRef<{ abort: () => void } | null>(null);
+  const searchToken = useRef(0);
+  const pendingSearch = useRef<{ path: string; query: string; isName: boolean; mode: ViewMode; line: number } | null>(null);
+  const pendingEditorLine = useRef<number | null>(null);
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
   const [findReplacement, setFindReplacement] = useState("");
@@ -436,6 +507,7 @@ export function App({ transport }: { transport: Transport }) {
         setTreeFocus(null);
         setTreeActive(false);
         setRevealRequest(null);
+        setLeftView("tree");
         setStale(null);
         setUpdatedAt(null);
         treeRows.current = [];
@@ -666,17 +738,26 @@ export function App({ transport }: { transport: Transport }) {
   // dialog whose result a new window may take instead.
   const applyOutcome = useCallback(
     (result: RequestedOutcome) => {
+      const pending = pendingSearch.current;
+      pendingSearch.current = null;
       switch (result.kind) {
-        case "file":
+        case "file": {
+          const searchOpen = Boolean(pending && pending.path === result.rel);
+          const targetMode: ViewMode = searchOpen && pending ? pending.mode : "reading";
           rememberHere();
           setDoc(result.doc);
           setExternalChange(null);
           setReloadOpen(false);
           setExternalLost(false);
-          setMode("reading");
+          setMode(targetMode);
           setBuffer(result.doc.text);
           setSavedText(result.doc.text);
           setPreview(null);
+          if (targetMode === "preview") {
+            void transport.renderSource(result.doc.text).then((preview) => {
+              if (preview.kind === "ok") setPreview({ html: preview.html, counts: preview.counts });
+            });
+          }
           void loadSettings();
           setLoadError(null);
           setStale(null);
@@ -691,8 +772,25 @@ export function App({ transport }: { transport: Transport }) {
             applyFolder(null);
             setTree([]);
             setSelected(null);
+            setLeftView("tree");
+          }
+          if (searchOpen && pending && !pending.isName && pending.query) {
+            if (targetMode === "editing") {
+              if (pending.line > 0) {
+                pendingEditorLine.current = pending.line;
+                if (editorRef.current) {
+                  editorRef.current.goToLine(pending.line);
+                  pendingEditorLine.current = null;
+                }
+              }
+            } else {
+              setFindQuery(pending.query);
+              setFindOpen(true);
+              setFindIndex(0);
+            }
           }
           return;
+        }
         case "folder":
           startScan(result.root, result.name);
           void loadSettings();
@@ -711,7 +809,7 @@ export function App({ transport }: { transport: Transport }) {
           return;
       }
     },
-    [applyFolder, rememberHere, startScan],
+    [applyFolder, rememberHere, startScan, transport],
   );
 
   // M4-1 has no save yet, so an open that would replace the buffer is held
@@ -1013,13 +1111,13 @@ export function App({ transport }: { transport: Transport }) {
   // M5-1: file operations act on the tree row the left pane focused, or on
   // the current document when no tree file is active.
   const fileTargetInfo = useCallback((): { rel: string; name: string; current: boolean } | null => {
-    if (treeActive && treeFocus && !treeFocus.isDir) {
+    if (leftView === "tree" && treeActive && treeFocus && !treeFocus.isDir) {
       return { rel: treeFocus.path, name: treeFocus.name, current: treeFocus.path === selected };
     }
     const current = docRef.current;
     if (current) return { rel: "", name: current.name, current: true };
     return null;
-  }, [selected, treeActive, treeFocus]);
+  }, [leftView, selected, treeActive, treeFocus]);
 
   const runMove = useCallback(
     async (target: { rel: string; name: string; current: boolean }) => {
@@ -1172,6 +1270,209 @@ export function App({ transport }: { transport: Transport }) {
       if (folderRef.current) setSelected(null);
     });
   }, [transport]);
+
+  // Outline: reading/preview use the current text; editing waits for a pause
+  // so typing does not call Go on every key (M5-2 VIEW-02).
+  useEffect(() => {
+    if (leftView !== "outline") return;
+    const current = docRef.current;
+    if (!current) {
+      setOutline([]);
+      setOutlineTruncated(false);
+      return;
+    }
+    const text = mode === "reading" ? current.text : buffer;
+    const token = ++outlineToken.current;
+    let timer: number | null = null;
+    const run = () => {
+      void transport.extractOutline(text).then((result) => {
+        if (token !== outlineToken.current) return;
+        if (result.kind === "ok") {
+          setOutline(result.headings);
+          setOutlineTruncated(result.truncated);
+        } else {
+          setOutline([]);
+          setOutlineTruncated(false);
+        }
+      });
+    };
+    if (mode === "editing") timer = window.setTimeout(run, 300);
+    else run();
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [buffer, doc?.path, doc?.text, leftView, mode, transport]);
+
+  const goOutline = useCallback((heading: OutlineHeading, index: number) => {
+    if (modeRef.current === "editing") {
+      editorRef.current?.goToLine(heading.line);
+      return;
+    }
+    const article = readerRef.current?.querySelector(".markdown");
+    const headings = article?.querySelectorAll("h1, h2, h3, h4, h5, h6");
+    headings?.[index]?.scrollIntoView({ block: "start" });
+  }, []);
+
+  useEffect(() => {
+    if (mode !== "editing") {
+      pendingEditorLine.current = null;
+      return;
+    }
+    if (pendingEditorLine.current === null) return;
+    let attempts = 0;
+    let timer: number | null = null;
+    const attempt = () => {
+      if (pendingEditorLine.current === null) return;
+      if (editorRef.current) {
+        const line = pendingEditorLine.current;
+        pendingEditorLine.current = null;
+        editorRef.current.goToLine(line);
+        return;
+      }
+      if (++attempts < 20) timer = window.setTimeout(attempt, 50);
+    };
+    attempt();
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [doc?.path, mode]);
+
+  const stopSearch = useCallback(() => {
+    searchToken.current++;
+    searchAbort.current?.abort();
+    searchAbort.current = null;
+    setSearching(false);
+  }, []);
+
+  const startSearch = useCallback(
+    (raw: string) => {
+      stopSearch();
+      const query = raw.trim();
+      const token = ++searchToken.current;
+      setSearchResults([]);
+      setSearchTruncated(false);
+      setSearchError(null);
+      if (query === "") return;
+      setSearching(true);
+      const handle = transport.searchDirectory(query, (frame) => {
+        if (token !== searchToken.current) return;
+        if (frame.failure) {
+          setSearchError(failureMessage(frame.failure.code, frame.failure.detail));
+          setSearching(false);
+          return;
+        }
+        if (frame.matches && frame.matches.length > 0) {
+          const matches = frame.matches ?? [];
+          setSearchResults((prev) => [...prev, ...matches]);
+        }
+        if (frame.done) {
+          setSearching(false);
+          setSearchTruncated(Boolean(frame.truncated));
+        }
+      });
+      searchAbort.current = handle;
+      void handle.done.then(() => {
+        if (token === searchToken.current) setSearching(false);
+      });
+    },
+    [stopSearch, transport],
+  );
+
+  useEffect(() => {
+    if (leftView !== "search") {
+      stopSearch();
+      return;
+    }
+    const query = searchQuery.trim();
+    if (query === "") {
+      stopSearch();
+      setSearchResults([]);
+      setSearchTruncated(false);
+      setSearchError(null);
+      return;
+    }
+    const timer = window.setTimeout(() => startSearch(query), 350);
+    setSearching(true);
+    return () => window.clearTimeout(timer);
+  }, [leftView, searchQuery, startSearch, stopSearch]);
+
+  useEffect(() => () => stopSearch(), [stopSearch]);
+
+  const openSearch = useCallback(() => {
+    if (folderRef.current) {
+      setShowLeft(true);
+      setLeftView("search");
+      requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".search-box input")?.focus());
+      return;
+    }
+    if (docRef.current?.path) {
+      setSearchConfirm(true);
+      return;
+    }
+    setNotice("先打开文档或目录");
+  }, []);
+
+  const openList = useCallback(() => {
+    if (folderRef.current) {
+      setShowLeft(true);
+      setLeftView("list");
+      return;
+    }
+    if (docRef.current?.path) {
+      setListConfirm(true);
+      return;
+    }
+    setNotice("先打开文档或目录");
+  }, []);
+
+  const confirmList = useCallback(async () => {
+    setListConfirm(false);
+    const result = await transport.attachParentFolder();
+    if (result.kind === "failed") {
+      setNotice(result.message);
+      return;
+    }
+    setSelected(result.rel);
+    startScan(result.root, result.name, true);
+    setShowLeft(true);
+    setLeftView("list");
+  }, [startScan, transport]);
+
+  const confirmSearch = useCallback(async () => {
+    setSearchConfirm(false);
+    const result = await transport.attachParentFolder();
+    if (result.kind === "failed") {
+      setNotice(result.message);
+      return;
+    }
+    setSelected(result.rel);
+    startScan(result.root, result.name, true);
+    setShowLeft(true);
+    setLeftView("search");
+    requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".search-box input")?.focus());
+  }, [startScan, transport]);
+
+  const openSearchMatch = useCallback(
+    (match: SearchMatch) => {
+      pendingSearch.current = {
+        path: match.path,
+        query: searchQuery.trim(),
+        isName: Boolean(match.isName),
+        mode: modeRef.current,
+        line: match.line ?? 0,
+      };
+      void openTreeFile({ path: match.path, name: match.name, isDir: false }, false);
+    },
+    [openTreeFile, searchQuery],
+  );
+
+  const closeSearch = useCallback(() => {
+    stopSearch();
+    setSearchQuery("");
+    setSearchResults([]);
+    setSearchError(null);
+    setLeftView(folderRef.current ? "tree" : "outline");
+  }, [stopSearch]);
 
   // M4-2: the buffer is saved through the window's file, or through Save As
   // when it has none. A conflict opens the explicit overwrite prompt.
@@ -1481,6 +1782,23 @@ export function App({ transport }: { transport: Transport }) {
     setMode("editing");
   }, [buffer, transport]);
 
+  // The reserved pane's switch has three states in effect: shown, hidden by
+  // the user, and hidden because the window is narrow. Pressing it while
+  // narrow records the wish and says when it will show.
+  const toggleRight = useCallback(() => {
+    if (!wideEnough) {
+      const next = !rightWanted;
+      setRightWanted(next);
+      setNotice(
+        next
+          ? "窗口较窄，预留侧栏将在加宽到 1200 像素后显示"
+          : "已取消显示预留侧栏，加宽窗口后也不会自动展开",
+      );
+      return;
+    }
+    setRightWanted((value) => !value);
+  }, [rightWanted, wideEnough]);
+
   const onMenuCommand = useCallback(
     (id: string) => {
       const editor = editorRef.current;
@@ -1504,6 +1822,28 @@ export function App({ transport }: { transport: Transport }) {
         case "delete-file": requestDelete(); return;
         case "settings": setSettingsError(null); setSettingsOpen(true); return;
         case "close": requestClose(); return;
+        case "toggle-left": setShowLeft((value) => !value); return;
+        case "toggle-right": toggleRight(); return;
+        case "view-outline":
+          if (!docRef.current) {
+            setNotice("尚未打开文档");
+            return;
+          }
+          setShowLeft(true);
+          setLeftView("outline");
+          return;
+        case "view-list":
+          openList();
+          return;
+        case "view-tree":
+          if (!folderRef.current) {
+            setNotice("尚未打开目录");
+            return;
+          }
+          setShowLeft(true);
+          setLeftView("tree");
+          return;
+        case "search-folder": openSearch(); return;
         case "undo": run((c) => c.undo()); return;
         case "redo": run((c) => c.redo()); return;
         case "cut": run((c) => void c.cut()); return;
@@ -1565,7 +1905,7 @@ export function App({ transport }: { transport: Transport }) {
         case "help-about": setHelpKind("about"); return;
       }
     },
-    [newDocument, newWindow, openFile, openFolder, requestClose, requestDelete, requestMove, requestProperties, revealFile, revealInSidebar, save, saveAs, startSaveAll, toggleSource, transport],
+    [newDocument, newWindow, openFile, openFolder, openList, openSearch, requestClose, requestDelete, requestMove, requestProperties, revealFile, revealInSidebar, save, saveAs, startSaveAll, toggleRight, toggleSource, transport],
   );
 
   // Links in the preview do not replace the buffer before M4-2's protection.
@@ -1577,23 +1917,6 @@ export function App({ transport }: { transport: Transport }) {
     }
     setNotice("编辑预览中暂不打开链接");
   }, []);
-
-  // The reserved pane's switch has three states in effect: shown, hidden by
-  // the user, and hidden because the window is narrow. Pressing it while
-  // narrow records the wish and says when it will show.
-  const toggleRight = useCallback(() => {
-    if (!wideEnough) {
-      const next = !rightWanted;
-      setRightWanted(next);
-      setNotice(
-        next
-          ? "窗口较窄，预留侧栏将在加宽到 1200 像素后显示"
-          : "已取消显示预留侧栏，加宽窗口后也不会自动展开",
-      );
-      return;
-    }
-    setRightWanted((value) => !value);
-  }, [rightWanted, wideEnough]);
 
   // Search the rendered document without touching its DOM (PRD FR-05).
   useEffect(() => {
@@ -1616,7 +1939,7 @@ export function App({ transport }: { transport: Transport }) {
     paint(ranges, current);
     const active = ranges[current];
     if (active) scrollToRange(active);
-  }, [findOpen, findQuery, doc?.html, mode]);
+  }, [findOpen, findQuery, doc?.html, mode, preview?.html]);
 
   // Source editing searches the buffer, not the rendered DOM. The find input
   // keeps focus; the editor only moves its selection.
@@ -1699,7 +2022,7 @@ export function App({ transport }: { transport: Transport }) {
       if (e.defaultPrevented) return;
       const command = commandFor(e);
       if (!command) return;
-      if ((settingsOpen || unsavedOpen || conflict !== null || reloadOpen || deleteTarget !== null || properties !== null || sidebarConfirm || saveAllSummary !== null || recentOpen || helpKind !== null) && command !== "dismiss") return;
+      if ((settingsOpen || unsavedOpen || conflict !== null || reloadOpen || deleteTarget !== null || properties !== null || sidebarConfirm || searchConfirm || listConfirm || saveAllSummary !== null || recentOpen || helpKind !== null) && command !== "dismiss") return;
       const editorAction = EDITOR_ACTIONS[command];
       if (editorAction) {
         const active = document.activeElement;
@@ -1714,6 +2037,9 @@ export function App({ transport }: { transport: Transport }) {
           if (findOpen) {
             e.preventDefault();
             closeFind();
+          } else if (leftView === "search") {
+            e.preventDefault();
+            closeSearch();
           } else if (notice) {
             e.preventDefault();
             setNotice(null);
@@ -1760,6 +2086,32 @@ export function App({ transport }: { transport: Transport }) {
           e.preventDefault();
           setShowLeft((value) => !value);
           return;
+        case "view-outline":
+          e.preventDefault();
+          if (!docRef.current) {
+            setNotice("尚未打开文档");
+            return;
+          }
+          setShowLeft(true);
+          setLeftView("outline");
+          return;
+        case "view-list":
+          e.preventDefault();
+          openList();
+          return;
+        case "view-tree":
+          e.preventDefault();
+          if (!folderRef.current) {
+            setNotice("尚未打开目录");
+            return;
+          }
+          setShowLeft(true);
+          setLeftView("tree");
+          return;
+        case "search-folder":
+          e.preventDefault();
+          openSearch();
+          return;
         case "toggle-source":
           e.preventDefault();
           void toggleSource();
@@ -1802,7 +2154,9 @@ export function App({ transport }: { transport: Transport }) {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [
     closeFind,
+    closeSearch,
     findOpen,
+    leftView,
     newDocument,
     newWindow,
     notice,
@@ -1819,9 +2173,13 @@ export function App({ transport }: { transport: Transport }) {
     deleteTarget,
     properties,
     sidebarConfirm,
+    searchConfirm,
+    listConfirm,
     saveAllSummary,
     recentOpen,
     helpKind,
+    openList,
+    openSearch,
     toggleSource,
   ]);
 
@@ -1833,8 +2191,12 @@ export function App({ transport }: { transport: Transport }) {
           canSave: mode !== "reading" && Boolean(doc),
           hasDoc: Boolean(doc),
           hasPath: Boolean(doc?.path),
-          fileTarget: Boolean(treeActive && treeFocus && !treeFocus.isDir) || Boolean(doc?.path),
-          propertiesTarget: Boolean(treeActive && treeFocus && !treeFocus.isDir) || Boolean(doc),
+          fileTarget: Boolean(leftView === "tree" && treeActive && treeFocus && !treeFocus.isDir) || Boolean(doc?.path),
+          propertiesTarget: Boolean(leftView === "tree" && treeActive && treeFocus && !treeFocus.isDir) || Boolean(doc),
+          hasFolder: Boolean(folder),
+          leftView,
+          showLeft,
+          showRight,
           saveAllRunning,
           saving,
           promptOpen: unsavedOpen || conflict !== null,
@@ -1906,7 +2268,15 @@ export function App({ transport }: { transport: Transport }) {
         {showLeft && (
           <aside
             className="side left"
-            aria-label="文件树"
+            aria-label={
+              leftView === "outline"
+                ? "大纲"
+                : leftView === "list"
+                  ? "文档列表"
+                  : leftView === "search"
+                    ? "目录搜索"
+                    : "文件树"
+            }
             onFocusCapture={() => setTreeActive(true)}
             onBlurCapture={(e) => {
               const next = e.relatedTarget as Element | null;
@@ -1914,7 +2284,27 @@ export function App({ transport }: { transport: Transport }) {
               if (!next || !e.currentTarget.contains(next)) setTreeActive(false);
             }}
           >
-            {folder ? (
+            {leftView === "search" ? (
+              <SearchPanel
+                query={searchQuery}
+                onQuery={setSearchQuery}
+                results={searchResults}
+                searching={searching}
+                truncated={searchTruncated}
+                error={searchError}
+                onOpen={openSearchMatch}
+                onCancel={stopSearch}
+                onClose={closeSearch}
+              />
+            ) : leftView === "outline" ? (
+              <OutlineView headings={outline} truncated={outlineTruncated} onGo={goOutline} />
+            ) : leftView === "list" && folder ? (
+              <DocumentList
+                entries={tree}
+                selected={selected}
+                onOpen={(entry) => void openTreeFile(entry, false)}
+              />
+            ) : folder ? (
               <FileTree
                 rootName={folder.name}
                 entries={tree}
@@ -2140,6 +2530,8 @@ export function App({ transport }: { transport: Transport }) {
           onDiscard={discardChanges}
           onCancel={() => {
             pendingAction.current = null;
+            pendingSearch.current = null;
+            pendingEditorLine.current = null;
             setUnsavedOpen(false);
             setUnsavedError(null);
           }}
@@ -2219,6 +2611,24 @@ export function App({ transport }: { transport: Transport }) {
           confirmLabel="打开目录"
           onConfirm={() => void confirmSidebar()}
           onCancel={() => setSidebarConfirm(false)}
+        />
+      )}
+      {searchConfirm && (
+        <ConfirmDialog
+          title="打开所在目录并搜索？"
+          message="目录搜索需要工作区。将当前文件所在目录作为工作区，当前文档保持不变。"
+          confirmLabel="打开目录"
+          onConfirm={() => void confirmSearch()}
+          onCancel={() => setSearchConfirm(false)}
+        />
+      )}
+      {listConfirm && (
+        <ConfirmDialog
+          title="打开所在目录并列出？"
+          message="文档列表需要工作区。将当前文件所在目录作为工作区，当前文档保持不变。"
+          confirmLabel="打开目录"
+          onConfirm={() => void confirmList()}
+          onCancel={() => setListConfirm(false)}
         />
       )}
       {properties && (

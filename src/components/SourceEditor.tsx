@@ -50,6 +50,8 @@ export type SourceCommands = {
   selectAll(): void;
   selectLine(): boolean;
   selectParagraph(): boolean;
+  /** Moves the cursor to a 1-based source line (M5-2 outline). */
+  goToLine(line: number): void;
   moveLine(direction: "up" | "down"): boolean;
   deleteForward(): boolean;
   find(query: string): { count: number; index: number };
@@ -288,6 +290,14 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, r
         if (!view || !mod) return false;
         const range = view.state.selection.main;
         return applyEdit(mod.selectParagraph({ text: view.state.doc.toString(), anchor: range.anchor, head: range.head }));
+      },
+      goToLine(line) {
+        const view = viewRef.current;
+        if (!view) return;
+        const number = Math.max(1, Math.min(Math.trunc(line), view.state.doc.lines));
+        const from = view.state.doc.line(number).from;
+        view.dispatch({ selection: { anchor: from }, scrollIntoView: true });
+        view.focus();
       },
       moveLine(direction) {
         const view = viewRef.current;

@@ -27,11 +27,16 @@ import {
   type FileProperties,
   type AttachFolderResult,
   type FileTrashed,
+  type OutlineResult,
+  type OutlineHeading,
+  type SearchFrame,
+  type SearchMatch,
 } from "../mygo";
 import { failureMessage, failureText } from "./errors";
 
 export type { Doc as OpenedDoc, DocUpdate, OpenRequest, ReadyInfo, ScanFrame, SaveAllSummary, SaveAllResult };
 export type { FileProperties, FileTrashed };
+export type { OutlineHeading, SearchFrame, SearchMatch };
 
 /** One row of the file tree, as Go sends it. */
 export type TreeEntry = ScanFrame["entries"][number];
@@ -98,6 +103,11 @@ export type PropertiesOutcome =
 /** What attaching the document's parent folder produced. */
 export type AttachFolderOutcome =
   | { kind: "attached"; root: string; name: string; rel: string }
+  | { kind: "failed"; code: string; message: string };
+
+/** What extracting an outline produced. */
+export type OutlineOutcome =
+  | { kind: "ok"; headings: OutlineResult["headings"]; truncated: boolean }
   | { kind: "failed"; code: string; message: string };
 
 /** The result of a call: its value, or a message for a failure. */
@@ -200,6 +210,10 @@ export interface Transport {
   attachParentFolder(): Promise<AttachFolderOutcome>;
   /** Subscribes to a file being moved to the recycle bin by another window. */
   onFileTrashed(listener: (event: FileTrashed) => void): () => void;
+  /** Extracts the headings of a source buffer for the left outline. */
+  extractOutline(text: string): Promise<OutlineOutcome>;
+  /** Streams directory-search matches; abort closes the channel. */
+  searchDirectory(query: string, onFrame: (frame: SearchFrame) => void): { abort: () => void; done: Promise<void> };
   /**
    * Streams the tree of the window's folder. Each frame appends rows; the
    * frame marked done carries the outcome. Abort stops the stream.
@@ -320,6 +334,39 @@ export const mygoTransport: Transport = {
     }
   },
   onFileTrashed: (listener) => subscribe(() => events.fileTrashed.on(listener)),
+  extractOutline: async (text) => {
+    try {
+      const result = await WindowService.extractOutline(text);
+      if (result.failure) {
+        return {
+          kind: "failed",
+          code: result.failure.code,
+          message: failureText(result.failure),
+        };
+      }
+      return { kind: "ok", headings: result.headings ?? [], truncated: result.truncated ?? false };
+    } catch (err) {
+      return {
+        kind: "failed",
+        code: "unknown",
+        message: failureText({
+          code: "unknown",
+          detail: err instanceof Error ? err.message : "",
+        }),
+      };
+    }
+  },
+  searchDirectory: (query, onFrame) => {
+    const frames = new Channel<SearchFrame>();
+    const reading = (async () => {
+      for await (const frame of frames) onFrame(frame);
+    })();
+    const done = WindowService.searchDirectory(query, frames).then(
+      () => reading,
+      () => reading,
+    );
+    return { abort: () => frames.close(), done };
+  },
   scan: (onFrame) => {
     const frames = new Channel<ScanFrame>();
     const reading = (async () => {

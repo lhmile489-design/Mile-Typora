@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Check } from "lucide-react";
 
 export type MenuItem =
   | { kind: "separator" }
@@ -8,6 +9,7 @@ export type MenuItem =
       shortcut?: string;
       disabled?: boolean;
       reason?: string;
+      checked?: boolean;
     };
 
 export type MenuGroup = {
@@ -132,8 +134,9 @@ export function MenuBar({ menus, onCommand }: Props) {
                   <button
                     className="menu-item"
                     type="button"
-                    role="menuitem"
+                    role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"}
                     key={item.id}
+                    aria-checked={item.checked}
                     aria-disabled={disabled || undefined}
                     title={disabled ? item.reason : undefined}
                     ref={(node) => {
@@ -146,6 +149,11 @@ export function MenuBar({ menus, onCommand }: Props) {
                       onCommand(item.id);
                     }}
                   >
+                    {item.checked ? (
+                      <Check className="menu-check" aria-hidden="true" />
+                    ) : (
+                      <span className="menu-check" aria-hidden="true" />
+                    )}
                     <span className="label">{item.label}</span>
                     {item.shortcut && <span className="shortcut">{item.shortcut}</span>}
                   </button>

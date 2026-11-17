@@ -190,6 +190,20 @@ export interface OpenRequestResult {
   failure?: Failure;
 }
 
+/** OutlineHeading is one row of the left outline (M5-2 VIEW-02). */
+export interface OutlineHeading {
+  level: number;
+  text: string;
+  line: number;
+}
+
+/** OutlineResult is the heading list of the current buffer or document. */
+export interface OutlineResult {
+  headings: OutlineHeading[];
+  truncated?: boolean;
+  failure?: Failure;
+}
+
 /**
  * PendingResult lists the open requests the page has not acknowledged yet, in
  * order. The page asks again after a remount or a reload and gets them back.
@@ -288,6 +302,30 @@ export interface ScanFrame {
    */
   unreadable?: number;
   failure?: Failure;
+}
+
+/**
+ * SearchFrame is one batch of directory-search results. Done marks the last
+ * frame and carries the outcome.
+ */
+export interface SearchFrame {
+  matches?: SearchMatch[];
+  done: boolean;
+  truncated?: boolean;
+  files?: number;
+  failure?: Failure;
+}
+
+/**
+ * SearchMatch is one directory-search result (M5-2 VIEW-05). Path is relative
+ * to the window's root; Line is 1-based and zero for a file-name match.
+ */
+export interface SearchMatch {
+  path: string;
+  name: string;
+  line?: number;
+  text?: string;
+  isName?: boolean;
 }
 
 /**
@@ -391,6 +429,14 @@ export const WindowService = {
    */
   documentProperties(rel: string): Promise<FileProperties> {
     return call("WindowService.DocumentProperties", rel);
+  },
+  /**
+   * ExtractOutline returns the headings of the page's buffer or document for the
+   * left outline (M5-2 VIEW-02). It parses the source with the same GFM rules as
+   * the renderer and never writes anything.
+   */
+  extractOutline(text: string): Promise<OutlineResult> {
+    return call("WindowService.ExtractOutline", text);
   },
   /**
    * GetSettings hands the page the settings and the recent list. A damaged file
@@ -555,6 +601,13 @@ export const WindowService = {
    */
   scan(frames: Channel<ScanFrame>): Promise<void> {
     return call("WindowService.Scan", frames);
+  },
+  /**
+   * SearchDirectory streams text matches from the window's authorized folder
+   * (M5-2 VIEW-05). Closing the channel cancels the walk.
+   */
+  searchDirectory(query: string, frames: Channel<SearchFrame>): Promise<void> {
+    return call("WindowService.SearchDirectory", query, frames);
   },
   /**
    * SetEditState lets the page tell the backend whether its buffer is dirty and

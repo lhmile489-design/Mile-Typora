@@ -43,6 +43,8 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     revealDocument: async () => ({ kind: "failed" as const, code: "no_file", message: "no file" }),
     attachParentFolder: async () => ({ kind: "failed" as const, code: "no_file", message: "no file" }),
     onFileTrashed: () => () => {},
+    extractOutline: async () => ({ kind: "ok" as const, headings: [], truncated: false }),
+    searchDirectory: () => ({ abort: () => {}, done: Promise.resolve() }),
     onNotice: () => () => {},
     onCloseRequested: () => () => {},
     saveDocument: async () => ({
@@ -505,6 +507,181 @@ describe("file operations", () => {
     expect(trashDocument).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "移至回收站" }));
     await waitFor(() => expect(trashDocument).toHaveBeenCalledWith("sub/b.md"));
+  });
+});
+
+describe("left views and directory search", () => {
+  const treeEntries = [
+    { path: "sub", name: "sub", isDir: true },
+    { path: "sub/a.md", name: "a.md", isDir: false },
+    { path: "a.md", name: "a.md", isDir: false },
+    { path: "b.md", name: "b.md", isDir: false },
+  ];
+
+  function folderWith(overrides: Partial<Transport> = {}) {
+    return fakeTransport({
+      openFolder: async () => ({ kind: "opened", root: "E:/notes", name: "notes" }),
+      scan: (onFrame) => {
+        queueMicrotask(() => {
+          onFrame({ entries: treeEntries, done: false } as never);
+          onFrame({ entries: [], done: true, truncated: false } as never);
+        });
+        return { abort: () => {}, done: Promise.resolve() };
+      },
+      ...overrides,
+    });
+  }
+
+  it("switches to the outline and back to the tree", async () => {
+    const extractOutline = vi.fn(async () => ({
+      kind: "ok" as const,
+      headings: [
+        { level: 1, text: "标题", line: 1 },
+        { level: 2, text: "小节", line: 3 },
+      ],
+      truncated: false,
+    }));
+    render(
+      <App
+        transport={folderWith({
+          openTreeFile: async (rel) => ({
+            kind: "file" as const,
+            rel,
+            doc: { ...loadedDoc.doc, name: "b.md", path: `E:/notes/${rel}` },
+          }),
+          extractOutline,
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
+    await screen.findByRole("tree", { name: "文件树" });
+    fireEvent.mouseDown(await screen.findByRole("treeitem", { name: /b\.md/ }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.keyDown(window, { key: "!", ctrlKey: true, shiftKey: true });
+    expect(await screen.findByRole("complementary", { name: "大纲" })).toBeTruthy();
+    expect(await screen.findByText("小节")).toBeTruthy();
+    fireEvent.click(screen.getByText("小节"));
+    fireEvent.keyDown(window, { key: "#", ctrlKey: true, shiftKey: true });
+    expect(await screen.findByRole("complementary", { name: "文件树" })).toBeTruthy();
+  });
+
+  it("shows a flat document list with relative paths for duplicate names", async () => {
+    render(<App transport={folderWith()} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
+    await screen.findByRole("tree", { name: "文件树" });
+    fireEvent.keyDown(window, { key: "@", ctrlKey: true, shiftKey: true });
+    const list = await screen.findByRole("complementary", { name: "文档列表" });
+    expect(within(list).getAllByText("a.md").length).toBeGreaterThanOrEqual(2);
+    expect(within(list).getByText("b.md")).toBeTruthy();
+    expect(within(list).getByText("sub/a.md")).toBeTruthy();
+  });
+
+  it("searches the folder and shows plain text matches", async () => {
+    let captured: { query: string; onFrame: (frame: unknown) => void } | null = null;
+    const searchDirectory = vi.fn((query, onFrame) => {
+      captured = { query, onFrame };
+      return { abort: () => {}, done: Promise.resolve() };
+    });
+    const openTreeFile = vi.fn(async (rel: string) => ({
+      kind: "file" as const,
+      rel,
+      doc: { ...loadedDoc.doc, name: rel, path: `E:/notes/${rel}` },
+    }));
+    render(
+      <App
+        transport={folderWith({
+          searchDirectory: searchDirectory as never,
+          openTreeFile,
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
+    await screen.findByRole("tree", { name: "文件树" });
+    fireEvent.keyDown(window, { key: "F", ctrlKey: true, shiftKey: true });
+    const input = await screen.findByRole("searchbox", { name: "搜索当前目录" });
+    fireEvent.change(input, { target: { value: "命中" } });
+    await waitFor(() => expect(searchDirectory).toHaveBeenCalledWith("命中", expect.any(Function)));
+    act(() => {
+      captured?.onFrame({ matches: [{ path: "a.md", name: "a.md", line: 2, text: "这里是命中" }], done: false });
+    });
+    expect(await screen.findByText("这里是命中")).toBeTruthy();
+    fireEvent.click(screen.getByText("这里是命中"));
+    await waitFor(() => expect(openTreeFile).toHaveBeenCalledWith("a.md", false));
+    const findInput = (await screen.findByLabelText("在文中查找")) as HTMLInputElement;
+    expect(findInput.value).toBe("命中");
+  });
+
+  it("marks the active left view in the View menu", async () => {
+    render(<App transport={folderWith()} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
+    await screen.findByRole("tree", { name: "文件树" });
+    fireEvent.keyDown(window, { key: "F", ctrlKey: true, shiftKey: true });
+    await screen.findByRole("searchbox", { name: "搜索当前目录" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "视图" }));
+    const searchItem = screen.getByRole("menuitemcheckbox", { name: /搜索/ });
+    const treeItem = screen.getByRole("menuitemcheckbox", { name: /文件树/ });
+    expect(searchItem.getAttribute("aria-checked")).toBe("true");
+    expect(treeItem.getAttribute("aria-checked")).toBe("false");
+    expect(searchItem.querySelector("svg")).toBeTruthy();
+    expect(treeItem.querySelector("svg")).toBeNull();
+  });
+
+  it("asks to open the parent folder before listing a single file", async () => {
+    const attachParentFolder = vi.fn(async () => ({
+      kind: "attached" as const,
+      root: "E:/notes",
+      name: "notes",
+      rel: "笔记.md",
+    }));
+    render(
+      <App
+        transport={folderWith({
+          openFile: async () => loadedDoc,
+          attachParentFolder,
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.keyDown(window, { key: "@", ctrlKey: true, shiftKey: true });
+    const dialog = await screen.findByRole("dialog", { name: "打开所在目录并列出？" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "打开目录" }));
+    await waitFor(() => expect(attachParentFolder).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("complementary", { name: "文档列表" })).toBeTruthy();
+  });
+
+  it("closes directory search with Escape", async () => {
+    render(<App transport={folderWith()} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
+    await screen.findByRole("tree", { name: "文件树" });
+    fireEvent.keyDown(window, { key: "F", ctrlKey: true, shiftKey: true });
+    await screen.findByRole("searchbox", { name: "搜索当前目录" });
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(await screen.findByRole("complementary", { name: "文件树" })).toBeTruthy();
+  });
+
+  it("asks to open the parent folder before searching a single file", async () => {
+    const attachParentFolder = vi.fn(async () => ({
+      kind: "attached" as const,
+      root: "E:/notes",
+      name: "notes",
+      rel: "笔记.md",
+    }));
+    render(
+      <App
+        transport={folderWith({
+          openFile: async () => loadedDoc,
+          attachParentFolder,
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.keyDown(window, { key: "F", ctrlKey: true, shiftKey: true });
+    const dialog = await screen.findByRole("dialog", { name: "打开所在目录并搜索？" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "打开目录" }));
+    await waitFor(() => expect(attachParentFolder).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("searchbox", { name: "搜索当前目录" })).toBeTruthy();
   });
 });
 

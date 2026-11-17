@@ -62,6 +62,8 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     revealDocument: async () => ({ kind: "failed" as const, code: "no_file", message: "no file" }),
     attachParentFolder: async () => ({ kind: "failed" as const, code: "no_file", message: "no file" }),
     onFileTrashed: () => () => {},
+    extractOutline: async () => ({ kind: "ok" as const, headings: [], truncated: false }),
+    searchDirectory: () => ({ abort: () => {}, done: Promise.resolve() }),
     onNotice: () => () => {},
     onCloseRequested: () => () => {},
     saveDocument: async () => ({

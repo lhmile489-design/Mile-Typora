@@ -25,6 +25,13 @@ describe("the P0 shortcut table", () => {
     ["w", { ctrlKey: true }, "close-window"],
     [",", { ctrlKey: true }, "settings"],
     ["l", { ctrlKey: true, shiftKey: true }, "toggle-left"],
+    ["1", { ctrlKey: true, shiftKey: true }, "view-outline"],
+    ["!", { ctrlKey: true, shiftKey: true }, "view-outline"],
+    ["2", { ctrlKey: true, shiftKey: true }, "view-list"],
+    ["@", { ctrlKey: true, shiftKey: true }, "view-list"],
+    ["3", { ctrlKey: true, shiftKey: true }, "view-tree"],
+    ["#", { ctrlKey: true, shiftKey: true }, "view-tree"],
+    ["f", { ctrlKey: true, shiftKey: true }, "search-folder"],
     ["/", { ctrlKey: true }, "toggle-source"],
     ["s", { ctrlKey: true }, "save-blocked"],
     ["1", { ctrlKey: true }, "heading-1"],
@@ -69,7 +76,6 @@ describe("the P0 shortcut table", () => {
     // The Shift variants stay free for P2 zoom and are not heading commands.
     expect(commandFor(press("=", { ctrlKey: true, shiftKey: true }))).toBeNull();
     expect(commandFor(press("-", { ctrlKey: true, shiftKey: true }))).toBeNull();
-    expect(commandFor(press("1", { ctrlKey: true, shiftKey: true }))).toBeNull();
     expect(commandFor(press("b", { ctrlKey: true, shiftKey: true }))).toBeNull();
     expect(commandFor(press("i", { ctrlKey: true, shiftKey: true }))).toBeNull();
     expect(commandFor(press("`", { ctrlKey: true }))).toBeNull();

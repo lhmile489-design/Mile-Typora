@@ -13,6 +13,10 @@ export type Command =
   | "close-window"
   | "settings"
   | "toggle-left"
+  | "view-outline"
+  | "view-list"
+  | "view-tree"
+  | "search-folder"
   | "toggle-source"
   | "save-blocked"
   | "save-as"
@@ -109,6 +113,10 @@ export function commandFor(e: KeyPress): Command | null {
   if (shift && (key === "`" || key === "~")) return "inline-code";
   if (!shift && key === ",") return "settings";
   if (shift && key === "l") return "toggle-left";
+  if (shift && (key === "1" || key === "!")) return "view-outline";
+  if (shift && (key === "2" || key === "@")) return "view-list";
+  if (shift && (key === "3" || key === "#")) return "view-tree";
+  if (shift && key === "f") return "search-folder";
   return null;
 }
 
@@ -123,6 +131,10 @@ export const SHORTCUT_HINT: Partial<Record<Command, string>> = {
   "close-window": "Ctrl+W",
   settings: "Ctrl+,",
   "toggle-left": "Ctrl+Shift+L",
+  "view-outline": "Ctrl+Shift+1",
+  "view-list": "Ctrl+Shift+2",
+  "view-tree": "Ctrl+Shift+3",
+  "search-folder": "Ctrl+Shift+F",
   "toggle-source": "Ctrl+/",
   "save-blocked": "Ctrl+S",
   "save-as": "Ctrl+Shift+S",

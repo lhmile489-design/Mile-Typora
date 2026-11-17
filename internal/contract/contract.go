@@ -220,6 +220,40 @@ type FileTrashed struct {
 	Name string `json:"name"`
 }
 
+// OutlineHeading is one row of the left outline (M5-2 VIEW-02).
+type OutlineHeading struct {
+	Level int    `json:"level"`
+	Text  string `json:"text"`
+	Line  int    `json:"line"`
+}
+
+// OutlineResult is the heading list of the current buffer or document.
+type OutlineResult struct {
+	Headings  []OutlineHeading `json:"headings"`
+	Truncated bool             `json:"truncated,omitempty"`
+	Failure   *Failure         `json:"failure,omitempty"`
+}
+
+// SearchMatch is one directory-search result (M5-2 VIEW-05). Path is relative
+// to the window's root; Line is 1-based and zero for a file-name match.
+type SearchMatch struct {
+	Path   string `json:"path"`
+	Name   string `json:"name"`
+	Line   int    `json:"line,omitempty"`
+	Text   string `json:"text,omitempty"`
+	IsName bool   `json:"isName,omitempty"`
+}
+
+// SearchFrame is one batch of directory-search results. Done marks the last
+// frame and carries the outcome.
+type SearchFrame struct {
+	Matches   []SearchMatch `json:"matches,omitempty"`
+	Done      bool          `json:"done"`
+	Truncated bool          `json:"truncated,omitempty"`
+	Files     int           `json:"files,omitempty"`
+	Failure   *Failure      `json:"failure,omitempty"`
+}
+
 // ThemeChange tells every window that the appearance preference changed
 // (PRD FR-10.12: all windows switch at once).
 type ThemeChange struct {
