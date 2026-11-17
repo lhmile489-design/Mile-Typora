@@ -112,6 +112,26 @@ export interface FolderInfo {
   name: string;
 }
 
+/** ImageCopyResult is the copied image and the relative path to insert. */
+export interface ImageCopyResult {
+  path?: string;
+  markdown?: string;
+  name?: string;
+  failure?: Failure;
+}
+
+/**
+ * ImagePickResult is a picked image waiting for confirmation before it is
+ * copied into the document's assets folder (M5-4 FORMAT-09).
+ */
+export interface ImagePickResult {
+  token?: string;
+  name?: string;
+  target?: string;
+  size?: number;
+  failure?: Failure;
+}
+
 /**
  * LinkTarget says what a link click means. The page scrolls an anchor, opens
  * a document from the tree, or says why nothing opened (PRD FR-06).
@@ -387,6 +407,10 @@ export const WindowService = {
   attachParentFolder(): Promise<AttachFolderResult> {
     return call("WindowService.AttachParentFolder");
   },
+  /** CancelImage forgets a pick the page chose not to copy. */
+  cancelImage(token: string): Promise<void> {
+    return call("WindowService.CancelImage", token);
+  },
   /**
    * ClearRecent empties the recent list (PRD FR-10.10). The resume target goes
    * with it once M3-2 keeps one.
@@ -422,6 +446,13 @@ export const WindowService = {
    */
   closeWindow(force: boolean): Promise<void> {
     return call("WindowService.CloseWindow", force);
+  },
+  /**
+   * CopyImage copies the confirmed image into assets and returns the Markdown
+   * path to insert. The pending token is one-use.
+   */
+  copyImage(token: string): Promise<ImageCopyResult> {
+    return call("WindowService.CopyImage", token);
   },
   /**
    * DocumentProperties returns the read-only details the properties dialog shows
@@ -519,6 +550,13 @@ export const WindowService = {
    */
   pending(after: number): Promise<PendingResult> {
     return call("WindowService.Pending", after);
+  },
+  /**
+   * PickImage asks for a local image and prepares a copy in the document's
+   * assets folder. Nothing is written until CopyImage confirms (M5-4 FORMAT-09).
+   */
+  pickImage(): Promise<ImagePickResult> {
+    return call("WindowService.PickImage");
   },
   /**
    * Ready is the page's handshake: it identifies the calling window. The page

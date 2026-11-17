@@ -254,6 +254,24 @@ type SearchFrame struct {
 	Failure   *Failure      `json:"failure,omitempty"`
 }
 
+// ImagePickResult is a picked image waiting for confirmation before it is
+// copied into the document's assets folder (M5-4 FORMAT-09).
+type ImagePickResult struct {
+	Token   string   `json:"token,omitempty"`
+	Name    string   `json:"name,omitempty"`
+	Target  string   `json:"target,omitempty"`
+	Size    int64    `json:"size,omitempty"`
+	Failure *Failure `json:"failure,omitempty"`
+}
+
+// ImageCopyResult is the copied image and the relative path to insert.
+type ImageCopyResult struct {
+	Path     string   `json:"path,omitempty"`
+	Markdown string   `json:"markdown,omitempty"`
+	Name     string   `json:"name,omitempty"`
+	Failure  *Failure `json:"failure,omitempty"`
+}
+
 // ThemeChange tells every window that the appearance preference changed
 // (PRD FR-10.12: all windows switch at once).
 type ThemeChange struct {

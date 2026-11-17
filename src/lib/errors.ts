@@ -13,6 +13,7 @@ const messages: Record<string, string> = {
   no_folder: "尚未打开文件夹",
   scan_failed: "无法读取此文件夹",
   render_timeout: "渲染超时",
+  image_failed: "无法复制图片",
   queue_full: "打开请求太多，请稍后再试",
   no_frontend: "页面没有加载",
 };

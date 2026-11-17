@@ -54,6 +54,8 @@ body {
 .menu-item .shortcut { margin-left: auto; color: var(--text-muted); font-size: var(--ui-xs); }
 .menu-check { width: 14px; height: 14px; flex: none; color: var(--accent); }
 .menu-sep { height: 1px; margin: var(--sp-1) var(--sp-2); background: var(--line); }
+.menu-entry { position: relative; }
+.menu-pop.submenu { top: calc(var(--sp-1) * -1); left: 100%; }
 
 /* 工具栏 */
 .toolbar {
@@ -484,6 +486,15 @@ body {
 .source-editor .cm-editor { height: 100%; }
 
 .dialog-text { margin: 0 0 var(--sp-3); color: var(--text-soft); }
+
+.dialog-field { display: flex; flex-direction: column; gap: var(--sp-2); font-size: var(--ui-sm); color: var(--text-soft); }
+.dialog-input {
+  height: var(--control-h); padding: 0 var(--sp-3);
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  background: var(--bg-app); color: var(--text); font: inherit; font-size: var(--ui-sm);
+}
+.dialog-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dialog-source { margin: 0 0 var(--sp-4); color: var(--text-muted); font-size: var(--ui-xs); overflow-wrap: anywhere; }
 
 .props-list { margin: 0 0 var(--sp-4); display: grid; gap: var(--sp-2); }
 .props-row { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: var(--sp-3); font-size: var(--ui-sm); }

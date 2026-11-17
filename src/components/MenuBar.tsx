@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Check } from "lucide-react";
 
+export type MenuChild = {
+  id: string;
+  label: string;
+  disabled?: boolean;
+  reason?: string;
+};
+
 export type MenuItem =
   | { kind: "separator" }
   | {
@@ -10,6 +17,8 @@ export type MenuItem =
       disabled?: boolean;
       reason?: string;
       checked?: boolean;
+      /** A flyout menu for grouped commands (M5-4 link operations). */
+      children?: MenuChild[];
     };
 
 export type MenuGroup = {
@@ -29,7 +38,9 @@ type Props = {
  */
 export function MenuBar({ menus, onCommand }: Props) {
   const [open, setOpen] = useState<number | null>(null);
+  const [submenu, setSubmenu] = useState<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
+  const submenuRef = useRef<HTMLDivElement>(null);
   const tops = useRef<Array<HTMLButtonElement | null>>([]);
   const items = useRef<Array<Array<HTMLButtonElement | null>>>([]);
   const focusFirst = useRef(false);
@@ -50,8 +61,16 @@ export function MenuBar({ menus, onCommand }: Props) {
     focusFirst.current = false;
   }, [open]);
 
+  useEffect(() => {
+    if (!submenu) return;
+    submenuRef.current
+      ?.querySelector<HTMLButtonElement>(".menu-item:not([aria-disabled='true'])")
+      ?.focus();
+  }, [submenu]);
+
   const openMenu = (index: number, focus = false) => {
     focusFirst.current = focus;
+    setSubmenu(null);
     setOpen(index);
   };
 
@@ -66,6 +85,10 @@ export function MenuBar({ menus, onCommand }: Props) {
     if (open === null) return;
     if (e.key === "Escape") {
       e.preventDefault();
+      if (submenu) {
+        setSubmenu(null);
+        return;
+      }
       setOpen(null);
       tops.current[open]?.focus();
       return;
@@ -130,33 +153,84 @@ export function MenuBar({ menus, onCommand }: Props) {
               {menu.items.map((item, itemIndex) => {
                 if ("kind" in item) return <div className="menu-sep" role="separator" key={`sep-${itemIndex}`} />;
                 const disabled = item.disabled === true;
+                const hasChildren = (item.children?.length ?? 0) > 0;
+                const expanded = submenu === item.id;
                 return (
-                  <button
-                    className="menu-item"
-                    type="button"
-                    role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"}
-                    key={item.id}
-                    aria-checked={item.checked}
-                    aria-disabled={disabled || undefined}
-                    title={disabled ? item.reason : undefined}
-                    ref={(node) => {
-                      items.current[index] ??= [];
-                      items.current[index][itemIndex] = node;
-                    }}
-                    onClick={() => {
-                      if (disabled) return;
-                      setOpen(null);
-                      onCommand(item.id);
-                    }}
-                  >
-                    {item.checked ? (
-                      <Check className="menu-check" aria-hidden="true" />
-                    ) : (
-                      <span className="menu-check" aria-hidden="true" />
+                  <div className="menu-entry" key={item.id}>
+                    <button
+                      className="menu-item"
+                      type="button"
+                      role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+                      aria-checked={item.checked}
+                      aria-haspopup={hasChildren ? "menu" : undefined}
+                      aria-expanded={hasChildren ? expanded : undefined}
+                      aria-disabled={disabled || undefined}
+                      title={disabled ? item.reason : undefined}
+                      ref={(node) => {
+                        items.current[index] ??= [];
+                        items.current[index][itemIndex] = node;
+                      }}
+                      onClick={() => {
+                        if (disabled) return;
+                        if (hasChildren) {
+                          setSubmenu(expanded ? null : item.id);
+                          return;
+                        }
+                        setOpen(null);
+                        onCommand(item.id);
+                      }}
+                      onMouseEnter={() => {
+                        if (disabled) return;
+                        if (hasChildren) setSubmenu(item.id);
+                        else setSubmenu(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (!hasChildren || disabled) return;
+                        if (e.key === "ArrowRight") {
+                          e.preventDefault();
+                          setSubmenu(item.id);
+                        } else if (e.key === "ArrowLeft") {
+                          e.preventDefault();
+                          setSubmenu(null);
+                        }
+                      }}
+                    >
+                      {item.checked ? (
+                        <Check className="menu-check" aria-hidden="true" />
+                      ) : (
+                        <span className="menu-check" aria-hidden="true" />
+                      )}
+                      <span className="label">{item.label}</span>
+                      {item.shortcut && <span className="shortcut">{item.shortcut}</span>}
+                      {hasChildren && <span className="shortcut" aria-hidden="true">&gt;</span>}
+                    </button>
+                    {hasChildren && expanded && (
+                      <div className="menu-pop submenu" role="menu" aria-label={item.label} ref={submenuRef}>
+                        {item.children!.map((child) => {
+                          const childDisabled = child.disabled === true;
+                          return (
+                            <button
+                              className="menu-item"
+                              type="button"
+                              role="menuitem"
+                              key={child.id}
+                              aria-disabled={childDisabled || undefined}
+                              title={childDisabled ? child.reason : undefined}
+                              onClick={() => {
+                                if (childDisabled) return;
+                                setSubmenu(null);
+                                setOpen(null);
+                                onCommand(child.id);
+                              }}
+                            >
+                              <span className="menu-check" aria-hidden="true" />
+                              <span className="label">{child.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
                     )}
-                    <span className="label">{item.label}</span>
-                    {item.shortcut && <span className="shortcut">{item.shortcut}</span>}
-                  </button>
+                  </div>
                 );
               })}
             </div>

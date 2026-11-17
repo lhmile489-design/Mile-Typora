@@ -45,6 +45,9 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     onFileTrashed: () => () => {},
     extractOutline: async () => ({ kind: "ok" as const, headings: [], truncated: false }),
     searchDirectory: () => ({ abort: () => {}, done: Promise.resolve() }),
+    pickImage: async () => ({ kind: "cancelled" as const }),
+    copyImage: async () => ({ kind: "failed" as const, code: "not_found", message: "no image" }),
+    cancelImage: async () => {},
     onNotice: () => () => {},
     onCloseRequested: () => () => {},
     saveDocument: async () => ({
@@ -444,6 +447,104 @@ describe("file operations", () => {
     content.focus();
     fireEvent.keyDown(content, { key: "u", ctrlKey: true });
     await waitFor(() => expect(content.textContent).toContain("<u></u>"));
+  });
+
+  it("edits, copies and removes a link from the format submenu", async () => {
+    const linkDoc = {
+      kind: "loaded" as const,
+      doc: { ...loadedDoc.doc, text: "[文字](https://a.example)", html: '<p><a href="https://a.example">文字</a></p>' },
+    };
+    const writeClipboardText = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    render(<App transport={fakeTransport({ openFile: async () => linkDoc, writeClipboardText })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByText("文字");
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    content.focus();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "格式" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "链接操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "编辑地址…" }));
+    const dialog = await screen.findByRole("dialog", { name: "编辑链接地址" });
+    fireEvent.change(within(dialog).getByLabelText("地址"), { target: { value: "https://b.example" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(content.textContent).toContain("[文字](https://b.example)"));
+
+    content.focus();
+    fireEvent.click(screen.getByRole("menuitem", { name: "格式" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "链接操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "复制链接地址" }));
+    await waitFor(() => expect(writeClipboardText).toHaveBeenCalledWith("https://b.example"));
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "格式" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "链接操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "移除链接" }));
+    await waitFor(() => expect(content.textContent).toBe("文字"));
+  });
+
+  it("copies a chosen image into assets and inserts its Markdown", async () => {
+    const pickImage = vi.fn(async () => ({
+      kind: "picked" as const,
+      token: "t1",
+      name: "图.png",
+      target: "E:/notes/assets/图.png",
+      size: 1024,
+    }));
+    const copyImage = vi.fn(async () => ({
+      kind: "copied" as const,
+      path: "E:/notes/assets/图.png",
+      markdown: "assets/%E5%9B%BE.png",
+      name: "图.png",
+    }));
+    render(<App transport={fakeTransport({ openFile: async () => loadedDoc, pickImage, copyImage })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    content.focus();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "格式" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /插入图片/ }));
+    const dialog = await screen.findByRole("dialog", { name: "复制图片到文档资源目录？" });
+    expect(dialog.textContent).toContain("E:/notes/assets/图.png");
+    fireEvent.click(within(dialog).getByRole("button", { name: "复制并插入" }));
+
+    await waitFor(() => expect(copyImage).toHaveBeenCalledWith("t1"));
+    expect(content.textContent).toContain("![图](assets/%E5%9B%BE.png)");
+  });
+
+  it("replaces the image syntax under the cursor and keeps the old file", async () => {
+    const imageDoc = {
+      kind: "loaded" as const,
+      doc: { ...loadedDoc.doc, text: "![图](assets/a.png)", html: '<p><img alt="图"></p>' },
+    };
+    const pickImage = vi.fn(async () => ({
+      kind: "picked" as const,
+      token: "t2",
+      name: "b.png",
+      target: "E:/notes/assets/b.png",
+      size: 1024,
+    }));
+    const copyImage = vi.fn(async () => ({
+      kind: "copied" as const,
+      path: "E:/notes/assets/b.png",
+      markdown: "assets/b.png",
+      name: "b.png",
+    }));
+    render(<App transport={fakeTransport({ openFile: async () => imageDoc, pickImage, copyImage })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await waitFor(() => expect(document.querySelector(".reader img")).not.toBeNull());
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    content.focus();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "格式" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /更换图片/ }));
+    const dialog = await screen.findByRole("dialog", { name: "复制并替换图片？" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "复制并替换" }));
+
+    await waitFor(() => expect(content.textContent).toContain("![图](assets/b.png)"));
+    expect(content.textContent).not.toContain("assets/a.png");
   });
 
   it("attaches the parent folder when showing a single file in the sidebar", async () => {

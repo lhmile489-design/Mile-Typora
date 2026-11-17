@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  imageAt,
   insertAlert,
   insertComment,
   insertFootnote,
   insertFrontMatter,
+  insertImageLink,
   insertLinkReference,
   insertTable,
   insertTOC,
+  linkAt,
+  removeLink,
+  replaceImageAt,
+  setLinkAddress,
   tableAddColumn,
   tableAddRow,
   tableAlign,
@@ -79,5 +85,56 @@ describe("extended Markdown commands", () => {
     expect(toggleUnderline(underline).text).toBe("文字");
     const comment = insertComment(selected);
     expect(comment.text).toBe("<!-- 文字 -->");
+  });
+
+  it("finds and edits an inline link under the cursor", () => {
+    const text = "前 [文字](https://a.example) 后";
+    const at = text.indexOf("文字");
+    const link = linkAt(snap(text, at));
+    expect(link?.url).toBe("https://a.example");
+    expect(link?.text).toBe("文字");
+
+    const changed = setLinkAddress(snap(text, at), "https://b.example");
+    expect(changed?.text).toBe("前 [文字](https://b.example) 后");
+
+    const removed = removeLink(snap(text, at));
+    expect(removed?.text).toBe("前 文字 后");
+  });
+
+  it("finds adjacent links and keeps a title when changing the address", () => {
+    const text = '[一](https://a.example)[二](https://b.example "标题")';
+    const at = text.indexOf("二");
+    expect(linkAt(snap(text, at))?.url).toBe("https://b.example");
+    const changed = setLinkAddress(snap(text, at), "https://c.example");
+    expect(changed?.text).toBe('[一](https://a.example)[二](https://c.example "标题")');
+  });
+
+  it("reads and rewrites the definition of a reference link", () => {
+    const text = "[文字][ref-1]\n\n[ref-1]: https://a.example";
+    const at = text.indexOf("文字");
+    expect(linkAt(snap(text, at))?.url).toBe("https://a.example");
+
+    const changed = setLinkAddress(snap(text, at), "https://b.example");
+    expect(changed?.text).toBe("[文字][ref-1]\n\n[ref-1]: https://b.example");
+
+    const removed = removeLink(snap(text, at));
+    expect(removed?.text).toBe("文字\n\n[ref-1]: https://a.example");
+  });
+
+  it("ignores images when looking for links", () => {
+    const text = "![图](assets/a.png)";
+    expect(linkAt(snap(text, 3))).toBeNull();
+    const image = imageAt(snap(text, 3));
+    expect(image?.url).toBe("assets/a.png");
+    expect(replaceImageAt(snap(text, 3), "assets/b.png")?.text).toBe("![图](assets/b.png)");
+  });
+
+  it("inserts an image, using the selection as its label", () => {
+    const plain = insertImageLink(snap("正文", 2), "assets/a.png", "a.png");
+    expect(plain.text).toBe("正文![a.png](assets/a.png)");
+
+    const selected = insertImageLink({ text: "文字", anchor: 0, head: 2 }, "assets/a.png", "a.png");
+    expect(selected.text).toBe("![文字](assets/a.png)");
+    expect(selected.anchor).toBe(2);
   });
 });

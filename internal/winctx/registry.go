@@ -28,13 +28,14 @@ type Window struct {
 	stopTree   func()
 	// What editing knows about the file: whether the buffer differs from
 	// disk, the hash it started from, and the format saving must keep.
-	dirty      bool
-	untitled   bool
-	closing    bool
-	baseHash   string
-	hasBOM     bool
-	lineEnding string
-	savedHash  string
+	dirty        bool
+	untitled     bool
+	closing      bool
+	baseHash     string
+	hasBOM       bool
+	lineEnding   string
+	savedHash    string
+	pendingImage *PendingImage
 }
 
 // ID is the native window's ID, as mygo.Window.ID reports it.
@@ -176,6 +177,44 @@ func (w *Window) SetSavedHash(hash string) {
 	w.stateMu.Lock()
 	w.savedHash = hash
 	w.stateMu.Unlock()
+}
+
+// PendingImage is a picked image waiting for the page's confirmation before
+// it is copied into the document's assets folder (M5-4 FORMAT-09).
+type PendingImage struct {
+	Token  string
+	Doc    string
+	Source string
+	Target string
+}
+
+// SetPendingImage remembers one picked image. A newer pick replaces the old
+// one; only the latest confirmation can be committed.
+func (w *Window) SetPendingImage(image PendingImage) {
+	w.stateMu.Lock()
+	w.pendingImage = &image
+	w.stateMu.Unlock()
+}
+
+// TakePendingImage returns and forgets the pending image matching token.
+func (w *Window) TakePendingImage(token string) (PendingImage, bool) {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	if w.pendingImage == nil || w.pendingImage.Token != token {
+		return PendingImage{}, false
+	}
+	image := *w.pendingImage
+	w.pendingImage = nil
+	return image, true
+}
+
+// ClearPendingImage forgets a picked image the page cancelled.
+func (w *Window) ClearPendingImage(token string) {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	if w.pendingImage != nil && w.pendingImage.Token == token {
+		w.pendingImage = nil
+	}
 }
 
 // SavedHash is the last hash written by a save, if any.

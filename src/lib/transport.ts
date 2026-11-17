@@ -31,6 +31,8 @@ import {
   type OutlineHeading,
   type SearchFrame,
   type SearchMatch,
+  type ImagePickResult,
+  type ImageCopyResult,
 } from "../mygo";
 import { failureMessage, failureText } from "./errors";
 
@@ -108,6 +110,17 @@ export type AttachFolderOutcome =
 /** What extracting an outline produced. */
 export type OutlineOutcome =
   | { kind: "ok"; headings: OutlineResult["headings"]; truncated: boolean }
+  | { kind: "failed"; code: string; message: string };
+
+/** What picking an image produced, before the copy confirmation. */
+export type ImagePickOutcome =
+  | { kind: "picked"; token: string; name: string; target: string; size: number }
+  | { kind: "cancelled" }
+  | { kind: "failed"; code: string; message: string };
+
+/** What copying a confirmed image produced. */
+export type ImageCopyOutcome =
+  | { kind: "copied"; path: string; markdown: string; name: string }
   | { kind: "failed"; code: string; message: string };
 
 /** The result of a call: its value, or a message for a failure. */
@@ -214,6 +227,12 @@ export interface Transport {
   extractOutline(text: string): Promise<OutlineOutcome>;
   /** Streams directory-search matches; abort closes the channel. */
   searchDirectory(query: string, onFrame: (frame: SearchFrame) => void): { abort: () => void; done: Promise<void> };
+  /** Picks a local image and prepares its assets/ target (M5-4). */
+  pickImage(): Promise<ImagePickOutcome>;
+  /** Copies the picked image after the page confirms. */
+  copyImage(token: string): Promise<ImageCopyOutcome>;
+  /** Drops a pick the page cancelled. */
+  cancelImage(token: string): Promise<void>;
   /**
    * Streams the tree of the window's folder. Each frame appends rows; the
    * frame marked done carries the outcome. Abort stops the stream.
@@ -367,6 +386,49 @@ export const mygoTransport: Transport = {
     );
     return { abort: () => frames.close(), done };
   },
+  pickImage: async () => {
+    try {
+      const result = await WindowService.pickImage();
+      if (result.failure) {
+        return { kind: "failed", code: result.failure.code, message: failureText(result.failure) };
+      }
+      if (!result.token) return { kind: "cancelled" };
+      return {
+        kind: "picked",
+        token: result.token,
+        name: result.name ?? "",
+        target: result.target ?? "",
+        size: result.size ?? 0,
+      };
+    } catch (err) {
+      return {
+        kind: "failed",
+        code: "unknown",
+        message: failureText({ code: "unknown", detail: err instanceof Error ? err.message : "" }),
+      };
+    }
+  },
+  copyImage: async (token) => {
+    try {
+      const result = await WindowService.copyImage(token);
+      if (result.failure) {
+        return { kind: "failed", code: result.failure.code, message: failureText(result.failure) };
+      }
+      return {
+        kind: "copied",
+        path: result.path ?? "",
+        markdown: result.markdown ?? "",
+        name: result.name ?? "",
+      };
+    } catch (err) {
+      return {
+        kind: "failed",
+        code: "unknown",
+        message: failureText({ code: "unknown", detail: err instanceof Error ? err.message : "" }),
+      };
+    }
+  },
+  cancelImage: (token) => WindowService.cancelImage(token),
   scan: (onFrame) => {
     const frames = new Channel<ScanFrame>();
     const reading = (async () => {

@@ -3,13 +3,19 @@ import type { EditorView } from "@codemirror/view";
 import type { AnnotationType, Extension } from "@codemirror/state";
 import type { HeadingLevel, ParagraphEdit, Snapshot } from "../editor/paragraph";
 import {
+  imageAt,
   insertAlert,
   insertComment,
   insertFootnote,
   insertFrontMatter,
+  insertImageLink,
   insertLinkReference,
   insertTable,
   insertTOC,
+  linkAt,
+  removeLink,
+  replaceImageAt,
+  setLinkAddress,
   tableAddColumn,
   tableAddRow,
   tableAlign,
@@ -81,6 +87,14 @@ export type SourceCommands = {
   insertFrontMatter(): boolean;
   toggleUnderline(): boolean;
   insertComment(): boolean;
+  /** Link operations (M5-4 FORMAT-08). */
+  linkInfo(): { text: string; url: string; reference: boolean } | null;
+  setLinkAddress(address: string): boolean;
+  removeLink(): boolean;
+  /** Image operations (M5-4 FORMAT-09). */
+  imageInfo(): { alt: string; url: string } | null;
+  insertImage(markdown: string, alt: string): boolean;
+  replaceImage(markdown: string): boolean;
   selectAll(): void;
   selectLine(): boolean;
   selectParagraph(): boolean;
@@ -102,10 +116,12 @@ type Props = {
   /** Clipboard through the app's native binding, not the WebView permission. */
   readClipboard: () => Promise<string | null>;
   writeClipboard: (text: string) => Promise<boolean>;
-  /** Reports whether the caret is inside a pipe table, for menu enablement. */
-  onContext?: (inTable: boolean) => void;
+  /** Reports what sits under the caret, for menu enablement. */
+  onContext?: (context: EditorContext) => void;
   ref?: React.Ref<SourceCommands>;
 };
+
+export type EditorContext = { inTable: boolean; inLink: boolean; inImage: boolean };
 
 /**
  * The Markdown source editor (PRD 10.1, M4-1). CodeMirror is imported only
@@ -358,6 +374,32 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
       insertComment() {
         return runExtended((snapshot) => insertComment(snapshot));
       },
+      linkInfo() {
+        const view = viewRef.current;
+        if (!view) return null;
+        const range = view.state.selection.main;
+        const link = linkAt({ text: view.state.doc.toString(), anchor: range.anchor, head: range.head });
+        return link ? { text: link.text, url: link.url, reference: link.referenceLabel !== undefined } : null;
+      },
+      setLinkAddress(address) {
+        return runExtended((snapshot) => setLinkAddress(snapshot, address));
+      },
+      removeLink() {
+        return runExtended((snapshot) => removeLink(snapshot));
+      },
+      imageInfo() {
+        const view = viewRef.current;
+        if (!view) return null;
+        const range = view.state.selection.main;
+        const image = imageAt({ text: view.state.doc.toString(), anchor: range.anchor, head: range.head });
+        return image ? { alt: image.alt, url: image.url } : null;
+      },
+      insertImage(markdown, alt) {
+        return runExtended((snapshot) => insertImageLink(snapshot, markdown, alt));
+      },
+      replaceImage(markdown) {
+        return runExtended((snapshot) => replaceImageAt(snapshot, markdown));
+      },
       selectAll() {
         const view = viewRef.current;
         if (!view) return;
@@ -531,7 +573,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
         EditorView.updateListener.of((update) => {
           if (!update.docChanged && !update.selectionSet) return;
           if (update.docChanged && !applying.current) changeRef.current(update.state.doc.toString());
-          contextRef.current?.(inTableAt(update.state.doc.toString(), update.state.selection.main.head));
+          contextRef.current?.(contextAt(update.state.doc.toString(), update.state.selection.main.head));
         }),
       ];
       extensions.current = editorExtensions;
@@ -540,7 +582,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
         state: EditorState.create({ doc: valueRef.current, extensions: editorExtensions }),
       });
       viewRef.current = view;
-      contextRef.current?.(inTableAt(valueRef.current, 0));
+      contextRef.current?.(contextAt(valueRef.current, 0));
       view.focus();
     })();
 
@@ -584,9 +626,18 @@ function selectedText(view: EditorView): string {
 const TABLE_ROW = /^\s*\|.*\|\s*$/;
 const TABLE_DELIMITER = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/;
 
+/** contextAt reports what the caret touches, for menu enablement (M5-4). */
+export function contextAt(text: string, position: number): EditorContext {
+  const snapshot = { text, anchor: position, head: position };
+  return {
+    inTable: inTableAt(text, position),
+    inLink: linkAt(snapshot) !== null,
+    inImage: imageAt(snapshot) !== null,
+  };
+}
+
 /** inTableAt is a cheap local check for menu enablement, not a full parse. */
-export function inTableAt(text: string, position: number): boolean {
-  let lineStart = text.lastIndexOf("\n", Math.max(0, position - 1)) + 1;
+export function inTableAt(text: string, position: number): boolean {  let lineStart = text.lastIndexOf("\n", Math.max(0, position - 1)) + 1;
   const lineEnd = text.indexOf("\n", position);
   const current = text.slice(lineStart, lineEnd === -1 ? text.length : lineEnd);
   if (!TABLE_ROW.test(current)) return false;

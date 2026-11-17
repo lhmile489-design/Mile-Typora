@@ -305,3 +305,140 @@ export function insertComment(snapshot: Snapshot): Snapshot {
   const text = snapshot.text.slice(0, from) + `<!-- ${selected} -->` + snapshot.text.slice(to);
   return result(text, from + 5, from + 5 + selected.length);
 }
+
+export type LinkInfo = {
+  start: number;
+  end: number;
+  textStart: number;
+  textEnd: number;
+  urlStart: number;
+  urlEnd: number;
+  url: string;
+  text: string;
+  referenceLabel?: string;
+};
+
+function definitionOf(
+  text: string,
+  label: string,
+): { url: string; start: number; end: number; urlStart: number; urlEnd: number } | null {
+  const pattern = new RegExp(`^\\[${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]:\\s*(\\S+)`, "m");
+  const match = pattern.exec(text);
+  if (!match) return null;
+  const lineStart = match.index;
+  const urlStart = lineStart + match[0].length - match[1]!.length;
+  return { url: match[1]!, start: lineStart, end: lineStart + match[0].length, urlStart, urlEnd: lineStart + match[0].length };
+}
+
+/** lineBounds limits link and image scans to the cursor's own line. */
+function lineBounds(text: string, position: number): { start: number; end: number } {
+  const start = text.lastIndexOf("\n", Math.max(0, position - 1)) + 1;
+  const end = text.indexOf("\n", position);
+  return { start, end: end === -1 ? text.length : end };
+}
+
+/** linkAt finds an inline or reference link under the cursor. */
+export function linkAt(snapshot: Snapshot): LinkInfo | null {
+  const position = Math.min(snapshot.anchor, snapshot.head);
+  const { start: lineStart, end: lineEnd } = lineBounds(snapshot.text, position);
+  const line = snapshot.text.slice(lineStart, lineEnd);
+  const inline = /(?<!!)(\[([^\]]*)\]\(([^)\n]*)\))/g;
+  let match: RegExpExecArray | null;
+  while ((match = inline.exec(line))) {
+    const start = lineStart + match.index;
+    const end = start + match[1]!.length;
+    if (position < start || position > end) continue;
+    const textStart = start + 1;
+    const textEnd = textStart + (match[2] ?? "").length;
+    const inner = match[3] ?? "";
+    // The target ends at whitespace; a quoted title after it stays untouched.
+    const target = inner.split(/\s+/)[0] ?? "";
+    const urlStart = textEnd + 2;
+    return {
+      start,
+      end,
+      textStart,
+      textEnd,
+      urlStart,
+      urlEnd: urlStart + target.length,
+      text: match[2] ?? "",
+      url: target,
+    };
+  }
+  const reference = /(?<!!)(\[([^\]]*)\]\[([^\]]*)\])/g;
+  while ((match = reference.exec(line))) {
+    const start = lineStart + match.index;
+    const end = start + match[1]!.length;
+    if (position < start || position > end) continue;
+    const label = match[3] || match[2] || "";
+    const definition = definitionOf(snapshot.text, label);
+    if (!definition) return null;
+    return {
+      start,
+      end,
+      textStart: start + 1,
+      textEnd: start + 1 + (match[2] ?? "").length,
+      urlStart: definition.urlStart,
+      urlEnd: definition.urlEnd,
+      url: definition.url,
+      text: match[2] ?? "",
+      referenceLabel: label,
+    };
+  }
+  return null;
+}
+
+/** removeLink unwraps the link under the cursor, keeping its text. */
+export function removeLink(snapshot: Snapshot): ParagraphEdit {
+  const link = linkAt(snapshot);
+  if (!link) return null;
+  const text = snapshot.text.slice(0, link.start) + link.text + snapshot.text.slice(link.end);
+  return result(text, link.start, link.start + link.text.length);
+}
+
+/** setLinkAddress changes the target of the link under the cursor. */
+export function setLinkAddress(snapshot: Snapshot, address: string): ParagraphEdit {
+  const link = linkAt(snapshot);
+  if (!link) return null;
+  const url = address.trim();
+  const text = snapshot.text.slice(0, link.urlStart) + url + snapshot.text.slice(link.urlEnd);
+  return result(text, link.urlStart, link.urlStart + url.length);
+}
+
+/** insertImageLink inserts or wraps a Markdown image. */
+export function insertImageLink(snapshot: Snapshot, markdown: string, alt: string): Snapshot {
+  const from = Math.min(snapshot.anchor, snapshot.head);
+  const to = Math.max(snapshot.anchor, snapshot.head);
+  const raw = snapshot.text.slice(from, to) || alt;
+  const label = raw.replace(/([\[\]])/g, "\\$1");
+  const image = `![${label}](${markdown})`;
+  const text = snapshot.text.slice(0, from) + image + snapshot.text.slice(to);
+  const inner = from + 2;
+  return result(text, inner, inner + label.length);
+}
+
+/** imageAt finds the Markdown image around the cursor. */
+export function imageAt(snapshot: Snapshot): { start: number; end: number; alt: string; url: string; urlStart: number; urlEnd: number } | null {
+  const position = Math.min(snapshot.anchor, snapshot.head);
+  const { start: lineStart, end: lineEnd } = lineBounds(snapshot.text, position);
+  const line = snapshot.text.slice(lineStart, lineEnd);
+  const pattern = /!\[([^\]]*)\]\(([^)\n]*)\)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(line))) {
+    const start = lineStart + match.index;
+    const end = start + match[0].length;
+    if (position < start || position > end) continue;
+    const target = (match[2] ?? "").split(/\s+/)[0] ?? "";
+    const urlStart = start + 2 + (match[1] ?? "").length + 2;
+    return { start, end, alt: match[1] ?? "", url: target, urlStart, urlEnd: urlStart + target.length };
+  }
+  return null;
+}
+
+/** replaceImageAt swaps the image target under the cursor. */
+export function replaceImageAt(snapshot: Snapshot, markdown: string): ParagraphEdit {
+  const image = imageAt(snapshot);
+  if (!image) return null;
+  const text = snapshot.text.slice(0, image.urlStart) + markdown + snapshot.text.slice(image.urlEnd);
+  return result(text, image.urlStart, image.urlStart + markdown.length);
+}

@@ -53,7 +53,9 @@ type Deps struct {
 	PickFolder Picker
 	// PickMoveFolder asks for a destination folder for MoveDocument.
 	PickMoveFolder Picker
-	Resources      *resource.Store
+	// PickImageFile asks for a local image for FORMAT-09.
+	PickImageFile Picker
+	Resources     *resource.Store
 	// Watcher shares one file watch between the windows that show a file.
 	Watcher *watch.Pool
 	// DocUpdated tells one window its document changed.
@@ -101,6 +103,7 @@ type WindowService struct {
 	pick      Picker
 	pickDir   Picker
 	pickMove  Picker
+	pickImage Picker
 	render    *markdown.Renderer
 	resources *resource.Store
 	watcher   *watch.Pool
@@ -142,6 +145,9 @@ func NewWindowService(d Deps) *WindowService {
 	if d.PickMoveFolder == nil {
 		d.PickMoveFolder = PickMoveFolder
 	}
+	if d.PickImageFile == nil {
+		d.PickImageFile = PickImageFile
+	}
 	if d.Confirm == nil {
 		d.Confirm = ConfirmNative
 	}
@@ -171,6 +177,7 @@ func NewWindowService(d Deps) *WindowService {
 		pick:           d.PickFile,
 		pickDir:        d.PickFolder,
 		pickMove:       d.PickMoveFolder,
+		pickImage:      d.PickImageFile,
 		render:         markdown.New(),
 		resources:      d.Resources,
 		watcher:        d.Watcher,

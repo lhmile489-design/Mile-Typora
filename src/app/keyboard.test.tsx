@@ -45,6 +45,9 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     onFileTrashed: () => () => {},
     extractOutline: async () => ({ kind: "ok" as const, headings: [], truncated: false }),
     searchDirectory: () => ({ abort: () => {}, done: Promise.resolve() }),
+    pickImage: async () => ({ kind: "cancelled" as const }),
+    copyImage: async () => ({ kind: "failed" as const, code: "not_found", message: "no image" }),
+    cancelImage: async () => {},
     onNotice: () => () => {},
     onCloseRequested: () => () => {},
     saveDocument: async () => ({

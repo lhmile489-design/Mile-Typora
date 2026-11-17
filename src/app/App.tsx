@@ -46,6 +46,7 @@ import { DocumentList } from "../components/DocumentList";
 import { OutlineView } from "../components/OutlineView";
 import { SearchPanel } from "../components/SearchPanel";
 import { TableDialog } from "../components/TableDialog";
+import { LinkDialog } from "../components/LinkDialog";
 import { SettingsDialog } from "../components/SettingsDialog";
 import { UnsavedDialog } from "../components/UnsavedDialog";
 import { FindBar } from "../components/FindBar";
@@ -88,6 +89,8 @@ type MenuState = {
   showLeft: boolean;
   showRight: boolean;
   inTable: boolean;
+  inLink: boolean;
+  inImage: boolean;
   saveAllRunning: boolean;
   saving: boolean;
   promptOpen: boolean;
@@ -260,6 +263,19 @@ function buildMenus(state: MenuState): MenuGroup[] {
         editing("inline-code", "代码", "Ctrl+Shift+反引号"),
         editing("strikethrough", "删除线", "Alt+Shift+5"),
         editing("link", "超链接", "Ctrl+K"),
+        {
+          id: "link-ops",
+          label: "链接操作",
+          disabled: !state.editing,
+          reason,
+          children: [
+            { id: "link-edit", label: "编辑地址…", disabled: !state.inLink, reason: "光标不在链接内" },
+            { id: "link-remove", label: "移除链接", disabled: !state.inLink, reason: "光标不在链接内" },
+            { id: "link-copy", label: "复制链接地址", disabled: !state.inLink, reason: "光标不在链接内" },
+          ],
+        },
+        editing("image-insert", "插入图片…", undefined, !state.editing || !state.hasPath, !state.editing ? reason : "先保存文档，再复制本地图片"),
+        editing("image-replace", "更换图片…", undefined, !state.editing || !state.hasPath || !state.inImage, !state.editing ? reason : !state.hasPath ? "先保存文档，再复制本地图片" : "光标不在图片语法内"),
         editing("underline", "下划线", "Ctrl+U"),
         editing("comment-insert", "注释"),
         editing("clear-format", "清除样式", "Ctrl+\\"),
@@ -361,6 +377,15 @@ export function App({ transport }: { transport: Transport }) {
   // M4-1: one buffer per window; preview renders the same string through Go.
   const [mode, setMode] = useState<ViewMode>("reading");
   const [editorInTable, setEditorInTable] = useState(false);
+  const [editorInLink, setEditorInLink] = useState(false);
+  const [editorInImage, setEditorInImage] = useState(false);
+  const [linkDialog, setLinkDialog] = useState<{ address: string; reference: boolean } | null>(null);
+  const [imageConfirm, setImageConfirm] = useState<{
+    token: string;
+    name: string;
+    target: string;
+    mode: "insert" | "replace";
+  } | null>(null);
   const [buffer, setBuffer] = useState("");
   const [preview, setPreview] = useState<{ html: string; counts: OpenedDoc["counts"] } | null>(null);
   // M4-2: the buffer is dirty when it differs from the last saved/loaded text.
@@ -1829,6 +1854,52 @@ export function App({ transport }: { transport: Transport }) {
     setRightWanted((value) => !value);
   }, [rightWanted, wideEnough]);
 
+  /** chooseImage asks Go for a local image and waits for the copy confirmation. */
+  const chooseImage = useCallback(
+    async (mode: "insert" | "replace") => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      if (mode === "replace" && !editor.imageInfo()) {
+        setNotice("光标不在图片语法内");
+        return;
+      }
+      const picked = await transport.pickImage();
+      if (picked.kind === "failed") {
+        setNotice(picked.message);
+        return;
+      }
+      if (picked.kind !== "picked") return;
+      setImageConfirm({ token: picked.token, name: picked.name, target: picked.target, mode });
+    },
+    [transport],
+  );
+
+  /** confirmImageCopy performs the confirmed write and one editor command. */
+  const confirmImageCopy = useCallback(async () => {
+    if (!imageConfirm) return;
+    const pending = imageConfirm;
+    setImageConfirm(null);
+    const copied = await transport.copyImage(pending.token);
+    if (copied.kind === "failed") {
+      setNotice(copied.message);
+      return;
+    }
+    const editor = editorRef.current;
+    if (!editor) return;
+    if (pending.mode === "replace") {
+      if (!editor.replaceImage(copied.markdown)) setNotice("光标已不在图片语法内，资源已复制但没有替换链接");
+      return;
+    }
+    const alt = pending.name.replace(/\.[^.]+$/, "");
+    if (!editor.insertImage(copied.markdown, alt)) setNotice("无法插入图片");
+  }, [imageConfirm, transport]);
+
+  const cancelImageCopy = useCallback(() => {
+    if (!imageConfirm) return;
+    void transport.cancelImage(imageConfirm.token);
+    setImageConfirm(null);
+  }, [imageConfirm, transport]);
+
   const onMenuCommand = useCallback(
     (id: string) => {
       const editor = editorRef.current;
@@ -1950,6 +2021,31 @@ export function App({ transport }: { transport: Transport }) {
         case "inline-code": run((c) => c.toggleInlineCode()); return;
         case "strikethrough": run((c) => c.toggleStrikethrough()); return;
         case "link": run((c) => c.insertLink()); return;
+        case "link-edit": {
+          const info = editorRef.current?.linkInfo() ?? null;
+          if (!info) {
+            setNotice("光标不在链接内");
+            return;
+          }
+          setLinkDialog({ address: info.url, reference: info.reference });
+          return;
+        }
+        case "link-remove":
+          if (!editorRef.current?.removeLink()) setNotice("光标不在链接内");
+          return;
+        case "link-copy": {
+          const info = editorRef.current?.linkInfo() ?? null;
+          if (!info) {
+            setNotice("光标不在链接内");
+            return;
+          }
+          void transport.writeClipboardText(info.url).then((result) => {
+            if (!result.ok) setNotice(result.message);
+          });
+          return;
+        }
+        case "image-insert": void chooseImage("insert"); return;
+        case "image-replace": void chooseImage("replace"); return;
         case "underline": run((c) => c.toggleUnderline()); return;
         case "clear-format": run((c) => c.clearFormatting()); return;
         case "toggle-source": void toggleSource(); return;
@@ -1957,7 +2053,7 @@ export function App({ transport }: { transport: Transport }) {
         case "help-about": setHelpKind("about"); return;
       }
     },
-    [newDocument, newWindow, openFile, openFolder, openList, openSearch, requestClose, requestDelete, requestMove, requestProperties, revealFile, revealInSidebar, save, saveAs, startSaveAll, toggleRight, toggleSource, transport],
+    [newDocument, newWindow, openFile, openFolder, openList, openSearch, requestClose, requestDelete, requestMove, requestProperties, revealFile, revealInSidebar, save, saveAs, startSaveAll, toggleRight, toggleSource, chooseImage, transport],
   );
 
   // Links in the preview do not replace the buffer before M4-2's protection.
@@ -2074,7 +2170,7 @@ export function App({ transport }: { transport: Transport }) {
       if (e.defaultPrevented) return;
       const command = commandFor(e);
       if (!command) return;
-      if ((settingsOpen || unsavedOpen || conflict !== null || reloadOpen || deleteTarget !== null || properties !== null || sidebarConfirm || searchConfirm || listConfirm || tableOpen || saveAllSummary !== null || recentOpen || helpKind !== null) && command !== "dismiss") return;
+      if ((settingsOpen || unsavedOpen || conflict !== null || reloadOpen || deleteTarget !== null || properties !== null || sidebarConfirm || searchConfirm || listConfirm || tableOpen || linkDialog !== null || imageConfirm !== null || saveAllSummary !== null || recentOpen || helpKind !== null) && command !== "dismiss") return;
       const editorAction = EDITOR_ACTIONS[command];
       if (editorAction) {
         const active = document.activeElement;
@@ -2251,6 +2347,8 @@ export function App({ transport }: { transport: Transport }) {
           showLeft,
           showRight,
           inTable: editorInTable,
+          inLink: editorInLink,
+          inImage: editorInImage,
           saveAllRunning,
           saving,
           promptOpen: unsavedOpen || conflict !== null,
@@ -2437,7 +2535,11 @@ export function App({ transport }: { transport: Transport }) {
               ref={editorRef}
               value={buffer}
               onChange={setBuffer}
-              onContext={setEditorInTable}
+              onContext={(context) => {
+                setEditorInTable(context.inTable);
+                setEditorInLink(context.inLink);
+                setEditorInImage(context.inImage);
+              }}
               readClipboard={async () => {
                 const result = await transport.readClipboardText();
                 return result.ok ? result.value : null;
@@ -2691,6 +2793,26 @@ export function App({ transport }: { transport: Transport }) {
           properties={properties.props}
           unsaved={properties.unsaved}
           onClose={() => setProperties(null)}
+        />
+      )}
+      {linkDialog && (
+        <LinkDialog
+          address={linkDialog.address}
+          reference={linkDialog.reference}
+          onSave={(address) => {
+            setLinkDialog(null);
+            if (!editorRef.current?.setLinkAddress(address)) setNotice("光标不在链接内");
+          }}
+          onCancel={() => setLinkDialog(null)}
+        />
+      )}
+      {imageConfirm && (
+        <ConfirmDialog
+          title={imageConfirm.mode === "replace" ? "复制并替换图片？" : "复制图片到文档资源目录？"}
+          message={`将“${imageConfirm.name}”复制到 ${imageConfirm.target}，并把相对路径写入文档。目标存在同名文件时自动加序号，不覆盖已有文件。`}
+          confirmLabel={imageConfirm.mode === "replace" ? "复制并替换" : "复制并插入"}
+          onConfirm={() => void confirmImageCopy()}
+          onCancel={cancelImageCopy}
         />
       )}
       {tableOpen && (
