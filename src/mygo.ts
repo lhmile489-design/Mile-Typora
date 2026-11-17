@@ -148,6 +148,18 @@ export interface ImagePickResult {
 }
 
 /**
+ * ImportResult is an imported Markdown buffer and its format-loss warnings.
+ * Text is empty when the result was handed to a newly opened window.
+ */
+export interface ImportResult {
+  text?: string;
+  name?: string;
+  warnings?: string[];
+  windowId: number;
+  failure?: Failure;
+}
+
+/**
  * LinkTarget says what a link click means. The page scrolls an anchor, opens
  * a document from the tree, or says why nothing opened (PRD FR-06).
  */
@@ -267,6 +279,10 @@ export interface ReadyInfo {
   startupNotice?: string;
   /** StartUntitled asks the page to begin with an unsaved document (Ctrl+N). */
   startUntitled?: boolean;
+  /** StartText is the imported buffer a new window should begin with. */
+  startText?: string;
+  /** StartName is the suggested document name for StartText. */
+  startName?: string;
 }
 
 /** RecentEntry is one row of the start page's recent list. */
@@ -594,6 +610,13 @@ export const WindowService = {
    */
   getWindowView(): Promise<WindowViewState> {
     return call("WindowService.GetWindowView");
+  },
+  /**
+   * ImportDocument converts a user-chosen HTML or DOCX file into a new unsaved
+   * Markdown buffer. It never writes the source file or the imported text.
+   */
+  importDocument(): Promise<ImportResult> {
+    return call("WindowService.ImportDocument");
   },
   /**
    * MoveDocument moves the current document, or a file selected in the tree,

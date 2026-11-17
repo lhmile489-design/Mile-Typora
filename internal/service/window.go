@@ -55,6 +55,8 @@ type Deps struct {
 	PickMoveFolder Picker
 	// PickImageFile asks for a local image for FORMAT-09.
 	PickImageFile Picker
+	// PickImportFile asks for an HTML or DOCX file to import (FILE-15).
+	PickImportFile Picker
 	Resources     *resource.Store
 	// Watcher shares one file watch between the windows that show a file.
 	Watcher *watch.Pool
@@ -117,6 +119,7 @@ type WindowService struct {
 	pickDir   Picker
 	pickMove  Picker
 	pickImage Picker
+	pickImport Picker
 	render    *markdown.Renderer
 	resources *resource.Store
 	watcher   *watch.Pool
@@ -177,6 +180,9 @@ func NewWindowService(d Deps) *WindowService {
 	if d.PickImageFile == nil {
 		d.PickImageFile = PickImageFile
 	}
+	if d.PickImportFile == nil {
+		d.PickImportFile = PickImportFile
+	}
 	if d.Confirm == nil {
 		d.Confirm = ConfirmNative
 	}
@@ -210,6 +216,7 @@ func NewWindowService(d Deps) *WindowService {
 		pickDir:            d.PickFolder,
 		pickMove:           d.PickMoveFolder,
 		pickImage:          d.PickImageFile,
+		pickImport:         d.PickImportFile,
 		render:             markdown.New(),
 		resources:          d.Resources,
 		watcher:            d.Watcher,
@@ -1037,6 +1044,9 @@ func (s *WindowService) Ready(ctx context.Context) (contract.ReadyInfo, error) {
 		log.Printf("perf: ready window=%d ms=%d", w.ID(), time.Since(s.startedAt).Milliseconds())
 	}
 	info := contract.ReadyInfo{WindowID: w.ID(), Version: s.version(), StartUntitled: w.StartUntitled()}
+	if info.StartUntitled {
+		info.StartText, info.StartName = w.StartText()
+	}
 	// The reason a restore fell back to a blank page belongs to this launch,
 	// so every handshake of it reports the reason: a page that remounts
 	// (React StrictMode in development) must not lose it.

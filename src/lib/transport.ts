@@ -17,6 +17,7 @@ import {
   type RecentEntry,
   type RenderSourceResult,
   type SaveResult,
+  type ImportResult,
   type SettingsResult,
   type SettingsView,
   type SettingsChange,
@@ -81,6 +82,12 @@ export type OpenFolderResult =
 /** What a save or save-as produced. */
 export type SaveOutcome =
   | { kind: "saved"; path: string; name: string; size: number; hash: string; hasBom: boolean; lineEnding: string }
+  | { kind: "cancelled" }
+  | { kind: "failed"; code: string; message: string };
+
+/** What an import produced. Text is empty when a new window received it. */
+export type ImportOutcome =
+  | { kind: "imported"; text: string; name: string; warnings: string[]; windowId: number }
   | { kind: "cancelled" }
   | { kind: "failed"; code: string; message: string };
 
@@ -206,6 +213,8 @@ export interface Transport {
   newDocument(): Promise<Outcome<number>>;
   /** Stops the ready handshake from asking for an unsaved document again. */
   clearStartUntitled(): Promise<void>;
+  /** Converts a chosen HTML or DOCX file into a new unsaved buffer (FILE-15). */
+  importDocument(): Promise<ImportOutcome>;
   /** Writes the buffer to the window's file; force overwrites a conflict. */
   saveDocument(text: string, force: boolean): Promise<SaveOutcome>;
   /** Asks for a path and writes the buffer there. */
@@ -638,6 +647,35 @@ export const mygoTransport: Transport = {
       return result.windowId;
     }),
   clearStartUntitled: () => WindowService.clearStartUntitled(),
+  importDocument: async () => {
+    try {
+      const result = await WindowService.importDocument();
+      if (result.failure) {
+        if (result.failure.code === "cancelled") return { kind: "cancelled" };
+        return {
+          kind: "failed",
+          code: result.failure.code,
+          message: failureText(result.failure),
+        };
+      }
+      return {
+        kind: "imported",
+        text: result.text ?? "",
+        name: result.name ?? "导入文档",
+        warnings: result.warnings ?? [],
+        windowId: result.windowId,
+      };
+    } catch (err) {
+      return {
+        kind: "failed",
+        code: "unknown",
+        message: failureText({
+          code: "unknown",
+          detail: err instanceof Error ? err.message : "",
+        }),
+      };
+    }
+  },
   saveDocument: async (text, force) => saveOutcome(() => WindowService.saveDocument(text, force)),
   saveDocumentAs: async (text) => saveOutcome(() => WindowService.saveDocumentAs(text)),
   readClipboardText: () => wrap(() => WindowService.clipboardReadText()),

@@ -2,11 +2,11 @@
 
 > 给 AI 的项目级说明。优先级：用户当次指令 > 本文 > `docs/PRD.md` > `DESIGN.md` / `docs/decisions.md` > 项目 skills > 全局 `~/.claude/CLAUDE.md` > 通用经验。
 > 全局规范（UTF-8、不编造、无 emoji、破坏性操作先确认、没有证据不算完成）照常生效，本文只写本项目特有的内容。
-> 最后更新：2026-11-17（PRD v0.4；P0、P1 完成；P2 需求冻结并完成 M5-1 至 M5-8，发布 0.5.0；M6-0 已冻结，M6-1 进行中）
+> 最后更新：2026-11-17（PRD v0.4；P0、P1、P2 完成并发布 0.5.0；M6-0 冻结，M6-1 导入完成）
 
 ## 0. 先读这几条
 
-1. **P0 已完成（G4，29/29），P1 已完成（M4-8），P2 需求冻结（M5-0）并完成 M5-1 至 M5-8。** P1 验收见 [docs/develop/M4-验收记录.md](docs/develop/M4-验收记录.md)，M5 验收见 [docs/develop/M5-1-验收记录.md](docs/develop/M5-1-验收记录.md)、[M5-2](docs/develop/M5-2-验收记录.md)、[M5-3](docs/develop/M5-3-验收记录.md)、[M5-4](docs/develop/M5-4-验收记录.md)、[M5-5](docs/develop/M5-5-验收记录.md)、[M5-6](docs/develop/M5-6-验收记录.md)、[M5-7](docs/develop/M5-7-验收记录.md)、[M5-8](docs/develop/M5-8-验收记录.md)，P2 需求与验收基线见 [docs/P2-效率与排版需求.md](docs/P2-效率与排版需求.md)；P1-AC-05 的真实 ACL 拒绝、P1-AC-16 的多窗口保存全部组合、M5-4 图片选择完整点击流程与 M5-8 的 Win+. 系统面板输入仍待用户桌面验收。M6-0 草案见 [docs/P3-高级工具需求.md](docs/P3-高级工具需求.md)，用户确认冻结后才能开始 M6-1。
+1. **P0 已完成（G4，29/29），P1 已完成（M4-8），P2 需求冻结（M5-0）并完成 M5-1 至 M5-8。** P1 验收见 [docs/develop/M4-验收记录.md](docs/develop/M4-验收记录.md)，M5 验收见 [docs/develop/M5-1-验收记录.md](docs/develop/M5-1-验收记录.md)、[M5-2](docs/develop/M5-2-验收记录.md)、[M5-3](docs/develop/M5-3-验收记录.md)、[M5-4](docs/develop/M5-4-验收记录.md)、[M5-5](docs/develop/M5-5-验收记录.md)、[M5-6](docs/develop/M5-6-验收记录.md)、[M5-7](docs/develop/M5-7-验收记录.md)、[M5-8](docs/develop/M5-8-验收记录.md)，P2 需求与验收基线见 [docs/P2-效率与排版需求.md](docs/P2-效率与排版需求.md)；P1-AC-05 的真实 ACL 拒绝、P1-AC-16 的多窗口保存全部组合、M5-4 图片选择完整点击流程与 M5-8 的 Win+. 系统面板输入仍待用户桌面验收。M6-0 需求已冻结（[docs/P3-高级工具需求.md](docs/P3-高级工具需求.md)），M6-1 导入完成，验收见 [docs/develop/M6-1-验收记录.md](docs/develop/M6-1-验收记录.md)；下一步 M6-2 数学工具。
 2. **需求以 [docs/PRD.md](docs/PRD.md) 为准**，[PRODUCT.md](PRODUCT.md) 是精简版。PRD 区分"已确认项"（C-01 至 C-12）和"建议默认项"（D-01 至 D-11、性能与容量数值），不能把建议项说成用户已确认。
 3. **P0 是只读阅读器。** 任何写用户文件、写工作区目录的代码在 P0 都是缺陷。
 4. **视觉以 [DESIGN.md](DESIGN.md) 为准**，组件不硬编码颜色、字号、间距。

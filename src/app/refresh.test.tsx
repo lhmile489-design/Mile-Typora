@@ -64,6 +64,7 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     clearRecent: async () => ({ ok: true as const, value: undefined }),
     newDocument: async () => ({ ok: true as const, value: 3 }),
     clearStartUntitled: async () => {},
+    importDocument: async () => ({ kind: "cancelled" as const }),
     saveAll: async () => ({ ok: true as const, value: 1 }),
     reportSaveAll: async () => ({ ok: true as const, value: undefined }),
     onSaveAllRequest: () => () => {},

@@ -498,3 +498,12 @@ M1 需验证：mermaid 12 的 `securityLevel: "strict"` 与 `%%{init}%%` 指令�
 - `mygo.config.ts` 是版本号唯一来源，`mygo build` 用它生成 `Mile Typora.exe` 的 PE 元数据与 `mile-typora-setup-0.5.0-amd64.exe` 文件名；`package.json` 不重复写版本，避免两处漂移。
 - 产物与哈希记录在 `docs/develop/M5-发布记录.md`。构建使用 `bun run build`；不提交 `build/` 产物，发布时将安装包与免安装版一起交付。
 - 本次只做启动冒烟，未在干净系统验证安装向导与 WebView2 缺失引导；已列入发布记录的待验收项。
+
+### D-T57 · M6-1 导入：Go 侧离线转换，新缓冲不落盘图片
+
+- `ImportDocument` 在 Go 侧读取用户选中的 HTML / HTM / DOCX，转换为 Markdown 文本与格式损失警告；前端不执行输入内容、不把导入结果写进 `innerHTML`。HTML 使用已有 `golang.org/x/net/html` 遍历器，DOCX 使用标准库 `archive/zip` + `encoding/xml`，不引入第三方文档转换库。
+- 输入上限 10 MiB；HTML 只接受 UTF-8；DOCX 检查 ZIP/OOXML、最多 2048 个条目、相关 XML 解压合计 32 MiB、压缩比超过 100:1 拒绝、拒绝 `..` / 绝对路径，宏、OLE、页眉页脚、脚注与外部关系一律不读取。转换超时 8 秒。
+- 图片不落盘：HTML 只保留 http(s) 图片地址（阅读器仍不会请求远程图片），本地 / `data:` / `file:` 图片与 DOCX 内嵌图片变成替代文字或“图片未导入”占位并警告。这样未保存缓冲不会写入无授权目录，也不会产生假资源路径。
+- 导入结果写入新缓冲：调用窗口没有打开文件且不脏时直接载入；否则新建窗口，通过 `ReadyInfo.startText` / `startName` 移交文本。`winctx.Window` 增加一次性 start text 状态，`ClearStartUntitled` 同时清理它；不改变 Ctrl+N 的现有行为。
+- 新绑定与契约：`contract.ImportResult`、`ReadyInfo.startText/startName`；`src/mygo.ts` 由 `bun run generate` 重建。前端 `transport.importDocument()` 统一返回 `imported` / `cancelled` / `failed`，导入期间禁用再次触发，警告用独立对话框展示。
+- 测试：HTML/DOCX 转换、恶意输入、路径穿越、宏/页眉忽略、容量与取消、空窗口导入与新窗口移交；原生系统文件对话框无法脚本化，完整点击流程按既有约定留给用户桌面验收。

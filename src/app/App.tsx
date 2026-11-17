@@ -48,6 +48,7 @@ import { SearchPanel } from "../components/SearchPanel";
 import { TableDialog } from "../components/TableDialog";
 import { LinkDialog } from "../components/LinkDialog";
 import { ExportNoticeDialog } from "../components/ExportNoticeDialog";
+import { ImportNoticeDialog } from "../components/ImportNoticeDialog";
 import { WordCountDialog } from "../components/WordCountDialog";
 import { readerSelectionHTML, readerSelectionText, selectedReaderImage } from "../lib/clipboard";
 import { serializeExportBody } from "../lib/export";
@@ -110,6 +111,7 @@ type MenuState = {
   saveAllRunning: boolean;
   saving: boolean;
   exporting: boolean;
+  importing: boolean;
   promptOpen: boolean;
   recentCount: number;
 };
@@ -205,6 +207,12 @@ function buildMenus(state: MenuState): MenuGroup[] {
                 : state.promptOpen
                   ? "先处理当前保存提示"
                   : undefined,
+        },
+        {
+          id: "import-document",
+          label: "导入…",
+          disabled: state.importing,
+          reason: "正在导入",
         },
         sep,
         item("settings", "偏好设置…", "Ctrl+,"),
@@ -624,6 +632,9 @@ export function App({ transport }: { transport: Transport }) {
   const [savedLineEnding, setSavedLineEnding] = useState("LF");
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const importingRef = useRef(false);
+  const [importNotice, setImportNotice] = useState<{ name: string; warnings: string[] } | null>(null);
   const [exportNotice, setExportNotice] = useState<{
     title: string;
     path: string;
@@ -937,16 +948,18 @@ export function App({ transport }: { transport: Transport }) {
   }, []);
 
   // Ctrl+N: an unsaved buffer, no file written until the user saves it.
-  const startUntitled = useCallback(() => {
+  // An import passes its converted text and suggested name.
+  const startUntitled = useCallback((initial?: { text: string; name: string }) => {
     untitledCount.current += 1;
+    const text = initial?.text ?? "";
     const untitled: OpenedDoc = {
-      name: `未命名-${untitledCount.current}`,
+      name: initial?.name ?? `未命名-${untitledCount.current}`,
       path: "",
       size: 0,
       hasBom: false,
       lineEnding: "LF",
       hash: "",
-      text: "",
+      text,
       html: "",
       counts: { math: 0, mathLimited: 0, mermaid: 0, mermaidLimited: 0 },
     };
@@ -954,7 +967,7 @@ export function App({ transport }: { transport: Transport }) {
     setExternalChange(null);
     setReloadOpen(false);
     setExternalLost(false);
-    setBuffer("");
+    setBuffer(text);
     setSavedText("");
     setSavedLineEnding("LF");
     setMode("editing");
@@ -1255,7 +1268,13 @@ export function App({ transport }: { transport: Transport }) {
       }
       if (r.value.startupNotice) setNotice(r.value.startupNotice);
       setReady({ kind: "ready", info: r.value });
-      if (r.value.startUntitled && !docRef.current) startUntitled();
+      if (r.value.startUntitled && !docRef.current) {
+        if (r.value.startText) {
+          startUntitled({ text: r.value.startText, name: r.value.startName || "导入文档" });
+        } else {
+          startUntitled();
+        }
+      }
       const pending = await transport.pending(0);
       if (!alive || !pending.ok) return;
       pending.value.forEach(add);
@@ -1432,6 +1451,30 @@ export function App({ transport }: { transport: Transport }) {
     if (ready.kind === "ready" && result.value === ready.info.windowId) {
       startUntitled();
     }
+  }, [holdForDirty, ready, startUntitled, transport]);
+
+  // FILE-15: convert a chosen HTML/DOCX file into a new unsaved buffer. An
+  // occupied window opens a new one; its ready handshake carries the text.
+  const importDocument = useCallback(async () => {
+    if (importingRef.current) return;
+    if (dirtyRef.current) {
+      holdForDirty(() => void importDocument());
+      return;
+    }
+    importingRef.current = true;
+    setImporting(true);
+    const result = await transport.importDocument();
+    importingRef.current = false;
+    setImporting(false);
+    if (result.kind === "failed") {
+      setNotice(result.message);
+      return;
+    }
+    if (result.kind === "cancelled") return;
+    if (ready.kind === "ready" && result.windowId === ready.info.windowId && result.text) {
+      startUntitled({ text: result.text, name: result.name });
+    }
+    setImportNotice({ name: result.name, warnings: result.warnings });
   }, [holdForDirty, ready, startUntitled, transport]);
 
   // Ctrl+W closes this window; the app quits with its last window (PRD FR-09).
@@ -2494,6 +2537,7 @@ export function App({ transport }: { transport: Transport }) {
         case "save": void save(); return;
         case "save-as": void saveAs(); return;
         case "save-all": void startSaveAll(); return;
+        case "import-document": void importDocument(); return;
         case "export-html": void runExport("html"); return;
         case "export-pdf": void runExport("pdf"); return;
         case "print-document": void runExport("print"); return;
@@ -2661,7 +2705,7 @@ export function App({ transport }: { transport: Transport }) {
         case "help-about": setHelpKind("about"); return;
       }
     },
-    [newDocument, newWindow, openFile, openFolder, openList, openSearch, requestClose, requestDelete, requestMove, requestProperties, revealFile, revealInSidebar, save, saveAs, startSaveAll, toggleRight, toggleSource, chooseImage, pasteAuto, pasteImageFromClipboard, copyImage, copyPlainText, copyHTMLFragment, runExport, toggleFocusMode, toggleTypewriter, toggleFullScreen, toggleAlwaysOnTop, changeZoom, requestWordCount, toggleStatusBar, changeAppearance, viewState.zoom, transport],
+    [newDocument, newWindow, openFile, openFolder, openList, openSearch, requestClose, requestDelete, requestMove, requestProperties, revealFile, revealInSidebar, save, saveAs, startSaveAll, importDocument, toggleRight, toggleSource, chooseImage, pasteAuto, pasteImageFromClipboard, copyImage, copyPlainText, copyHTMLFragment, runExport, toggleFocusMode, toggleTypewriter, toggleFullScreen, toggleAlwaysOnTop, changeZoom, requestWordCount, toggleStatusBar, changeAppearance, viewState.zoom, transport],
   );
 
   // Links in the preview do not replace the buffer before M4-2's protection.
@@ -2797,7 +2841,7 @@ export function App({ transport }: { transport: Transport }) {
       if (e.defaultPrevented) return;
       const command = commandFor(e);
       if (!command) return;
-      if ((settingsOpen || unsavedOpen || conflict !== null || reloadOpen || deleteTarget !== null || properties !== null || sidebarConfirm || searchConfirm || listConfirm || tableOpen || linkDialog !== null || imageConfirm !== null || exportNotice !== null || wordCount !== null || exporting || saveAllSummary !== null || recentOpen || helpKind !== null) && command !== "dismiss") return;
+      if ((settingsOpen || unsavedOpen || conflict !== null || reloadOpen || deleteTarget !== null || properties !== null || sidebarConfirm || searchConfirm || listConfirm || tableOpen || linkDialog !== null || imageConfirm !== null || exportNotice !== null || importNotice !== null || wordCount !== null || exporting || importing || saveAllSummary !== null || recentOpen || helpKind !== null) && command !== "dismiss") return;
       const editorAction = EDITOR_ACTIONS[command];
       if (editorAction) {
         const active = document.activeElement;
@@ -3056,6 +3100,7 @@ export function App({ transport }: { transport: Transport }) {
           saveAllRunning,
           saving,
           exporting,
+          importing,
           promptOpen: unsavedOpen || conflict !== null,
           recentCount: recent.length,
         })}
@@ -3542,6 +3587,13 @@ export function App({ transport }: { transport: Transport }) {
           path={exportNotice.path}
           warnings={exportNotice.warnings}
           onClose={() => setExportNotice(null)}
+        />
+      )}
+      {importNotice && (
+        <ImportNoticeDialog
+          name={importNotice.name}
+          warnings={importNotice.warnings}
+          onClose={() => setImportNotice(null)}
         />
       )}
       {wordCount && (

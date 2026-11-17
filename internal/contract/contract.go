@@ -29,6 +29,10 @@ type ReadyInfo struct {
 	StartupNotice string `json:"startupNotice,omitempty"`
 	// StartUntitled asks the page to begin with an unsaved document (Ctrl+N).
 	StartUntitled bool `json:"startUntitled,omitempty"`
+	// StartText is the imported buffer a new window should begin with.
+	StartText string `json:"startText,omitempty"`
+	// StartName is the suggested document name for StartText.
+	StartName string `json:"startName,omitempty"`
 }
 
 // PendingResult lists the open requests the page has not acknowledged yet, in
@@ -157,6 +161,16 @@ type SaveResult struct {
 	HasBOM     bool     `json:"hasBom,omitempty"`
 	LineEnding string   `json:"lineEnding,omitempty"`
 	Failure    *Failure `json:"failure,omitempty"`
+}
+
+// ImportResult is an imported Markdown buffer and its format-loss warnings.
+// Text is empty when the result was handed to a newly opened window.
+type ImportResult struct {
+	Text     string   `json:"text,omitempty"`
+	Name     string   `json:"name,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
+	WindowID int      `json:"windowId"`
+	Failure  *Failure `json:"failure,omitempty"`
 }
 
 // CloseRequested asks a window's page to run the unsaved-changes prompt

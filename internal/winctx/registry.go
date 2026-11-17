@@ -30,6 +30,8 @@ type Window struct {
 	// disk, the hash it started from, and the format saving must keep.
 	dirty        bool
 	untitled     bool
+	startText    string
+	startName    string
 	closing      bool
 	baseHash     string
 	hasBOM       bool
@@ -145,6 +147,21 @@ func (w *Window) SetStartUntitled(start bool) {
 	w.stateMu.Unlock()
 }
 
+// SetStartText gives the next unsaved document its initial imported buffer.
+func (w *Window) SetStartText(text, name string) {
+	w.stateMu.Lock()
+	w.startText = text
+	w.startName = name
+	w.stateMu.Unlock()
+}
+
+// StartText is the imported buffer and name for the next page handshake.
+func (w *Window) StartText() (string, string) {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	return w.startText, w.startName
+}
+
 // StartUntitled reports whether this window should begin with an unsaved
 // document. It stays true across ready handshakes (React StrictMode remounts).
 func (w *Window) StartUntitled() bool {
@@ -157,6 +174,8 @@ func (w *Window) StartUntitled() bool {
 func (w *Window) ClearStartUntitled() {
 	w.stateMu.Lock()
 	w.untitled = false
+	w.startText = ""
+	w.startName = ""
 	w.stateMu.Unlock()
 }
 

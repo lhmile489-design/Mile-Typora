@@ -45,6 +45,7 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     clearRecent: async () => ({ ok: true as const, value: undefined }),
     newDocument: async () => ({ ok: true as const, value: 3 }),
     clearStartUntitled: async () => {},
+    importDocument: async () => ({ kind: "cancelled" as const }),
     saveAll: async () => ({ ok: true as const, value: 1 }),
     reportSaveAll: async () => ({ ok: true as const, value: undefined }),
     onSaveAllRequest: () => () => {},
@@ -1531,5 +1532,44 @@ describe("M5-8 editing aids and the theme menu", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "表情与符号" }));
     expect(await screen.findByText(/Windows 表情面板/)).toBeTruthy();
+  });
+});
+
+describe("M6-1 import", () => {
+  it("imports into an empty window and lists format-loss warnings", async () => {
+    const importDocument = vi.fn(async () => ({
+      kind: "imported" as const,
+      text: "# 导入标题\n\n正文\n",
+      name: "导入-文章",
+      warnings: ["已忽略脚本、样式、表单或嵌入内容"],
+      windowId: 3,
+    }));
+    render(<App transport={fakeTransport({ importDocument })} />);
+    await screen.findByText(/窗口 3/);
+    fireEvent.click(screen.getByRole("menuitem", { name: "文件" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "导入…" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "导入完成" });
+    expect(dialog.textContent).toContain("导入-文章");
+    expect(dialog.textContent).toContain("脚本");
+    expect(document.title).toBe("导入-文章 •");
+    expect(await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 })).toBeTruthy();
+  });
+
+  it("keeps the current document when the import opened another window", async () => {
+    const importDocument = vi.fn(async () => ({
+      kind: "imported" as const,
+      text: "",
+      name: "导入-另一份",
+      warnings: [],
+      windowId: 99,
+    }));
+    render(<App transport={fakeTransport({ openFile: async () => loadedDoc, importDocument })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "文件" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "导入…" }));
+    await screen.findByRole("dialog", { name: "导入完成" });
+    expect(document.title).toBe("笔记.md");
   });
 });
