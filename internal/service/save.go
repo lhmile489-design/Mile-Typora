@@ -136,6 +136,17 @@ func canonicalSavePath(chosen string) (string, *contract.Failure) {
 func (s *WindowService) saveText(w *winctx.Window, path, text string, force, as bool) contract.SaveResult {
 	w.LockSave()
 	defer w.UnlockSave()
+	if !as {
+		// A move can finish while this save waits for the lock. Writing the
+		// old path then would resurrect the file the move just left behind.
+		current, ok := w.OpenFile()
+		if !ok || !sameFilePath(current, path) {
+			return contract.SaveResult{Failure: &contract.Failure{
+				Code:   "save_failed",
+				Detail: "文件已被移动，请另存为或重新打开",
+			}}
+		}
+	}
 	if !utf8.ValidString(text) {
 		return contract.SaveResult{Failure: &contract.Failure{
 			Code:   "encoding",

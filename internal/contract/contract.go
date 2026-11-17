@@ -182,6 +182,42 @@ type DocUpdate struct {
 	// Seq increases per refresh: the page drops anything older than what it
 	// already shows (PRD §9.2.5).
 	Seq int64 `json:"seq"`
+	// Rel is the document's path relative to the window's folder, when it is
+	// inside it. A move updates the tree's selection with it (M5-1).
+	Rel string `json:"rel,omitempty"`
+}
+
+// FileOpResult answers a move, reveal or trash. Failure means nothing changed.
+type FileOpResult struct {
+	Path    string   `json:"path,omitempty"`
+	Name    string   `json:"name,omitempty"`
+	Failure *Failure `json:"failure,omitempty"`
+}
+
+// FileProperties is the read-only information the properties dialog shows.
+type FileProperties struct {
+	Name       string   `json:"name"`
+	Path       string   `json:"path"`
+	Size       int64    `json:"size"`
+	Encoding   string   `json:"encoding"`
+	LineEnding string   `json:"lineEnding"`
+	Modified   string   `json:"modified"`
+	ReadOnly   bool     `json:"readOnly"`
+	Failure    *Failure `json:"failure,omitempty"`
+}
+
+// AttachFolderResult answers "show in sidebar" when the window had no folder
+// root: the file's parent becomes the root, the document stays open.
+type AttachFolderResult struct {
+	Folder  *FolderInfo `json:"folder,omitempty"`
+	Rel     string      `json:"rel,omitempty"`
+	Failure *Failure    `json:"failure,omitempty"`
+}
+
+// FileTrashed tells a window that its file was moved to the recycle bin.
+type FileTrashed struct {
+	Path string `json:"path"`
+	Name string `json:"name"`
 }
 
 // ThemeChange tells every window that the appearance preference changed

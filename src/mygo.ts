@@ -5,6 +5,16 @@ import { call, event, type Channel } from "mygo-runtime";
 // ---- Types ----
 
 /**
+ * AttachFolderResult answers "show in sidebar" when the window had no folder
+ * root: the file's parent becomes the root, the document stays open.
+ */
+export interface AttachFolderResult {
+  folder?: FolderInfo;
+  rel?: string;
+  failure?: Failure;
+}
+
+/**
  * CloseRequested asks a window's page to run the unsaved-changes prompt
  * before the native close goes through.
  */
@@ -53,6 +63,11 @@ export interface DocUpdate {
    * already shows (PRD §9.2.5).
    */
   seq: number;
+  /**
+   * Rel is the document's path relative to the window's folder, when it is
+   * inside it. A move updates the tree's selection with it (M5-1).
+   */
+  rel?: string;
 }
 
 /**
@@ -64,6 +79,31 @@ export interface Failure {
   detail: string;
   size?: number;
   limit?: number;
+}
+
+/** FileOpResult answers a move, reveal or trash. Failure means nothing changed. */
+export interface FileOpResult {
+  path?: string;
+  name?: string;
+  failure?: Failure;
+}
+
+/** FileProperties is the read-only information the properties dialog shows. */
+export interface FileProperties {
+  name: string;
+  path: string;
+  size: number;
+  encoding: string;
+  lineEnding: string;
+  modified: string;
+  readOnly: boolean;
+  failure?: Failure;
+}
+
+/** FileTrashed tells a window that its file was moved to the recycle bin. */
+export interface FileTrashed {
+  path: string;
+  name: string;
 }
 
 /** FolderInfo is a folder a request opened. */
@@ -302,6 +342,14 @@ export const WindowService = {
     return call("WindowService.Ack", seq);
   },
   /**
+   * AttachParentFolder makes the current document's folder the window root
+   * without closing the document. "Show in sidebar" uses it in single-file mode
+   * (M5-1 FILE-13).
+   */
+  attachParentFolder(): Promise<AttachFolderResult> {
+    return call("WindowService.AttachParentFolder");
+  },
+  /**
    * ClearRecent empties the recent list (PRD FR-10.10). The resume target goes
    * with it once M3-2 keeps one.
    */
@@ -338,11 +386,26 @@ export const WindowService = {
     return call("WindowService.CloseWindow", force);
   },
   /**
+   * DocumentProperties returns the read-only details the properties dialog shows
+   * (M5-1 FILE-11).
+   */
+  documentProperties(rel: string): Promise<FileProperties> {
+    return call("WindowService.DocumentProperties", rel);
+  },
+  /**
    * GetSettings hands the page the settings and the recent list. A damaged file
    * is reported rather than hidden (PRD FR-10.11).
    */
   getSettings(): Promise<SettingsResult> {
     return call("WindowService.GetSettings");
+  },
+  /**
+   * MoveDocument moves the current document, or a file selected in the tree,
+   * into a folder the user picks (M5-1 FILE-09). Nothing is overwritten: a
+   * same-name file in the target aborts the move.
+   */
+  moveDocument(rel: string): Promise<FileOpResult> {
+    return call("WindowService.MoveDocument", rel);
   },
   /**
    * NewDocument starts an unsaved Markdown buffer: the current window when it
@@ -452,6 +515,13 @@ export const WindowService = {
   reportSaveAll(requestID: number, name: string, status: string, message: string): Promise<void> {
     return call("WindowService.ReportSaveAll", requestID, name, status, message);
   },
+  /**
+   * RevealDocument selects the current document in Windows Explorer (M5-1
+   * FILE-12). It never opens the file or changes its content.
+   */
+  revealDocument(): Promise<FileOpResult> {
+    return call("WindowService.RevealDocument");
+  },
   /** SaveAll starts a run over every open window and asks the first one to save. */
   saveAll(): Promise<SaveAllStart> {
     return call("WindowService.SaveAll");
@@ -493,6 +563,14 @@ export const WindowService = {
   setEditState(dirty: boolean, hash: string, hasBOM: boolean, lineEnding: string): Promise<void> {
     return call("WindowService.SetEditState", dirty, hash, hasBOM, lineEnding);
   },
+  /**
+   * TrashDocument sends the current document, or a file selected in the tree, to
+   * the recycle bin (M5-1 FILE-14). A failure leaves the file where it is; this
+   * never falls back to a permanent delete.
+   */
+  trashDocument(rel: string): Promise<FileOpResult> {
+    return call("WindowService.TrashDocument", rel);
+  },
   /** WindowDirty answers the native close handler; main calls it directly. */
   windowDirty(id: number): Promise<boolean> {
     return call("WindowService.WindowDirty", id);
@@ -507,6 +585,8 @@ export const events = {
   themeChange: event<ThemeChange>("theme-change"),
   /** docUpdated tells one window its document changed outside the app. */
   docUpdated: event<DocUpdate>("doc-updated"),
+  /** fileTrashed tells one window its file went to the recycle bin. */
+  fileTrashed: event<FileTrashed>("file-trashed"),
   /** treeChanged tells one window its folder's structure changed. */
   treeChanged: event<TreeChanged>("tree-changed"),
   /** appNotice tells one window about something the app refused to do. */

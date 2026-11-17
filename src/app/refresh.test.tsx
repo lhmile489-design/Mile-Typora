@@ -56,6 +56,12 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     onThemeChange: () => () => {},
     onDocUpdated: () => () => {},
     onTreeChanged: () => () => {},
+    moveDocument: async () => ({ kind: "failed" as const, code: "no_file", message: "no file" }),
+    trashDocument: async () => ({ kind: "failed" as const, code: "no_file", message: "no file" }),
+    documentProperties: async () => ({ kind: "failed" as const, code: "no_file", message: "no file" }),
+    revealDocument: async () => ({ kind: "failed" as const, code: "no_file", message: "no file" }),
+    attachParentFolder: async () => ({ kind: "failed" as const, code: "no_file", message: "no file" }),
+    onFileTrashed: () => () => {},
     onNotice: () => () => {},
     onCloseRequested: () => () => {},
     saveDocument: async () => ({

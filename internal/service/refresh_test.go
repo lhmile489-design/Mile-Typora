@@ -34,6 +34,7 @@ type refreshHarness struct {
 	treeStops   int
 
 	treeChanged chan struct{}
+	trashed     chan contract.FileTrashed
 }
 
 func newRefreshHarness(t *testing.T, id int) *refreshHarness {
@@ -42,8 +43,9 @@ func newRefreshHarness(t *testing.T, id int) *refreshHarness {
 	h := &refreshHarness{
 		reg:         reg,
 		window:      reg.Add(id),
-		updates:     make(chan contract.DocUpdate, 4),
+		updates:     make(chan contract.DocUpdate, 8),
 		treeChanged: make(chan struct{}, 4),
+		trashed:     make(chan contract.FileTrashed, 4),
 	}
 	pool := watch.NewPool(func(path string, onEvent func(watch.Event)) (func(), error) {
 		h.mu.Lock()
@@ -88,6 +90,11 @@ func newRefreshHarness(t *testing.T, id int) *refreshHarness {
 		external: func(string) error { return nil },
 		docUpdated: func(_ int, update contract.DocUpdate) {
 			h.updates <- update
+		},
+		trash:  func(string) error { return nil },
+		reveal: func(string) {},
+		fileTrashed: func(_ int, event contract.FileTrashed) {
+			h.trashed <- event
 		},
 	}
 	t.Cleanup(reg.Close)

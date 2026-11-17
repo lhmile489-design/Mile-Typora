@@ -51,7 +51,9 @@ type Deps struct {
 	Open       Opener
 	PickFile   Picker
 	PickFolder Picker
-	Resources  *resource.Store
+	// PickMoveFolder asks for a destination folder for MoveDocument.
+	PickMoveFolder Picker
+	Resources      *resource.Store
 	// Watcher shares one file watch between the windows that show a file.
 	Watcher *watch.Pool
 	// DocUpdated tells one window its document changed.
@@ -82,6 +84,12 @@ type Deps struct {
 	SaveAllRequest func(windowID, requestID int) bool
 	// SaveAllDone sends the aggregate to the window that started save-all.
 	SaveAllDone func(windowID int, summary contract.SaveAllSummary)
+	// Trash sends a file to the recycle bin; tests replace it.
+	Trash func(path string) error
+	// Reveal selects a file in the system file manager; tests replace it.
+	Reveal func(path string)
+	// FileTrashed tells one window that its file went to the recycle bin.
+	FileTrashed func(windowID int, event contract.FileTrashed)
 }
 
 type WindowService struct {
@@ -92,6 +100,7 @@ type WindowService struct {
 	open      Opener
 	pick      Picker
 	pickDir   Picker
+	pickMove  Picker
 	render    *markdown.Renderer
 	resources *resource.Store
 	watcher   *watch.Pool
@@ -116,6 +125,9 @@ type WindowService struct {
 	saveAllMu      sync.Mutex
 	saveAll        *saveAllRun
 	saveAllSeq     atomic.Int64
+	trash          func(path string) error
+	reveal         func(path string)
+	fileTrashed    func(windowID int, event contract.FileTrashed)
 }
 
 // NewWindowService returns a WindowService over the open windows. resources is
@@ -127,6 +139,9 @@ func NewWindowService(d Deps) *WindowService {
 	if d.PickFolder == nil {
 		d.PickFolder = PickFolder
 	}
+	if d.PickMoveFolder == nil {
+		d.PickMoveFolder = PickMoveFolder
+	}
 	if d.Confirm == nil {
 		d.Confirm = ConfirmNative
 	}
@@ -135,6 +150,12 @@ func NewWindowService(d Deps) *WindowService {
 	}
 	if d.SavePicker == nil {
 		d.SavePicker = PickSavePath
+	}
+	if d.Trash == nil {
+		d.Trash = mygo.Shell.TrashItem
+	}
+	if d.Reveal == nil {
+		d.Reveal = mygo.Shell.ShowItemInFolder
 	}
 	return &WindowService{
 		caller: func(ctx context.Context) (int, bool) {
@@ -149,6 +170,7 @@ func NewWindowService(d Deps) *WindowService {
 		open:           d.Open,
 		pick:           d.PickFile,
 		pickDir:        d.PickFolder,
+		pickMove:       d.PickMoveFolder,
 		render:         markdown.New(),
 		resources:      d.Resources,
 		watcher:        d.Watcher,
@@ -165,6 +187,9 @@ func NewWindowService(d Deps) *WindowService {
 		external:       d.External,
 		saveAllRequest: d.SaveAllRequest,
 		saveAllDone:    d.SaveAllDone,
+		trash:          d.Trash,
+		reveal:         d.Reveal,
+		fileTrashed:    d.FileTrashed,
 	}
 }
 
@@ -280,6 +305,22 @@ func PickFolder(ctx context.Context) (string, error) {
 	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
 		Parent:    mygo.CallerWindow(ctx),
 		Title:     "打开文件夹",
+		Directory: true,
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(paths) == 0 {
+		return "", nil
+	}
+	return paths[0], nil
+}
+
+// PickMoveFolder asks for the destination of a moved file (M5-1 FILE-09).
+func PickMoveFolder(ctx context.Context) (string, error) {
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Parent:    mygo.CallerWindow(ctx),
+		Title:     "移动到",
 		Directory: true,
 	})
 	if err != nil {
@@ -728,7 +769,11 @@ func (s *WindowService) reload(w *winctx.Window) {
 	if s.docUpdated == nil {
 		return
 	}
-	s.docUpdated(w.ID(), contract.DocUpdate{Seq: seq, Doc: result.Doc, Failure: result.Failure})
+	update := contract.DocUpdate{Seq: seq, Doc: result.Doc, Failure: result.Failure}
+	if result.Doc != nil {
+		update.Rel = s.relToRoot(w, result.Doc)
+	}
+	s.docUpdated(w.ID(), update)
 }
 
 // Refresh reads the window's document again, for F5 and the stale banner

@@ -23,10 +23,15 @@ import {
   type ThemeChange,
   type SaveAllSummary,
   type SaveAllResult,
+  type FileOpResult,
+  type FileProperties,
+  type AttachFolderResult,
+  type FileTrashed,
 } from "../mygo";
 import { failureMessage, failureText } from "./errors";
 
 export type { Doc as OpenedDoc, DocUpdate, OpenRequest, ReadyInfo, ScanFrame, SaveAllSummary, SaveAllResult };
+export type { FileProperties, FileTrashed };
 
 /** One row of the file tree, as Go sends it. */
 export type TreeEntry = ScanFrame["entries"][number];
@@ -77,6 +82,22 @@ export type SourcePreview =
 export type OpenFileResult =
   | { kind: "cancelled" }
   | { kind: "loaded"; doc: Doc }
+  | { kind: "failed"; code: string; message: string };
+
+/** What a move, trash or reveal produced. */
+export type FileOpOutcome =
+  | { kind: "done"; path: string; name: string }
+  | { kind: "cancelled" }
+  | { kind: "failed"; code: string; message: string };
+
+/** What reading a file's properties produced. */
+export type PropertiesOutcome =
+  | { kind: "ok"; properties: FileProperties }
+  | { kind: "failed"; code: string; message: string };
+
+/** What attaching the document's parent folder produced. */
+export type AttachFolderOutcome =
+  | { kind: "attached"; root: string; name: string; rel: string }
   | { kind: "failed"; code: string; message: string };
 
 /** The result of a call: its value, or a message for a failure. */
@@ -167,6 +188,18 @@ export interface Transport {
   openTreeFile(rel: string, newWindow: boolean): Promise<RequestedOutcome>;
   /** Asks for a folder and makes it the window's root. */
   openFolder(): Promise<OpenFolderResult>;
+  /** Moves the current document or a tree file to a folder the user picks. */
+  moveDocument(rel: string): Promise<FileOpOutcome>;
+  /** Sends the current document or a tree file to the recycle bin. */
+  trashDocument(rel: string): Promise<FileOpOutcome>;
+  /** Reads a file's read-only properties. */
+  documentProperties(rel: string): Promise<PropertiesOutcome>;
+  /** Selects the current document in Windows Explorer. */
+  revealDocument(): Promise<FileOpOutcome>;
+  /** Makes the current document's folder the window root, keeping the document. */
+  attachParentFolder(): Promise<AttachFolderOutcome>;
+  /** Subscribes to a file being moved to the recycle bin by another window. */
+  onFileTrashed(listener: (event: FileTrashed) => void): () => void;
   /**
    * Streams the tree of the window's folder. Each frame appends rows; the
    * frame marked done carries the outcome. Abort stops the stream.
@@ -232,6 +265,61 @@ export const mygoTransport: Transport = {
       return { kind: "failed", code: "unknown", message: failureMessage("unknown", err instanceof Error ? err.message : "") };
     }
   },
+  moveDocument: (rel) => fileOpOutcome(() => WindowService.moveDocument(rel)),
+  trashDocument: (rel) => fileOpOutcome(() => WindowService.trashDocument(rel)),
+  documentProperties: async (rel) => {
+    try {
+      const result = await WindowService.documentProperties(rel);
+      if (result.failure) {
+        return {
+          kind: "failed",
+          code: result.failure.code,
+          message: failureText(result.failure),
+        };
+      }
+      return { kind: "ok", properties: result };
+    } catch (err) {
+      return {
+        kind: "failed",
+        code: "unknown",
+        message: failureText({
+          code: "unknown",
+          detail: err instanceof Error ? err.message : "",
+        }),
+      };
+    }
+  },
+  revealDocument: () => fileOpOutcome(() => WindowService.revealDocument()),
+  attachParentFolder: async () => {
+    try {
+      const result = await WindowService.attachParentFolder();
+      if (result.failure || !result.folder) {
+        return {
+          kind: "failed",
+          code: result.failure?.code ?? "unknown",
+          message: result.failure
+            ? failureText(result.failure)
+            : failureMessage("unknown", "无法打开文件所在目录"),
+        };
+      }
+      return {
+        kind: "attached",
+        root: result.folder.root,
+        name: result.folder.name,
+        rel: result.rel ?? "",
+      };
+    } catch (err) {
+      return {
+        kind: "failed",
+        code: "unknown",
+        message: failureText({
+          code: "unknown",
+          detail: err instanceof Error ? err.message : "",
+        }),
+      };
+    }
+  },
+  onFileTrashed: (listener) => subscribe(() => events.fileTrashed.on(listener)),
   scan: (onFrame) => {
     const frames = new Channel<ScanFrame>();
     const reading = (async () => {
@@ -411,6 +499,31 @@ async function saveOutcome(call: () => Promise<SaveResult>): Promise<SaveOutcome
       hasBom: result.hasBom ?? false,
       lineEnding: result.lineEnding ?? "",
     };
+  } catch (err) {
+    return {
+      kind: "failed",
+      code: "unknown",
+      message: failureText({
+        code: "unknown",
+        detail: err instanceof Error ? err.message : "",
+      }),
+    };
+  }
+}
+
+/** fileOpOutcome turns a move, trash or reveal result into what the page does. */
+async function fileOpOutcome(call: () => Promise<FileOpResult>): Promise<FileOpOutcome> {
+  try {
+    const result = await call();
+    if (result.failure) {
+      return {
+        kind: "failed",
+        code: result.failure.code,
+        message: failureText(result.failure),
+      };
+    }
+    if (!result.path) return { kind: "cancelled" };
+    return { kind: "done", path: result.path, name: result.name ?? "" };
   } catch (err) {
     return {
       kind: "failed",

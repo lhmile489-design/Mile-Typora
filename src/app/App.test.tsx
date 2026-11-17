@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { App } from "./App";
 import type { Transport } from "../lib/transport";
 
@@ -37,6 +37,12 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     onThemeChange: () => () => {},
     onDocUpdated: () => () => {},
     onTreeChanged: () => () => {},
+    moveDocument: async () => ({ kind: "failed" as const, code: "no_file", message: "no file" }),
+    trashDocument: async () => ({ kind: "failed" as const, code: "no_file", message: "no file" }),
+    documentProperties: async () => ({ kind: "failed" as const, code: "no_file", message: "no file" }),
+    revealDocument: async () => ({ kind: "failed" as const, code: "no_file", message: "no file" }),
+    attachParentFolder: async () => ({ kind: "failed" as const, code: "no_file", message: "no file" }),
+    onFileTrashed: () => () => {},
     onNotice: () => () => {},
     onCloseRequested: () => () => {},
     saveDocument: async () => ({
@@ -273,13 +279,232 @@ describe("opening a folder", () => {
   });
 
   it("selects a file with the keyboard", async () => {
-    render(<App transport={folderTransport()} />);
+    const transport = fakeTransport({
+      openFolder: async () => ({ kind: "opened", root: "E:/notes", name: "notes" }),
+      scan: (onFrame) => {
+        queueMicrotask(() => {
+          onFrame({ entries: treeEntries, done: false } as never);
+          onFrame({ entries: [], done: true, truncated: false } as never);
+        });
+        return { abort: () => {}, done: Promise.resolve() };
+      },
+      openTreeFile: async (rel) => ({
+        kind: "file" as const,
+        rel,
+        doc: { ...loadedDoc.doc, name: "b.md", path: `E:/notes/${rel}` },
+      }),
+    });
+    render(<App transport={transport} />);
     fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
     const tree = await screen.findByRole("tree", { name: "文件树" });
     fireEvent.keyDown(tree, { key: "ArrowDown" });
     fireEvent.keyDown(tree, { key: "Enter" });
     const selected = await screen.findByRole("treeitem", { name: /b\.md/, selected: true });
     expect(selected).toBeTruthy();
+  });
+});
+
+describe("file operations", () => {
+  it("moves the current file from the file menu", async () => {
+    const moveDocument = vi.fn(async () => ({
+      kind: "done" as const,
+      path: "E:/archive/笔记.md",
+      name: "笔记.md",
+    }));
+    render(<App transport={fakeTransport({ openFile: async () => loadedDoc, moveDocument })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "文件" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /移动到/ }));
+    await waitFor(() => expect(moveDocument).toHaveBeenCalledWith(""));
+    expect(await screen.findByText("已移动：笔记.md")).toBeTruthy();
+  });
+
+  it("confirms before moving a file to the recycle bin", async () => {
+    const trashDocument = vi.fn(async () => ({
+      kind: "done" as const,
+      path: "E:/notes/笔记.md",
+      name: "笔记.md",
+    }));
+    render(<App transport={fakeTransport({ openFile: async () => loadedDoc, trashDocument })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "文件" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /删除/ }));
+    expect(await screen.findByRole("dialog", { name: "移至回收站？" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "移至回收站？" }).textContent).toContain("笔记.md");
+    expect(trashDocument).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "移至回收站" }));
+    await waitFor(() => expect(trashDocument).toHaveBeenCalledWith(""));
+    expect(await screen.findByText("已移至回收站：笔记.md")).toBeTruthy();
+  });
+
+  it("shows the read-only properties dialog", async () => {
+    const documentProperties = vi.fn(async () => ({
+      kind: "ok" as const,
+      properties: {
+        name: "笔记.md",
+        path: "E:/notes/笔记.md",
+        size: 2048,
+        encoding: "UTF-8",
+        lineEnding: "LF",
+        modified: "2026-11-17T03:00:00Z",
+        readOnly: false,
+      },
+    }));
+    render(<App transport={fakeTransport({ openFile: async () => loadedDoc, documentProperties })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "文件" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /属性/ }));
+    expect(await screen.findByRole("dialog", { name: "文件属性" })).toBeTruthy();
+    const dialog = screen.getByRole("dialog", { name: "文件属性" });
+    expect(within(dialog).getByText("E:/notes/笔记.md")).toBeTruthy();
+    expect(within(dialog).getByText("UTF-8")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+  });
+
+  it("keeps the buffer when another window trashes the file", async () => {
+    let listener: ((event: { path: string; name: string }) => void) | null = null;
+    render(
+      <App
+        transport={fakeTransport({
+          openFile: async () => loadedDoc,
+          onFileTrashed: (callback) => {
+            listener = callback;
+            return () => {};
+          },
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    await act(async () => {
+      listener?.({ path: loadedDoc.doc.path, name: "笔记.md" });
+    });
+    expect(await screen.findByText("笔记.md 已移至回收站")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "标题" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "保留当前查看" }));
+    await waitFor(() => expect(screen.queryByText("笔记.md 已移至回收站")).toBeNull());
+  });
+
+  it("moves after discarding changes without a dirty_other false positive", async () => {
+    const moveDocument = vi.fn(async () => ({
+      kind: "done" as const,
+      path: "E:/archive/笔记.md",
+      name: "笔记.md",
+    }));
+    const setEditState = vi.fn(async () => {});
+    render(
+      <App
+        transport={fakeTransport({
+          openFile: async () => loadedDoc,
+          moveDocument,
+          setEditState,
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    content.focus();
+    fireEvent.keyDown(content, { key: "2", ctrlKey: true });
+    await waitFor(() => expect(content.textContent).toContain("## 标题"));
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "文件" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /移动到/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "放弃修改" }));
+    await waitFor(() => expect(moveDocument).toHaveBeenCalled());
+    const editOrder = setEditState.mock.invocationCallOrder[0] ?? 0;
+    const moveOrder = moveDocument.mock.invocationCallOrder[0] ?? 0;
+    expect(editOrder).toBeLessThan(moveOrder);
+  });
+
+  it("attaches the parent folder when showing a single file in the sidebar", async () => {
+    const attachParentFolder = vi.fn(async () => ({
+      kind: "attached" as const,
+      root: "E:/notes",
+      name: "notes",
+      rel: "笔记.md",
+    }));
+    const scan = vi.fn((onFrame: (frame: unknown) => void) => {
+      queueMicrotask(() => {
+        onFrame({ entries: [{ path: "笔记.md", name: "笔记.md", isDir: false }], done: false });
+        onFrame({ entries: [], done: true, truncated: false });
+      });
+      return { abort: () => {}, done: Promise.resolve() };
+    });
+    render(
+      <App
+        transport={fakeTransport({
+          openFile: async () => loadedDoc,
+          attachParentFolder,
+          scan: scan as never,
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "文件" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "在侧边栏中显示" }));
+    const dialog = await screen.findByRole("dialog", { name: "打开所在目录？" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "打开目录" }));
+    await waitFor(() => expect(attachParentFolder).toHaveBeenCalledTimes(1));
+    const tree = await screen.findByRole("tree", { name: "文件树" });
+    expect(within(tree).getByText("笔记.md")).toBeTruthy();
+  });
+
+  it("shows unsaved properties locally for an untitled document", async () => {
+    const documentProperties = vi.fn();
+    render(<App transport={fakeTransport({ documentProperties })} />);
+    await screen.findByText("窗口 3 · v0.1.0");
+    fireEvent.keyDown(window, { key: "n", ctrlKey: true });
+    await screen.findAllByText("未命名-1");
+    fireEvent.click(screen.getByRole("menuitem", { name: "文件" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /属性/ }));
+    const dialog = await screen.findByRole("dialog", { name: "文件属性" });
+    expect(within(dialog).getByText("尚未保存")).toBeTruthy();
+    expect(documentProperties).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+  });
+
+  it("asks for confirmation when Delete is pressed in the tree", async () => {
+    const trashDocument = vi.fn(async () => ({
+      kind: "done" as const,
+      path: "E:/notes/sub/b.md",
+      name: "b.md",
+    }));
+    render(
+      <App
+        transport={fakeTransport({
+          openFolder: async () => ({ kind: "opened", root: "E:/notes", name: "notes" }),
+          scan: (onFrame) => {
+            queueMicrotask(() => {
+              onFrame({
+                entries: [
+                  { path: "sub", name: "sub", isDir: true },
+                  { path: "sub/b.md", name: "b.md", isDir: false },
+                ],
+                done: false,
+              } as never);
+              onFrame({ entries: [], done: true, truncated: false } as never);
+            });
+            return { abort: () => {}, done: Promise.resolve() };
+          },
+          trashDocument,
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
+    const tree = await screen.findByRole("tree", { name: "文件树" });
+    fireEvent.keyDown(tree, { key: "ArrowDown" });
+    fireEvent.keyDown(tree, { key: "ArrowDown" });
+    fireEvent.keyDown(tree, { key: "Delete" });
+    expect(await screen.findByRole("dialog", { name: "移至回收站？" })).toBeTruthy();
+    expect(trashDocument).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "移至回收站" }));
+    await waitFor(() => expect(trashDocument).toHaveBeenCalledWith("sub/b.md"));
   });
 });
 

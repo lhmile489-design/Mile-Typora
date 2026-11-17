@@ -4,12 +4,13 @@ type Props = {
   title: string;
   message: string;
   confirmLabel: string;
+  danger?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 };
 
 /** A small destructive confirmation for reloading an external change. */
-export function ConfirmDialog({ title, message, confirmLabel, onConfirm, onCancel }: Props) {
+export function ConfirmDialog({ title, message, confirmLabel, danger = false, onConfirm, onCancel }: Props) {
   const panel = useRef<HTMLDivElement>(null);
   const cancel = useRef<HTMLButtonElement>(null);
   const messageId = useId();
@@ -55,7 +56,7 @@ export function ConfirmDialog({ title, message, confirmLabel, onConfirm, onCance
           <button className="btn secondary" type="button" ref={cancel} onClick={onCancel}>
             取消
           </button>
-          <button className="btn primary" type="button" onClick={onConfirm}>
+          <button className={danger ? "btn danger" : "btn primary"} type="button" onClick={onConfirm}>
             {confirmLabel}
           </button>
         </div>

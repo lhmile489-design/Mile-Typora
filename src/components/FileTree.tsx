@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronRight, FileSearch, FileText, Folder, SquarePlus } from "lucide-react";
 import type { TreeEntry } from "../lib/transport";
@@ -18,6 +18,12 @@ type Props = {
   notice?: string | null;
   /** True while rows are still arriving. */
   busy?: boolean;
+  /** Reports the row the tree focused, for file commands (M5-1). */
+  onFocusEntry?: (entry: TreeEntry | null) => void;
+  /** Delete on a focused file row asks the app to confirm a recycle-bin delete. */
+  onDeleteEntry?: (entry: TreeEntry) => void;
+  /** Expands ancestors and scrolls to this file (M5-1 FILE-13). */
+  reveal?: { path: string; n: number } | null;
 };
 
 const ROW_HEIGHT = 28;
@@ -48,11 +54,12 @@ export function depthOf(path: string): number {
  * The folder tree (DESIGN.md §8.2): 28 px rows, folders first, a virtual list
  * so ten thousand files stay smooth, and the arrow keys from PRD FR-09.
  */
-export function FileTree({ rootName, entries, selected, onOpen, onOpenInNewWindow, notice, busy }: Props) {
+export function FileTree({ rootName, entries, selected, onOpen, onOpenInNewWindow, notice, busy, onFocusEntry, onDeleteEntry, reveal }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [focusIndex, setFocusIndex] = useState(0);
   const rows = useMemo(() => visibleRows(entries, collapsed), [entries, collapsed]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const lastReveal = useRef(0);
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -60,6 +67,31 @@ export function FileTree({ rootName, entries, selected, onOpen, onOpenInNewWindo
     estimateSize: () => ROW_HEIGHT,
     overscan: 12,
   });
+
+  useEffect(() => {
+    if (!reveal?.path) return;
+    const parts = reveal.path.split("/");
+    parts.pop();
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      let prefix = "";
+      for (const part of parts) {
+        prefix = prefix === "" ? part : `${prefix}/${part}`;
+        next.delete(prefix);
+      }
+      return next;
+    });
+  }, [reveal]);
+
+  useEffect(() => {
+    if (!reveal?.path || lastReveal.current === reveal.n) return;
+    const index = rows.findIndex((row) => row.path === reveal.path);
+    if (index < 0) return;
+    lastReveal.current = reveal.n;
+    setFocusIndex(index);
+    virtualizer.scrollToIndex(index, { align: "center" });
+    onFocusEntry?.(rows[index] ?? null);
+  }, [onFocusEntry, reveal, rows, virtualizer]);
 
   const toggle = (path: string) => {
     setCollapsed((prev) => {
@@ -74,6 +106,7 @@ export function FileTree({ rootName, entries, selected, onOpen, onOpenInNewWindo
     const clamped = Math.max(0, Math.min(index, rows.length - 1));
     setFocusIndex(clamped);
     virtualizer.scrollToIndex(clamped, { align: "auto" });
+    onFocusEntry?.(rows[clamped] ?? null);
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -120,6 +153,12 @@ export function FileTree({ rootName, entries, selected, onOpen, onOpenInNewWindo
         e.preventDefault();
         if (row && !row.isDir) onOpen(row);
         return;
+      case "Delete":
+        if (row && !row.isDir && onDeleteEntry) {
+          e.preventDefault();
+          onDeleteEntry(row);
+        }
+        return;
     }
   };
 
@@ -144,6 +183,7 @@ export function FileTree({ rootName, entries, selected, onOpen, onOpenInNewWindo
         aria-label="文件树"
         tabIndex={0}
         onKeyDown={onKeyDown}
+        onFocus={() => onFocusEntry?.(rows[focusIndex] ?? null)}
       >
         <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
           {virtualizer.getVirtualItems().map((item) => {
@@ -175,6 +215,7 @@ export function FileTree({ rootName, entries, selected, onOpen, onOpenInNewWindo
                 }}
                 onMouseDown={() => {
                   setFocusIndex(item.index);
+                  onFocusEntry?.(row);
                   if (row.isDir) toggle(row.path);
                   else onOpen(row);
                 }}

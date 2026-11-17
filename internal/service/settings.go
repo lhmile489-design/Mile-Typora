@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -201,6 +202,9 @@ func resumeOf(w *winctx.Window) *appstate.Resume {
 	file, hasFile := w.OpenFile()
 	switch {
 	case hasRoot && hasFile:
+		if _, err := os.Stat(file); err != nil {
+			return &appstate.Resume{Path: root, IsDir: true}
+		}
 		rel, err := filepath.Rel(root, file)
 		if err != nil {
 			return &appstate.Resume{Path: file}
@@ -209,6 +213,9 @@ func resumeOf(w *winctx.Window) *appstate.Resume {
 	case hasRoot:
 		return &appstate.Resume{Path: root, IsDir: true}
 	case hasFile:
+		if _, err := os.Stat(file); err != nil {
+			return nil
+		}
 		return &appstate.Resume{Path: file}
 	}
 	return nil
@@ -225,7 +232,7 @@ func (s *WindowService) relToRoot(w *winctx.Window, doc *contract.Doc) string {
 		return ""
 	}
 	rel, err := filepath.Rel(root, doc.Path)
-	if err != nil || strings.HasPrefix(rel, "..") {
+	if err != nil || outsideRel(rel) {
 		return ""
 	}
 	return filepath.ToSlash(rel)

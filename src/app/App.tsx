@@ -18,6 +18,8 @@ import {
 } from "lucide-react";
 import type {
   DocUpdate,
+  FileProperties,
+  FileTrashed,
   OpenedDoc,
   OpenRequest,
   ReadyInfo,
@@ -37,6 +39,7 @@ import { MenuBar, type MenuGroup } from "../components/MenuBar";
 import { RecentDialog } from "../components/RecentDialog";
 import { HelpDialog } from "../components/HelpDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { FilePropertiesDialog } from "../components/FilePropertiesDialog";
 import { SettingsDialog } from "../components/SettingsDialog";
 import { UnsavedDialog } from "../components/UnsavedDialog";
 import { FindBar } from "../components/FindBar";
@@ -55,7 +58,7 @@ type ReadyState =
 type LoadError = { code: string; message: string; kind: "file" | "folder" };
 type ViewMode = "reading" | "editing" | "preview";
 type ExternalChange = {
-  kind: "changed" | "deleted" | "unreadable";
+  kind: "changed" | "deleted" | "unreadable" | "trashed";
   message: string;
   doc: OpenedDoc | null;
 };
@@ -70,6 +73,9 @@ type MenuState = {
   editing: boolean;
   canSave: boolean;
   hasDoc: boolean;
+  hasPath: boolean;
+  fileTarget: boolean;
+  propertiesTarget: boolean;
   saveAllRunning: boolean;
   saving: boolean;
   promptOpen: boolean;
@@ -102,6 +108,53 @@ function buildMenus(state: MenuState): MenuGroup[] {
         editing("save", "保存", "Ctrl+S", !state.canSave || state.saving || state.promptOpen, state.saving ? "正在保存" : state.promptOpen ? "先处理当前保存提示" : "打开文档后可保存"),
         editing("save-as", "另存为…", "Ctrl+Shift+S", !state.canSave || state.saving || state.promptOpen, state.saving ? "正在保存" : state.promptOpen ? "先处理当前保存提示" : "打开文档后可另存为"),
         editing("save-all", "保存全部…", undefined, state.saveAllRunning || state.promptOpen || state.saving, state.saving ? "正在保存" : state.promptOpen ? "先处理当前保存提示" : "保存全部正在进行"),
+        sep,
+        {
+          id: "move-file",
+          label: "移动到…",
+          disabled: !state.fileTarget || state.saving || state.saveAllRunning || state.promptOpen,
+          reason: !state.fileTarget
+            ? "先打开或选择一个已保存的文件"
+            : state.saving
+              ? "正在保存"
+              : state.saveAllRunning
+                ? "保存全部正在进行"
+                : state.promptOpen
+                  ? "先处理当前保存提示"
+                  : undefined,
+        },
+        {
+          id: "reveal-file",
+          label: "打开文件位置…",
+          disabled: !state.hasPath,
+          reason: state.hasPath ? undefined : "当前文档尚未保存",
+        },
+        {
+          id: "show-in-sidebar",
+          label: "在侧边栏中显示",
+          disabled: !state.hasPath,
+          reason: state.hasPath ? undefined : "当前文档尚未保存",
+        },
+        {
+          id: "file-properties",
+          label: "属性…",
+          disabled: !state.propertiesTarget,
+          reason: state.propertiesTarget ? undefined : "先打开或选择一个文件",
+        },
+        {
+          id: "delete-file",
+          label: "删除…",
+          disabled: !state.fileTarget || state.saving || state.saveAllRunning || state.promptOpen,
+          reason: !state.fileTarget
+            ? "先打开或选择一个已保存的文件"
+            : state.saving
+              ? "正在保存"
+              : state.saveAllRunning
+                ? "保存全部正在进行"
+                : state.promptOpen
+                  ? "先处理当前保存提示"
+                  : undefined,
+        },
         sep,
         item("settings", "偏好设置…", "Ctrl+,"),
         item("close", "关闭", "Ctrl+W"),
@@ -271,6 +324,14 @@ export function App({ transport }: { transport: Transport }) {
   const [treeNotice, setTreeNotice] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  // The file row the tree has focus on; file commands use it when the tree is
+  // the active pane (M5-1 FILE-09/14). It is not the open document.
+  const [treeFocus, setTreeFocus] = useState<TreeEntry | null>(null);
+  const [treeActive, setTreeActive] = useState(false);
+  const [revealRequest, setRevealRequest] = useState<{ path: string; n: number } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ rel: string; name: string } | null>(null);
+  const [properties, setProperties] = useState<{ props: FileProperties; unsaved: boolean } | null>(null);
+  const [sidebarConfirm, setSidebarConfirm] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
   const [findReplacement, setFindReplacement] = useState("");
@@ -341,6 +402,27 @@ export function App({ transport }: { transport: Transport }) {
     };
   }, []);
 
+  useEffect(() => {
+    // The tree is the active pane only until the user works elsewhere. The
+    // menu bar is exempt because its commands act on the tree's last row.
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Element | null;
+      if (target?.closest(".side.left") || target?.closest(".menubar")) return;
+      setTreeActive(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, []);
+
+  useEffect(() => {
+    if (!treeFocus) return;
+    const present = tree.some((entry) => !entry.isDir && entry.path === treeFocus.path);
+    if (!present) {
+      setTreeFocus(null);
+      setTreeActive(false);
+    }
+  }, [tree, treeFocus]);
+
   // Start reading a folder: the tree streams in while the page draws. A
   // refresh keeps the open document until its own reload answers.
   const startScan = useCallback(
@@ -351,6 +433,9 @@ export function App({ transport }: { transport: Transport }) {
         setDoc(null);
         setLoadError(null);
         setSelected(null);
+        setTreeFocus(null);
+        setTreeActive(false);
+        setRevealRequest(null);
         setStale(null);
         setUpdatedAt(null);
         treeRows.current = [];
@@ -480,7 +565,7 @@ export function App({ transport }: { transport: Transport }) {
   }, [transport]);
 
   const applyExternalDoc = useCallback(
-    (next: OpenedDoc) => {
+    (next: OpenedDoc, rel?: string) => {
       setDoc(next);
       setBuffer(next.text);
       setSavedText(next.text);
@@ -491,6 +576,7 @@ export function App({ transport }: { transport: Transport }) {
       setExternalChange(null);
       setReloadOpen(false);
       setExternalLost(false);
+      if (rel !== undefined && folderRef.current) setSelected(rel || null);
       if (modeRef.current === "preview") {
         const token = ++previewToken.current;
         void transport.renderSource(next.text).then((result) => {
@@ -522,7 +608,7 @@ export function App({ transport }: { transport: Transport }) {
         }
         if (!update.doc) return;
         if (!dirtyRef.current) {
-          applyExternalDoc(update.doc);
+          applyExternalDoc(update.doc, update.rel);
           return;
         }
         setExternalChange({
@@ -541,6 +627,7 @@ export function App({ transport }: { transport: Transport }) {
       // A refresh keeps the reading position (PRD FR-07.3, AC-11).
       captureHere();
       setDoc(update.doc);
+      if (folderRef.current) setSelected(update.rel || null);
       setStale(null);
       setLoadError(null);
       setUpdatedAt(nowHM());
@@ -671,7 +758,6 @@ export function App({ transport }: { transport: Transport }) {
         holdForDirty(() => void openTreeFile(entry, newWindow));
         return;
       }
-      setSelected(entry.path);
       applyOutcome(await transport.openTreeFile(entry.path, newWindow));
     },
     [applyOutcome, holdForDirty, transport],
@@ -924,6 +1010,169 @@ export function App({ transport }: { transport: Transport }) {
     return transport.onCloseRequested(() => requestClose());
   }, [requestClose, transport]);
 
+  // M5-1: file operations act on the tree row the left pane focused, or on
+  // the current document when no tree file is active.
+  const fileTargetInfo = useCallback((): { rel: string; name: string; current: boolean } | null => {
+    if (treeActive && treeFocus && !treeFocus.isDir) {
+      return { rel: treeFocus.path, name: treeFocus.name, current: treeFocus.path === selected };
+    }
+    const current = docRef.current;
+    if (current) return { rel: "", name: current.name, current: true };
+    return null;
+  }, [selected, treeActive, treeFocus]);
+
+  const runMove = useCallback(
+    async (target: { rel: string; name: string; current: boolean }) => {
+      const result = await transport.moveDocument(target.rel);
+      if (result.kind === "failed") {
+        setNotice(result.message);
+        return;
+      }
+      if (result.kind === "done") {
+        setTreeFocus(null);
+        setNotice(`已移动：${result.name}`);
+      }
+    },
+    [transport],
+  );
+
+  const requestMove = useCallback(() => {
+    if (savingRef.current || saveAllRunning) {
+      setNotice(savingRef.current ? "正在保存，请稍后再试" : "保存全部正在进行");
+      return;
+    }
+    const target = fileTargetInfo();
+    if (!target) {
+      setNotice("先打开或选择一个已保存的文件");
+      return;
+    }
+    if (target.current && dirtyRef.current) {
+      holdForDirty(() => void runMove(target));
+      return;
+    }
+    void runMove(target);
+  }, [fileTargetInfo, holdForDirty, runMove, saveAllRunning]);
+
+  const runDelete = useCallback(
+    async (target: { rel: string; name: string }) => {
+      const result = await transport.trashDocument(target.rel);
+      if (result.kind === "failed") {
+        setNotice(result.message);
+        return;
+      }
+      if (result.kind === "done") {
+        setTreeFocus(null);
+        setNotice(`已移至回收站：${result.name}`);
+      }
+    },
+    [transport],
+  );
+
+  const requestDelete = useCallback(
+    (entry?: TreeEntry) => {
+      if (savingRef.current || saveAllRunning) {
+        setNotice(savingRef.current ? "正在保存，请稍后再试" : "保存全部正在进行");
+        return;
+      }
+      const target = entry
+        ? { rel: entry.path, name: entry.name, current: entry.path === selected }
+        : fileTargetInfo();
+      if (!target) {
+        setNotice("先打开或选择一个已保存的文件");
+        return;
+      }
+      const ask = () => setDeleteTarget({ rel: target.rel, name: target.name });
+      if (target.current && dirtyRef.current) {
+        holdForDirty(ask);
+        return;
+      }
+      ask();
+    },
+    [fileTargetInfo, holdForDirty, saveAllRunning, selected],
+  );
+
+  const requestProperties = useCallback(
+    async (entry?: TreeEntry) => {
+      const target = entry
+        ? { rel: entry.path, name: entry.name, current: entry.path === selected }
+        : fileTargetInfo();
+      if (!target) {
+        setNotice("先打开或选择一个文件");
+        return;
+      }
+      const current = docRef.current;
+      if (target.current && (!current || !current.path)) {
+        if (!current) return;
+        setProperties({
+          props: {
+            name: current.name,
+            path: "",
+            size: 0,
+            encoding: "",
+            lineEnding: "",
+            modified: "",
+            readOnly: false,
+          },
+          unsaved: true,
+        });
+        return;
+      }
+      const result = await transport.documentProperties(target.rel);
+      if (result.kind === "failed") {
+        setNotice(result.message);
+        return;
+      }
+      setProperties({ props: result.properties, unsaved: false });
+    },
+    [fileTargetInfo, selected, transport],
+  );
+
+  const revealFile = useCallback(async () => {
+    const result = await transport.revealDocument();
+    if (result.kind === "failed") setNotice(result.message);
+    else if (result.kind === "done") setNotice(`已在资源管理器中定位 ${result.name}`);
+  }, [transport]);
+
+  const revealInSidebar = useCallback(() => {
+    const current = docRef.current;
+    if (!current || !current.path) {
+      setNotice("当前文档尚未保存");
+      return;
+    }
+    if (folderRef.current && selected) {
+      setRevealRequest((prev) => ({ path: selected, n: (prev?.n ?? 0) + 1 }));
+      return;
+    }
+    setSidebarConfirm(true);
+  }, [selected]);
+
+  const confirmSidebar = useCallback(async () => {
+    setSidebarConfirm(false);
+    const result = await transport.attachParentFolder();
+    if (result.kind === "failed") {
+      setNotice(result.message);
+      return;
+    }
+    setSelected(result.rel);
+    startScan(result.root, result.name, true);
+    setRevealRequest((prev) => ({ path: result.rel, n: (prev?.n ?? 0) + 1 }));
+  }, [startScan, transport]);
+
+  useEffect(() => {
+    return transport.onFileTrashed((event) => {
+      const current = docRef.current;
+      if (!current || !samePath(current.path, event.path)) return;
+      setExternalLost(true);
+      setExternalChange({
+        kind: "trashed",
+        message: `${event.name} 已移至回收站`,
+        doc: null,
+      });
+      setTreeFocus(null);
+      if (folderRef.current) setSelected(null);
+    });
+  }, [transport]);
+
   // M4-2: the buffer is saved through the window's file, or through Save As
   // when it has none. A conflict opens the explicit overwrite prompt.
   // text is the exact buffer sent to disk; typing during the save keeps the
@@ -1155,7 +1404,7 @@ export function App({ transport }: { transport: Transport }) {
     if (action) action();
   }, []);
 
-  const discardChanges = useCallback(() => {
+  const discardChanges = useCallback(async () => {
     const current = docRef.current;
     if (current) {
       setBuffer(current.text);
@@ -1163,8 +1412,18 @@ export function App({ transport }: { transport: Transport }) {
     }
     setExternalLost(false);
     dirtyRef.current = false;
+    // The page's pending action may be a file operation. Let Go see the clean
+    // buffer before that action asks it to move or delete the file.
+    if (current) {
+      try {
+        await transport.setEditState(false, current.hash, current.hasBom, current.lineEnding);
+      } catch {
+        // The pending action may still succeed; the Go dirty check remains
+        // the final guard.
+      }
+    }
     continuePending();
-  }, [continuePending]);
+  }, [continuePending, transport]);
 
   const save = useCallback(async () => {
     if (conflictOpenRef.current || unsavedOpenRef.current) return;
@@ -1238,6 +1497,11 @@ export function App({ transport }: { transport: Transport }) {
         case "save": void save(); return;
         case "save-as": void saveAs(); return;
         case "save-all": void startSaveAll(); return;
+        case "move-file": requestMove(); return;
+        case "reveal-file": void revealFile(); return;
+        case "show-in-sidebar": revealInSidebar(); return;
+        case "file-properties": void requestProperties(); return;
+        case "delete-file": requestDelete(); return;
         case "settings": setSettingsError(null); setSettingsOpen(true); return;
         case "close": requestClose(); return;
         case "undo": run((c) => c.undo()); return;
@@ -1301,7 +1565,7 @@ export function App({ transport }: { transport: Transport }) {
         case "help-about": setHelpKind("about"); return;
       }
     },
-    [newDocument, newWindow, openFile, openFolder, requestClose, save, saveAs, startSaveAll, toggleSource, transport],
+    [newDocument, newWindow, openFile, openFolder, requestClose, requestDelete, requestMove, requestProperties, revealFile, revealInSidebar, save, saveAs, startSaveAll, toggleSource, transport],
   );
 
   // Links in the preview do not replace the buffer before M4-2's protection.
@@ -1435,7 +1699,7 @@ export function App({ transport }: { transport: Transport }) {
       if (e.defaultPrevented) return;
       const command = commandFor(e);
       if (!command) return;
-      if ((settingsOpen || unsavedOpen || conflict !== null || reloadOpen || saveAllSummary !== null || recentOpen || helpKind !== null) && command !== "dismiss") return;
+      if ((settingsOpen || unsavedOpen || conflict !== null || reloadOpen || deleteTarget !== null || properties !== null || sidebarConfirm || saveAllSummary !== null || recentOpen || helpKind !== null) && command !== "dismiss") return;
       const editorAction = EDITOR_ACTIONS[command];
       if (editorAction) {
         const active = document.activeElement;
@@ -1552,6 +1816,9 @@ export function App({ transport }: { transport: Transport }) {
     unsavedOpen,
     conflict,
     reloadOpen,
+    deleteTarget,
+    properties,
+    sidebarConfirm,
     saveAllSummary,
     recentOpen,
     helpKind,
@@ -1565,6 +1832,9 @@ export function App({ transport }: { transport: Transport }) {
           editing: mode === "editing",
           canSave: mode !== "reading" && Boolean(doc),
           hasDoc: Boolean(doc),
+          hasPath: Boolean(doc?.path),
+          fileTarget: Boolean(treeActive && treeFocus && !treeFocus.isDir) || Boolean(doc?.path),
+          propertiesTarget: Boolean(treeActive && treeFocus && !treeFocus.isDir) || Boolean(doc),
           saveAllRunning,
           saving,
           promptOpen: unsavedOpen || conflict !== null,
@@ -1634,7 +1904,16 @@ export function App({ transport }: { transport: Transport }) {
       </div>
       <div className="body">
         {showLeft && (
-          <aside className="side left" aria-label="文件树">
+          <aside
+            className="side left"
+            aria-label="文件树"
+            onFocusCapture={() => setTreeActive(true)}
+            onBlurCapture={(e) => {
+              const next = e.relatedTarget as Element | null;
+              if (next?.closest?.(".menubar")) return;
+              if (!next || !e.currentTarget.contains(next)) setTreeActive(false);
+            }}
+          >
             {folder ? (
               <FileTree
                 rootName={folder.name}
@@ -1644,6 +1923,9 @@ export function App({ transport }: { transport: Transport }) {
                 onOpenInNewWindow={(entry) => void openTreeFile(entry, true)}
                 busy={scanning}
                 notice={treeNotice}
+                onFocusEntry={setTreeFocus}
+                onDeleteEntry={(entry) => requestDelete(entry)}
+                reveal={revealRequest}
               />
             ) : (
               <div className="empty">
@@ -1668,7 +1950,7 @@ export function App({ transport }: { transport: Transport }) {
               onReplaceAll={replaceAllFind}
             />
           )}
-          {doc && externalChange && mode !== "reading" && (
+          {doc && externalChange && (mode !== "reading" || externalChange.kind === "trashed") && (
             <div className="stale-banner external-banner" role="alert">
               <CircleAlert aria-hidden="true" />
               <span className="txt">{externalChange.message}</span>
@@ -1690,7 +1972,7 @@ export function App({ transport }: { transport: Transport }) {
                 另存为
               </button>
               <button className="btn text" type="button" onClick={() => setExternalChange(null)}>
-                保留当前编辑
+                {externalChange.kind === "trashed" && mode === "reading" ? "保留当前查看" : "保留当前编辑"}
               </button>
             </div>
           )}
@@ -1916,6 +2198,36 @@ export function App({ transport }: { transport: Transport }) {
           onCancel={() => setReloadOpen(false)}
         />
       )}
+      {deleteTarget && (
+        <ConfirmDialog
+          title="移至回收站？"
+          message={`将“${deleteTarget.name}”移至回收站。需要时可以从回收站恢复。`}
+          confirmLabel="移至回收站"
+          danger
+          onConfirm={() => {
+            const target = deleteTarget;
+            setDeleteTarget(null);
+            void runDelete(target);
+          }}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+      {sidebarConfirm && (
+        <ConfirmDialog
+          title="打开所在目录？"
+          message="将当前文件所在目录作为工作区，当前文档保持不变。"
+          confirmLabel="打开目录"
+          onConfirm={() => void confirmSidebar()}
+          onCancel={() => setSidebarConfirm(false)}
+        />
+      )}
+      {properties && (
+        <FilePropertiesDialog
+          properties={properties.props}
+          unsaved={properties.unsaved}
+          onClose={() => setProperties(null)}
+        />
+      )}
       {saveAllSummary && (
         <SaveAllDialog
           rows={saveAllSummary.results}
@@ -2116,6 +2428,11 @@ function ReadyBadge({ state }: { state: ReadyState }) {
 }
 
 /** nowHM is the status bar's "已更新 14:32" (DESIGN.md §8.8). */
+/** samePath compares two Windows paths without case or slash differences. */
+function samePath(a: string, b: string): boolean {
+  return a.replace(/\\/g, "/").toLowerCase() === b.replace(/\\/g, "/").toLowerCase();
+}
+
 function nowHM(): string {
   const d = new Date();
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;

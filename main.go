@@ -82,6 +82,9 @@ var themeChange = mygo.NewEvent[contract.ThemeChange]("theme-change")
 // docUpdated tells one window its document changed outside the app.
 var docUpdated = mygo.NewEvent[contract.DocUpdate]("doc-updated")
 
+// fileTrashed tells one window its file went to the recycle bin.
+var fileTrashed = mygo.NewEvent[contract.FileTrashed]("file-trashed")
+
 // treeChanged tells one window its folder's structure changed.
 var treeChanged = mygo.NewEvent[contract.TreeChanged]("tree-changed")
 
@@ -218,6 +221,14 @@ func main() {
 			for _, w := range mygo.Windows() {
 				if w.ID() == windowID {
 					_ = saveAllDone.Emit(w, summary)
+					return
+				}
+			}
+		},
+		FileTrashed: func(windowID int, event contract.FileTrashed) {
+			for _, w := range mygo.Windows() {
+				if w.ID() == windowID {
+					_ = fileTrashed.Emit(w, event)
 					return
 				}
 			}

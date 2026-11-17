@@ -57,6 +57,14 @@ func (w *Window) SetRoot(root string) {
 	w.stateMu.Unlock()
 }
 
+// SetRootKeepFile records a folder without dropping the open file. "Show in
+// sidebar" uses it to adopt the document's parent as the root (M5-1).
+func (w *Window) SetRootKeepFile(root string) {
+	w.stateMu.Lock()
+	w.root = root
+	w.stateMu.Unlock()
+}
+
 // NextRefresh numbers a reload, so a late result never replaces a newer one.
 func (w *Window) NextRefresh() int64 {
 	w.stateMu.Lock()

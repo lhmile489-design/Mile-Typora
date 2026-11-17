@@ -394,3 +394,11 @@ body {
 .source-editor .cm-editor { height: 100%; }
 
 .dialog-text { margin: 0 0 var(--sp-3); color: var(--text-soft); }
+
+.props-list { margin: 0 0 var(--sp-4); display: grid; gap: var(--sp-2); }
+.props-row { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: var(--sp-3); font-size: var(--ui-sm); }
+.props-row dt { color: var(--text-muted); }
+.props-row dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+
+.btn.danger { background: var(--danger); color: var(--text-on-accent); }
+.btn.danger:hover { filter: brightness(1.05); }
