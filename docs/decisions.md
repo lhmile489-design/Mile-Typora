@@ -543,3 +543,12 @@ M1 需验证：mermaid 12 的 `securityLevel: "strict"` 与 `%%{init}%%` 指令�
 - 命令经既有 `runCodeTools` → `applyEdit` 一次 dispatch 一步撤销；无变化返回 null 不标脏。只处理围栏代码块正文行，不改 fence 字符、fence 长度、info 其余属性与行内空白；不做语言级格式化、不执行代码、不引外部格式化器；与 M5-8 行尾清理正交。
 - `paragraph.ts` 的 `indentColumns` 从私有改为导出复用（tab 按下一 4 列制表位计列）；fence 扫描器在 codetools 内独立实现，不改 mathtools/paragraph 的既有保护判定。
 - 测试：codetools 30 项纯变换（围栏定位、边界、重排、tab 转换、语言名、未闭合、front matter、缩进代码块）、App 3 项菜单（命令生效、禁用态）；原生验收见 `docs/develop/M6-5-验收记录.md`。
+
+### D-T62 · M6-6 受控开发者工具：设置重启生效 + Go 侧再校验
+
+- 模型：mygo 在**窗口创建时**由 `PageOptions.DevTools` 决定能否开检查器，运行中改不了已开的窗口，所以唯一的生效模型是「保存 → 重启」。设置只记 `diagnosticMode`，新建窗口用 `windowDevTools()` 读它；`OpenDevTools` 绑定在调用时再读一次设置，双保险防伪造页面绕过菜单置灰。
+- DevTools 取值：开 = `DevToolsEnabled`；关 = `DevToolsAuto`（不是 `DevToolsDisabled`）——契约写「关闭用 Disabled」，但 Auto 在生产构建同样关、且保住 `bun run dev` 开发期与 `native-eval.mjs` 调试通道；刻意偏离契约记在此。
+- 隔离：打印视图/导出临时窗口固定 `DevToolsDisabled` + `Untrusted`，`isPrintWindow` 命中即返回 `devtools_unavailable`；不设置 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`、不开远程调试端口、不接外部 CDP——检查器只是本机 WebView2 的自带工具，不是远程调试面。
+- 通知：`SettingsChange` 加 `diagnosticModeChanged` 布尔标志（不带取值），让其他窗口只提示「重启后生效」而不覆盖本地显示；页面 `saveSettings` 在保存前先 `getSettings` 比对得出自己窗口的 `diagnosticChanged`。风险文案写明「本机页面内容与脚本状态可被查看和修改」。
+- 快捷键 `Shift+F12`（不是 F12）：`DevToolsEnabled` 会恢复 WebView2 自带的 F12/F5/Ctrl+P/Ctrl+F，F12 留给它，菜单与快捷键跑同一命令由 Go 侧再校验。
+- 测试：service `OpenDevTools` 三态（未开 → `devtools_disabled`、打印 → `devtools_unavailable`、已开 → 调用注入函数）；App 菜单置灰+理由、armed 后菜单与 Shift+F12 各调一次、失败回退提示；原生验收（诊断开关持久化+重启生效、检查器开合、打印视图拒绝、菜单置灰）见 `docs/develop/M6-6-验收记录.md`。
