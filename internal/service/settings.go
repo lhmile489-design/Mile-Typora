@@ -41,6 +41,10 @@ func (s *WindowService) GetSettings(ctx context.Context) (contract.SettingsResul
 	if stored.SpellCheck != nil {
 		spellCheck = *stored.SpellCheck
 	}
+	diagnosticMode := false
+	if stored.DiagnosticMode != nil {
+		diagnosticMode = *stored.DiagnosticMode
+	}
 	result := contract.SettingsResult{
 		Settings: contract.SettingsView{
 			Startup:          stored.Startup,
@@ -48,6 +52,7 @@ func (s *WindowService) GetSettings(ctx context.Context) (contract.SettingsResul
 			ShowStatusBar:    showStatusBar,
 			SmartPunctuation: smartPunctuation,
 			SpellCheck:       spellCheck,
+			DiagnosticMode:   diagnosticMode,
 			Recent:           recentView(stored.Recent),
 		},
 		Corrupt: corrupt,
@@ -83,6 +88,7 @@ func (s *WindowService) SaveSettings(ctx context.Context, view contract.Settings
 	show := view.ShowStatusBar
 	punct := view.SmartPunctuation
 	spell := view.SpellCheck
+	diagnostic := view.DiagnosticMode
 	current := s.state.Get()
 	next := appstate.Settings{
 		Startup:          view.Startup,
@@ -90,6 +96,7 @@ func (s *WindowService) SaveSettings(ctx context.Context, view contract.Settings
 		ShowStatusBar:    &show,
 		SmartPunctuation: &punct,
 		SpellCheck:       &spell,
+		DiagnosticMode:   &diagnostic,
 		Recent:           current.Recent, // the page never replaces the list
 		Resume:           current.Resume, // nor the resume target
 	}
@@ -107,11 +114,13 @@ func (s *WindowService) SaveSettings(ctx context.Context, view contract.Settings
 	statusBarChanged := current.ShowStatusBar == nil || view.ShowStatusBar != *current.ShowStatusBar
 	punctuationChanged := current.SmartPunctuation == nil || view.SmartPunctuation != *current.SmartPunctuation
 	spellChanged := current.SpellCheck == nil || view.SpellCheck != *current.SpellCheck
-	if s.settingsChanged != nil && (statusBarChanged || punctuationChanged || spellChanged) {
+	diagnosticChanged := current.DiagnosticMode == nil || view.DiagnosticMode != *current.DiagnosticMode
+	if s.settingsChanged != nil && (statusBarChanged || punctuationChanged || spellChanged || diagnosticChanged) {
 		s.settingsChanged(contract.SettingsChange{
-			ShowStatusBar:    view.ShowStatusBar,
-			SmartPunctuation: view.SmartPunctuation,
-			SpellCheck:       view.SpellCheck,
+			ShowStatusBar:         view.ShowStatusBar,
+			SmartPunctuation:      view.SmartPunctuation,
+			SpellCheck:            view.SpellCheck,
+			DiagnosticModeChanged: diagnosticChanged,
 		})
 	}
 	return contract.SaveOutcome{}, nil

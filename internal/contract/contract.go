@@ -328,7 +328,10 @@ type SettingsView struct {
 	ShowStatusBar    bool          `json:"showStatusBar"`
 	SmartPunctuation bool          `json:"smartPunctuation"`
 	SpellCheck       bool          `json:"spellCheck"`
-	Recent           []RecentEntry `json:"recent"`
+	// DiagnosticMode arms the web inspector for the next launch's windows
+	// (M6-6 VIEW-17); the page shows "重启后生效" when it changes.
+	DiagnosticMode bool          `json:"diagnosticMode"`
+	Recent         []RecentEntry `json:"recent"`
 }
 
 // WindowViewState is the per-window state the view menu shows (M5-7).
@@ -359,6 +362,9 @@ type SettingsChange struct {
 	ShowStatusBar    bool `json:"showStatusBar"`
 	SmartPunctuation bool `json:"smartPunctuation"`
 	SpellCheck       bool `json:"spellCheck"`
+	// DiagnosticModeChanged tells the page to show the restart notice; the
+	// value itself matters only after the next launch, so it is not carried.
+	DiagnosticModeChanged bool `json:"diagnosticModeChanged,omitempty"`
 }
 
 // SettingsResult answers the settings read. Corrupt is true when the file

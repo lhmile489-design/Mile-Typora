@@ -67,3 +67,74 @@ func TestCountWordsBinding(t *testing.T) {
 		t.Fatalf("CountWords = %+v, %v", count, err)
 	}
 }
+
+// M6-6 VIEW-17: the inspector stays shut unless the diagnostic mode armed it,
+// and the isolated print views never get one.
+func TestOpenDevToolsRefusesWithoutDiagnosticMode(t *testing.T) {
+	s, _ := newTestService(5, true)
+	withState(t, s)
+	opened := -1
+	s.openDevTools = func(id int) { opened = id }
+	s.isPrintWindow = func(int) bool { return false }
+
+	got, err := s.OpenDevTools(context.Background())
+	if err != nil {
+		t.Fatalf("OpenDevTools: %v", err)
+	}
+	if got.Failure == nil || got.Failure.Code != "devtools_disabled" {
+		t.Fatalf("result = %+v, want devtools_disabled", got)
+	}
+	if opened != -1 {
+		t.Fatalf("opened = %d, want no inspector without the mode", opened)
+	}
+}
+
+func TestOpenDevToolsRefusesPrintWindow(t *testing.T) {
+	s, _ := newTestService(6, true)
+	store := withState(t, s)
+	on := true
+	settings := store.Get()
+	settings.DiagnosticMode = &on
+	if err := store.Save(settings); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	opened := -1
+	s.openDevTools = func(id int) { opened = id }
+	s.isPrintWindow = func(id int) bool { return id == 6 }
+
+	got, err := s.OpenDevTools(context.Background())
+	if err != nil {
+		t.Fatalf("OpenDevTools: %v", err)
+	}
+	if got.Failure == nil || got.Failure.Code != "devtools_unavailable" {
+		t.Fatalf("result = %+v, want devtools_unavailable", got)
+	}
+	if opened != -1 {
+		t.Fatalf("opened = %d, want no inspector on a print view", opened)
+	}
+}
+
+func TestOpenDevToolsOpensArmedWindow(t *testing.T) {
+	s, _ := newTestService(7, true)
+	store := withState(t, s)
+	on := true
+	settings := store.Get()
+	settings.DiagnosticMode = &on
+	if err := store.Save(settings); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	opened := -1
+	s.openDevTools = func(id int) { opened = id }
+	s.isPrintWindow = func(int) bool { return false }
+
+	got, err := s.OpenDevTools(context.Background())
+	if err != nil {
+		t.Fatalf("OpenDevTools: %v", err)
+	}
+	if got.Failure != nil {
+		t.Fatalf("result = %+v, want the inspector open", got)
+	}
+	if opened != 7 {
+		t.Fatalf("opened = %d, want the calling window's inspector", opened)
+	}
+}

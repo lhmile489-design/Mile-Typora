@@ -101,6 +101,7 @@ type MenuState = {
   showStatusBar: boolean;
   smartPunctuation: boolean;
   spellCheck: boolean;
+  diagnosticMode: boolean;
   inTable: boolean;
   inLink: boolean;
   inImage: boolean;
@@ -718,6 +719,14 @@ function buildMenus(state: MenuState): MenuGroup[] {
           label: "显示状态栏",
           checked: state.showStatusBar,
         },
+        sep,
+        {
+          id: "open-devtools",
+          label: "开发者工具",
+          shortcut: "Shift+F12",
+          disabled: !state.diagnosticMode,
+          reason: "先在设置中开启诊断模式并重启",
+        },
       ],
     },
     {
@@ -912,12 +921,13 @@ export function App({ transport }: { transport: Transport }) {
   const [findIndex, setFindIndex] = useState(0);
   const [findCount, setFindCount] = useState(0);
   const [recent, setRecent] = useState<RecentEntry[]>([]);
-  const [settings, setSettings] = useState<{ startup: string; appearance: string; showStatusBar: boolean; smartPunctuation: boolean; spellCheck: boolean }>({
+  const [settings, setSettings] = useState<{ startup: string; appearance: string; showStatusBar: boolean; smartPunctuation: boolean; spellCheck: boolean; diagnosticMode: boolean }>({
     startup: "blank",
     appearance: "system",
     showStatusBar: true,
     smartPunctuation: false,
     spellCheck: false,
+    diagnosticMode: false,
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
@@ -1091,6 +1101,9 @@ export function App({ transport }: { transport: Transport }) {
         smartPunctuation: change.smartPunctuation,
         spellCheck: change.spellCheck,
       }));
+      // Diagnostic mode only takes effect after a restart; the other windows
+      // keep their own value but still get told it changed (P3 §3.6).
+      if (change.diagnosticModeChanged) setNotice("诊断模式已更改，重启后生效");
     });
   }, [transport]);
 
@@ -1273,6 +1286,7 @@ export function App({ transport }: { transport: Transport }) {
       showStatusBar: result.settings.showStatusBar !== false,
       smartPunctuation: result.settings.smartPunctuation === true,
       spellCheck: result.settings.spellCheck === true,
+      diagnosticMode: result.settings.diagnosticMode === true,
     });
     applyTheme(result.settings.appearance);
     if (result.notice) setNotice(result.notice);
@@ -1628,11 +1642,15 @@ export function App({ transport }: { transport: Transport }) {
       showStatusBar: settings.showStatusBar,
       smartPunctuation: settings.smartPunctuation,
       spellCheck: settings.spellCheck,
+      diagnosticMode: settings.diagnosticMode,
       recent: [],
     });
     setSettingsSaving(false);
     if (result.ok) {
       setSettingsOpen(false);
+      // mygo decides PageOptions.DevTools at window creation, so the toggle
+      // can only apply after a restart (P3 §3.6, frozen).
+      if (result.diagnosticChanged) setNotice("诊断模式已更改，重启后生效");
       return;
     }
     setSettingsError(result.message);
@@ -2699,13 +2717,14 @@ export function App({ transport }: { transport: Transport }) {
       showStatusBar: next,
       smartPunctuation: settings.smartPunctuation,
       spellCheck: settings.spellCheck,
+      diagnosticMode: settings.diagnosticMode,
       recent: [],
     });
     if (!result.ok) {
       setSettings((current) => ({ ...current, showStatusBar: !next }));
       setNotice(result.message);
     }
-  }, [settings.appearance, settings.showStatusBar, settings.smartPunctuation, settings.spellCheck, settings.startup, transport]);
+  }, [settings, transport]);
 
   // M6-3 EDIT-18: one checkbox under 编辑 → 智能标点, shared across windows.
   const toggleSmartPunct = useCallback(async () => {
@@ -2717,13 +2736,14 @@ export function App({ transport }: { transport: Transport }) {
       showStatusBar: settings.showStatusBar,
       smartPunctuation: next,
       spellCheck: settings.spellCheck,
+      diagnosticMode: settings.diagnosticMode,
       recent: [],
     });
     if (!result.ok) {
       setSettings((current) => ({ ...current, smartPunctuation: !next }));
       setNotice(result.message);
     }
-  }, [settings.appearance, settings.showStatusBar, settings.smartPunctuation, settings.spellCheck, settings.startup, transport]);
+  }, [settings, transport]);
 
   // M6-4 EDIT-21: one checkbox under 编辑 → 拼写检查, shared across windows.
   const toggleSpellCheck = useCallback(async () => {
@@ -2735,13 +2755,22 @@ export function App({ transport }: { transport: Transport }) {
       showStatusBar: settings.showStatusBar,
       smartPunctuation: settings.smartPunctuation,
       spellCheck: next,
+      diagnosticMode: settings.diagnosticMode,
       recent: [],
     });
     if (!result.ok) {
       setSettings((current) => ({ ...current, spellCheck: !next }));
       setNotice(result.message);
     }
-  }, [settings.appearance, settings.showStatusBar, settings.smartPunctuation, settings.spellCheck, settings.startup, transport]);
+  }, [settings, transport]);
+
+  // M6-6 VIEW-17: the menu item and Shift+F12 run the same command; Go
+  // re-checks the diagnostic mode so a stale or hand-rolled page cannot open
+  // an inspector the setting did not arm.
+  const openDevTools = useCallback(async () => {
+    const result = await transport.openDevTools();
+    if (!result.ok) setNotice(result.message);
+  }, [transport]);
 
   // The 主题 menu shares the settings appearance preference: all windows
   // switch at once and the choice persists (P2 §11, P2-AC-27).
@@ -2757,6 +2786,7 @@ export function App({ transport }: { transport: Transport }) {
         showStatusBar: settings.showStatusBar,
         smartPunctuation: settings.smartPunctuation,
         spellCheck: settings.spellCheck,
+        diagnosticMode: settings.diagnosticMode,
         recent: [],
       });
       if (!result.ok) {
@@ -2765,7 +2795,7 @@ export function App({ transport }: { transport: Transport }) {
         setNotice(result.message);
       }
     },
-    [applyTheme, settings.appearance, settings.showStatusBar, settings.smartPunctuation, settings.spellCheck, settings.startup, transport],
+    [applyTheme, settings, transport],
   );
 
   const onMenuCommand = useCallback(
@@ -2824,6 +2854,7 @@ export function App({ transport }: { transport: Transport }) {
         case "zoom-in": void changeZoom(viewState.zoom + 0.1); return;
         case "zoom-out": void changeZoom(viewState.zoom - 0.1); return;
         case "zoom-reset": void changeZoom(1); return;
+        case "open-devtools": void openDevTools(); return;
         case "word-count": void requestWordCount(); return;
         case "toggle-statusbar": void toggleStatusBar(); return;
         case "toggle-smart-punct": void toggleSmartPunct(); return;
@@ -3207,6 +3238,10 @@ export function App({ transport }: { transport: Transport }) {
           e.preventDefault();
           void changeZoom(1);
           return;
+        case "open-devtools":
+          e.preventDefault();
+          void openDevTools();
+          return;
         case "next-window":
           e.preventDefault();
           void (async () => {
@@ -3356,6 +3391,7 @@ export function App({ transport }: { transport: Transport }) {
     toggleTypewriter,
     toggleFullScreen,
     changeZoom,
+    openDevTools,
     viewState.zoom,
   ]);
 
@@ -3381,6 +3417,7 @@ export function App({ transport }: { transport: Transport }) {
           showStatusBar: settings.showStatusBar,
           smartPunctuation: settings.smartPunctuation,
           spellCheck: settings.spellCheck,
+          diagnosticMode: settings.diagnosticMode,
           inTable: editorInTable,
           inLink: editorInLink,
           inImage: editorInImage,
@@ -3963,6 +4000,8 @@ export function App({ transport }: { transport: Transport }) {
           onChangeSmartPunctuation={(smartPunctuation) => setSettings({ ...settings, smartPunctuation })}
           spellCheck={settings.spellCheck}
           onChangeSpellCheck={(spellCheck) => setSettings({ ...settings, spellCheck })}
+          diagnosticMode={settings.diagnosticMode}
+          onChangeDiagnosticMode={(diagnosticMode) => setSettings({ ...settings, diagnosticMode })}
           onCancel={() => setSettingsOpen(false)}
           onSave={() => void saveSettings()}
           saving={settingsSaving}

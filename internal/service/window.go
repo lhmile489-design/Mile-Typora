@@ -93,6 +93,11 @@ type Deps struct {
 	SetZoom        func(windowID int, factor float64) (contract.WindowViewState, error)
 	// FocusWindow activates one app window for Ctrl+Tab.
 	FocusWindow func(windowID int) bool
+	// OpenDevTools opens the web inspector of one window (M6-6 VIEW-17).
+	OpenDevTools func(windowID int)
+	// IsPrintWindow tells the isolated print and export views apart from the
+	// app windows; they never get an inspector (P3 §3.6).
+	IsPrintWindow func(windowID int) bool
 	// Confirm asks the user a yes/no question with the reason spelled out.
 	Confirm func(ctx context.Context, title, message, detail string) bool
 	// External opens a URL with the system browser.
@@ -133,6 +138,8 @@ type WindowService struct {
 	setAlwaysOnTop  func(windowID int, value bool) (contract.WindowViewState, error)
 	setZoom         func(windowID int, factor float64) (contract.WindowViewState, error)
 	focusWindow     func(windowID int) bool
+	openDevTools    func(windowID int)
+	isPrintWindow   func(windowID int) bool
 	windowMRU       []int
 	windowMRUMu     sync.Mutex
 	docUpdated      func(windowID int, update contract.DocUpdate)
@@ -237,6 +244,8 @@ func NewWindowService(d Deps) *WindowService {
 		setAlwaysOnTop:     d.SetAlwaysOnTop,
 		setZoom:            d.SetZoom,
 		focusWindow:        d.FocusWindow,
+		openDevTools:       d.OpenDevTools,
+		isPrintWindow:      d.IsPrintWindow,
 		confirm:            d.Confirm,
 		external:           d.External,
 		saveAllRequest:     d.SaveAllRequest,

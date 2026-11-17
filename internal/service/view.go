@@ -117,6 +117,30 @@ func (s *WindowService) CycleWindow(ctx context.Context, backwards bool) (contra
 	return contract.WindowCycleResult{}, nil
 }
 
+// OpenDevTools opens the calling window's web inspector (M6-6 VIEW-17). The Go
+// side re-checks the diagnostic setting and refuses the isolated print views,
+// so a page cannot open an inspector the mode did not arm.
+func (s *WindowService) OpenDevTools(ctx context.Context) (contract.SaveOutcome, error) {
+	w, err := s.callerWindow(ctx)
+	if err != nil {
+		return contract.SaveOutcome{}, err
+	}
+	if s.isPrintWindow != nil && s.isPrintWindow(w.ID()) {
+		return contract.SaveOutcome{Failure: failFile("devtools_unavailable", "打印视图不支持开发者工具")}, nil
+	}
+	diagnostic := false
+	if s.state != nil {
+		if stored := s.state.Get(); stored.DiagnosticMode != nil {
+			diagnostic = *stored.DiagnosticMode
+		}
+	}
+	if !diagnostic || s.openDevTools == nil {
+		return contract.SaveOutcome{Failure: failFile("devtools_disabled", "先在设置中开启诊断模式并重启")}, nil
+	}
+	s.openDevTools(w.ID())
+	return contract.SaveOutcome{}, nil
+}
+
 func (s *WindowService) touchWindowMRU(id int) {
 	s.windowMRUMu.Lock()
 	defer s.windowMRUMu.Unlock()

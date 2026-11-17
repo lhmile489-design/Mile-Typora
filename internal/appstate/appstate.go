@@ -70,13 +70,17 @@ type Settings struct {
 	// SpellCheck underlines misspelled English words in the source editor
 	// (M6-4 EDIT-21). A pointer keeps old files defaulting to off.
 	SpellCheck *bool `json:"spellCheck,omitempty"`
+	// DiagnosticMode arms the web inspector for the windows the next launch
+	// creates (M6-6 VIEW-17): mygo decides PageOptions.DevTools at window
+	// creation, so changing it can only take effect after a restart.
+	DiagnosticMode *bool `json:"diagnosticMode,omitempty"`
 }
 
 // Defaults are what a fresh install uses.
 func Defaults() Settings {
 	show := true
 	off := false
-	return Settings{Startup: StartupBlank, Appearance: AppearanceSystem, Recent: nil, ShowStatusBar: &show, SmartPunctuation: &off, SpellCheck: &off}
+	return Settings{Startup: StartupBlank, Appearance: AppearanceSystem, Recent: nil, ShowStatusBar: &show, SmartPunctuation: &off, SpellCheck: &off, DiagnosticMode: &off}
 }
 
 // Store owns the settings file. It is safe for concurrent use: native events
@@ -257,6 +261,10 @@ func normalize(s Settings) Settings {
 		off := false
 		s.SpellCheck = &off
 	}
+	if s.DiagnosticMode == nil {
+		off := false
+		s.DiagnosticMode = &off
+	}
 
 	seen := make(map[string]struct{}, len(s.Recent))
 	recent := make([]Recent, 0, len(s.Recent))
@@ -316,6 +324,10 @@ func copyOf(s Settings) Settings {
 	if s.SpellCheck != nil {
 		spell := *s.SpellCheck
 		out.SpellCheck = &spell
+	}
+	if s.DiagnosticMode != nil {
+		diagnostic := *s.DiagnosticMode
+		out.DiagnosticMode = &diagnostic
 	}
 	return out
 }

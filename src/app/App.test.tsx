@@ -19,7 +19,7 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     openLink: async () => ({ kind: "none" }),
     getSettings: async () => ({
       kind: "ok" as const,
-      settings: { startup: "blank", appearance: "system", showStatusBar: true, smartPunctuation: false, spellCheck: false, recent: [] },
+      settings: { startup: "blank", appearance: "system", showStatusBar: true, smartPunctuation: false, spellCheck: false, diagnosticMode: false, recent: [] },
       corrupt: false,
     }),
     saveSettings: async () => ({ ok: true as const, value: undefined }),
@@ -37,6 +37,7 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
       state: { fullScreen: false, alwaysOnTop: value, zoom: 1 },
     }),
     setZoom: async (zoom) => ({ kind: "ok" as const, state: { fullScreen: false, alwaysOnTop: false, zoom } }),
+    openDevTools: async () => ({ ok: true as const, value: undefined }),
     cycleWindow: async () => ({ ok: true as const, value: undefined }),
     countWords: async () => ({
       kind: "ok" as const,
@@ -853,7 +854,7 @@ describe("file operations", () => {
           ready: async () => ({ ok: false as const, message: "绑定不可用" }),
           getSettings: async () => ({
             kind: "ok" as const,
-            settings: { startup: "blank", appearance: "system", showStatusBar: false, smartPunctuation: false, spellCheck: false, recent: [] },
+            settings: { startup: "blank", appearance: "system", showStatusBar: false, smartPunctuation: false, spellCheck: false, diagnosticMode: false, recent: [] },
             corrupt: false,
           }),
         })}
@@ -875,6 +876,67 @@ describe("file operations", () => {
       expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({ showStatusBar: false })),
     );
     expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  // M6-6 VIEW-17: the devtools entry stays disabled until the diagnostic mode
+  // is armed, and the menu item plus Shift+F12 run the same Go-checked command.
+  it("keeps the devtools entry disabled without the diagnostic mode", async () => {
+    render(<App transport={fakeTransport({ openFile: async () => loadedDoc })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "视图" }));
+    const entry = screen.getByRole("menuitem", { name: /开发者工具/ });
+    expect(entry.getAttribute("aria-disabled")).toBe("true");
+    expect(entry.getAttribute("title")).toBe("先在设置中开启诊断模式并重启");
+  });
+
+  it("opens devtools from the menu and Shift+F12 once armed", async () => {
+    const openDevTools = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    render(
+      <App
+        transport={fakeTransport({
+          openFile: async () => loadedDoc,
+          openDevTools,
+          getSettings: async () => ({
+            kind: "ok" as const,
+            settings: {
+              startup: "blank",
+              appearance: "system",
+              showStatusBar: true,
+              smartPunctuation: false,
+              spellCheck: false,
+              diagnosticMode: true,
+              recent: [],
+            },
+            corrupt: false,
+          }),
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    await waitFor(() =>
+      expect(screen.getByRole("menuitem", { name: "视图" })).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByRole("menuitem", { name: "视图" }));
+    const entry = screen.getByRole("menuitem", { name: /开发者工具/ });
+    expect(entry.getAttribute("aria-disabled")).toBeNull();
+    fireEvent.click(entry);
+    await waitFor(() => expect(openDevTools).toHaveBeenCalledTimes(1));
+    fireEvent.keyDown(window, { key: "F12", shiftKey: true });
+    await waitFor(() => expect(openDevTools).toHaveBeenCalledTimes(2));
+  });
+
+  it("shows the go hint when the inspector cannot open", async () => {
+    const openDevTools = vi.fn(async () => ({
+      ok: false as const,
+      message: "先在设置中开启诊断模式并重启",
+    }));
+    render(<App transport={fakeTransport({ openFile: async () => loadedDoc, openDevTools })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.keyDown(window, { key: "F12", shiftKey: true });
+    expect(await screen.findByText("先在设置中开启诊断模式并重启")).toBeTruthy();
   });
 
   // M6-3 EDIT-18: the 编辑 → 智能标点 submenu mirrors the shared setting and
@@ -910,6 +972,7 @@ describe("file operations", () => {
               showStatusBar: true,
               smartPunctuation: true,
               spellCheck: false,
+              diagnosticMode: false,
               recent: [],
             },
             corrupt: false,
@@ -961,6 +1024,7 @@ describe("file operations", () => {
               showStatusBar: true,
               smartPunctuation: false,
               spellCheck: true,
+              diagnosticMode: false,
               recent: [],
             },
             corrupt: false,
@@ -1427,6 +1491,7 @@ describe("the recent list", () => {
       showStatusBar: true,
       smartPunctuation: false,
       spellCheck: false,
+      diagnosticMode: false,
       recent: [
         { path: "E:/notes\a.md", name: "a.md", isDir: false },
         { path: "E:/notes", name: "notes", isDir: true },
@@ -1454,7 +1519,7 @@ describe("the recent list", () => {
   it("says when the settings could not be read", async () => {
     const broken = {
       kind: "ok" as const,
-      settings: { startup: "blank", appearance: "system", showStatusBar: true, smartPunctuation: false, spellCheck: false, recent: [] },
+      settings: { startup: "blank", appearance: "system", showStatusBar: true, smartPunctuation: false, spellCheck: false, diagnosticMode: false, recent: [] },
       corrupt: true,
       notice: "设置文件损坏，已按默认设置启动，原文件已保留",
     };
@@ -1511,7 +1576,7 @@ describe("the appearance preference", () => {
   it("applies the saved preference once the settings load", async () => {
     const settings = {
       kind: "ok" as const,
-      settings: { startup: "blank", appearance: "dark", showStatusBar: true, smartPunctuation: false, spellCheck: false, recent: [] },
+      settings: { startup: "blank", appearance: "dark", showStatusBar: true, smartPunctuation: false, spellCheck: false, diagnosticMode: false, recent: [] },
       corrupt: false,
     };
     render(<App transport={fakeTransport({ getSettings: async () => settings })} />);

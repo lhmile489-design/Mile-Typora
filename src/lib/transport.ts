@@ -249,8 +249,9 @@ export interface Transport {
   setEditState(dirty: boolean, hash: string, hasBom: boolean, lineEnding: string): Promise<void>;
   /** Reads the settings and the recent list. */
   getSettings(): Promise<SettingsOutcome>;
-  /** Writes the settings the page edited. */
-  saveSettings(view: SettingsView): Promise<Outcome<void>>;
+  /** Writes the settings the page edited. diagnosticChanged tells the caller
+   *  to show the restart notice (M6-6 VIEW-17). */
+  saveSettings(view: SettingsView): Promise<Outcome<void> & { diagnosticChanged?: boolean }>;
   /** Subscribes to a shared preference changed in any window. */
   onSettingsChange(listener: (change: SettingsChange) => void): () => void;
   /** Current window fullscreen, topmost and zoom state (M5-7). */
@@ -258,6 +259,9 @@ export interface Transport {
   setFullScreen(value: boolean): Promise<ViewOutcome>;
   setAlwaysOnTop(value: boolean): Promise<ViewOutcome>;
   setZoom(factor: number): Promise<ViewOutcome>;
+  /** Opens the calling window's web inspector; Go re-checks the diagnostic
+   *  mode and refuses print views (M6-6 VIEW-17). */
+  openDevTools(): Promise<Outcome<void>>;
   /** Focuses the next/previous app window in MRU order. */
   cycleWindow(backwards: boolean): Promise<Outcome<void>>;
   /** Counts the parsed source, excluding document front matter when whole. */
@@ -727,16 +731,29 @@ export const mygoTransport: Transport = {
       return { kind: "failed", message: failureMessage("unknown", err instanceof Error ? err.message : "") };
     }
   },
-  saveSettings: (view) =>
-    wrap(async () => {
+  saveSettings: async (view) => {
+    try {
+      const before = await WindowService.getSettings().catch(() => null);
       const outcome = await WindowService.saveSettings(view);
-      if (outcome.failure) throw new Error(failureMessage(outcome.failure.code, outcome.failure.detail));
-    }),
+      if (outcome.failure) {
+        return { ok: false as const, message: failureMessage(outcome.failure.code, outcome.failure.detail) };
+      }
+      const diagnosticChanged = before != null && before.settings.diagnosticMode !== view.diagnosticMode;
+      return { ok: true as const, value: undefined, diagnosticChanged };
+    } catch (err) {
+      return { ok: false as const, message: failureMessage("unknown", err instanceof Error ? err.message : "") };
+    }
+  },
   onSettingsChange: (listener) => subscribe(() => events.settingsChanged.on(listener)),
   getWindowView: () => viewOutcome(() => WindowService.getWindowView()),
   setFullScreen: (value) => viewOutcome(() => WindowService.setFullScreen(value)),
   setAlwaysOnTop: (value) => viewOutcome(() => WindowService.setAlwaysOnTop(value)),
   setZoom: (factor) => viewOutcome(() => WindowService.setZoom(factor)),
+  openDevTools: () =>
+    wrap(async () => {
+      const outcome = await WindowService.openDevTools();
+      if (outcome.failure) throw new Error(failureMessage(outcome.failure.code, outcome.failure.detail));
+    }),
   cycleWindow: (backwards) =>
     wrap(async () => {
       const result = await WindowService.cycleWindow(backwards);

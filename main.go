@@ -277,6 +277,14 @@ func main() {
 			w.Focus()
 			return true
 		},
+		// M6-6 VIEW-17: the service decides whether the inspector may open;
+		// main only performs it, and never on a print view.
+		OpenDevTools: func(windowID int) {
+			if w := mygo.WindowByID(windowID); w != nil && !isPrintWindow(windowID) {
+				w.Page().OpenDevTools()
+			}
+		},
+		IsPrintWindow: isPrintWindow,
 		SaveAllRequest: func(windowID, requestID int) bool {
 			for _, w := range mygo.Windows() {
 				if w.ID() == windowID {
@@ -473,9 +481,10 @@ func newWindow() *mygo.Window {
 		BackgroundColor: "light-dark(#FFFFFF, #1C1D20)",
 		URL:             "/",
 		Page: mygo.PageOptions{
-			// The inspector is off in builds, and with it the web view's
-			// browser keys (decisions.md D-T01).
-			DevTools:      mygo.DevToolsAuto,
+			// The inspector follows the diagnostic mode the launch read
+			// (M6-6 VIEW-17): off keeps DevToolsAuto, which stays off in
+			// production builds (decisions.md D-T01).
+			DevTools:      windowDevTools(),
 			PreloadScript: preloadTheme(),
 		},
 	})
@@ -524,6 +533,19 @@ func newWindow() *mygo.Window {
 		windows.Remove(id)
 	})
 	return w
+}
+
+// windowDevTools arms the web inspector only when the launch's settings asked
+// for it (M6-6 VIEW-17). mygo decides PageOptions.DevTools when the window is
+// created, so toggling the setting can only apply after a restart: the frozen
+// model, not a per-window switch.
+func windowDevTools() mygo.DevTools {
+	if appState != nil {
+		if stored := appState.Get(); stored.DiagnosticMode != nil && *stored.DiagnosticMode {
+			return mygo.DevToolsEnabled
+		}
+	}
+	return mygo.DevToolsAuto
 }
 
 // isAppURL reports whether the page may navigate to raw: the app's own

@@ -393,6 +393,11 @@ export interface SettingsChange {
   showStatusBar: boolean;
   smartPunctuation: boolean;
   spellCheck: boolean;
+  /**
+   * DiagnosticModeChanged tells the page to show the restart notice; the
+   * value itself matters only after the next launch, so it is not carried.
+   */
+  diagnosticModeChanged?: boolean;
 }
 
 /**
@@ -412,6 +417,11 @@ export interface SettingsView {
   showStatusBar: boolean;
   smartPunctuation: boolean;
   spellCheck: boolean;
+  /**
+   * DiagnosticMode arms the web inspector for the next launch's windows
+   * (M6-6 VIEW-17); the page shows "重启后生效" when it changes.
+   */
+  diagnosticMode: boolean;
   recent: RecentEntry[];
 }
 
@@ -644,6 +654,14 @@ export const WindowService = {
    */
   newWindow(): Promise<NewWindowResult> {
     return call("WindowService.NewWindow");
+  },
+  /**
+   * OpenDevTools opens the calling window's web inspector (M6-6 VIEW-17). The Go
+   * side re-checks the diagnostic setting and refuses the isolated print views,
+   * so a page cannot open an inspector the mode did not arm.
+   */
+  openDevTools(): Promise<SaveOutcome> {
+    return call("WindowService.OpenDevTools");
   },
   /**
    * OpenFileDialog asks for a Markdown file and reads it (FR-01). Cancelling

@@ -15,6 +15,9 @@ type Props = {
   /** Underlines misspelled English words in the source editor (M6-4 EDIT-21). */
   spellCheck: boolean;
   onChangeSpellCheck: (value: boolean) => void;
+  /** Arms the web inspector for the next launch's windows (M6-6 VIEW-17). */
+  diagnosticMode: boolean;
+  onChangeDiagnosticMode: (value: boolean) => void;
   onCancel: () => void;
   onSave: () => void;
   saving?: boolean;
@@ -57,6 +60,8 @@ export function SettingsDialog({
   onChangeSmartPunctuation,
   spellCheck,
   onChangeSpellCheck,
+  diagnosticMode,
+  onChangeDiagnosticMode,
   onCancel,
   onSave,
   saving,
@@ -176,6 +181,22 @@ export function SettingsDialog({
                 <span className="txt">
                   <span className="label">拼写检查</span>
                   <span className="hint">在源码编辑区用波浪线标出拼错的英文单词，只检查英文，不联网。</span>
+                </span>
+              </label>
+            </fieldset>
+            <fieldset className="settings-group">
+              <legend>诊断</legend>
+              <label className="radio-row">
+                <input
+                  type="checkbox"
+                  checked={diagnosticMode}
+                  onChange={(e) => onChangeDiagnosticMode(e.target.checked)}
+                />
+                <span className="txt">
+                  <span className="label">诊断模式</span>
+                  <span className="hint">
+                    开启后，本机页面内容与脚本状态可被查看和修改，并恢复浏览器自带按键（F5 刷新、Ctrl+P 打印等）；不开启远程调试端口。保存后重启应用生效。
+                  </span>
                 </span>
               </label>
             </fieldset>

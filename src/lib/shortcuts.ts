@@ -63,6 +63,7 @@ export type Command =
   | "final-newline"
   | "line-ending-lf"
   | "line-ending-crlf"
+  | "open-devtools"
   | "dismiss";
 
 /** The keyboard fields the table reads. */
@@ -100,6 +101,9 @@ export function commandFor(e: KeyPress): Command | null {
   if (!ctrl && !shift && !e.altKey && key === "F8") return "focus-mode";
   if (!ctrl && !shift && !e.altKey && key === "F9") return "typewriter-mode";
   if (!ctrl && !shift && !e.altKey && key === "F11") return "fullscreen";
+  // Shift+F12 keeps F12 itself free for the web view's own inspector key once
+  // the diagnostic mode armed it (M6-6 VIEW-17).
+  if (!ctrl && shift && !e.altKey && key === "F12") return "open-devtools";
   if (!ctrl && !shift && !e.altKey && key === "Escape") return "dismiss";
   if (e.ctrlKey && !e.altKey && !e.metaKey && key === "Tab") {
     return shift ? "previous-window" : "next-window";
@@ -203,4 +207,5 @@ export const SHORTCUT_HINT: Partial<Record<Command, string>> = {
   "clear-format": "Ctrl+\\",
   "move-line-up": "Alt+↑",
   "move-line-down": "Alt+↓",
+  "open-devtools": "Shift+F12",
 };
