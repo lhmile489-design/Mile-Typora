@@ -19,6 +19,10 @@ import {
   type SaveResult,
   type SettingsResult,
   type SettingsView,
+  type SettingsChange,
+  type WindowViewState,
+  type WindowCount,
+  type WindowCycleResult,
   type ScanFrame,
   type ThemeChange,
   type SaveAllSummary,
@@ -139,6 +143,16 @@ export type PrintOutcome =
   | { kind: "printed"; warnings: string[] }
   | { kind: "failed"; code: string; message: string };
 
+/** One view operation's result (M5-7). */
+export type ViewOutcome =
+  | { kind: "ok"; state: WindowViewState }
+  | { kind: "failed"; code: string; message: string };
+
+/** Word statistics from the parsed document (M5-7 VIEW-10). */
+export type CountOutcome =
+  | { kind: "ok"; count: WindowCount }
+  | { kind: "failed"; code: string; message: string };
+
 /** The result of a call: its value, or a message for a failure. */
 export type Outcome<T> = { ok: true; value: T } | { ok: false; message: string };
 
@@ -228,6 +242,17 @@ export interface Transport {
   getSettings(): Promise<SettingsOutcome>;
   /** Writes the settings the page edited. */
   saveSettings(view: SettingsView): Promise<Outcome<void>>;
+  /** Subscribes to a shared preference changed in any window. */
+  onSettingsChange(listener: (change: SettingsChange) => void): () => void;
+  /** Current window fullscreen, topmost and zoom state (M5-7). */
+  getWindowView(): Promise<ViewOutcome>;
+  setFullScreen(value: boolean): Promise<ViewOutcome>;
+  setAlwaysOnTop(value: boolean): Promise<ViewOutcome>;
+  setZoom(factor: number): Promise<ViewOutcome>;
+  /** Focuses the next/previous app window in MRU order. */
+  cycleWindow(backwards: boolean): Promise<Outcome<void>>;
+  /** Counts the parsed source, excluding document front matter when whole. */
+  countWords(source: string, selection: boolean): Promise<CountOutcome>;
   /** Empties the recent list. */
   clearRecent(): Promise<Outcome<void>>;
   /** Opens an entry the app recorded itself. */
@@ -353,6 +378,23 @@ async function printOutcome(
       };
     }
     return { kind: "printed", warnings: result.warnings ?? [] };
+  } catch (err) {
+    return {
+      kind: "failed",
+      code: "unknown",
+      message: failureText({ code: "unknown", detail: err instanceof Error ? err.message : "" }),
+    };
+  }
+}
+
+/** viewOutcome maps one per-window view binding result. */
+async function viewOutcome(call: () => Promise<WindowViewState>): Promise<ViewOutcome> {
+  try {
+    const state = await call();
+    if (state.failure) {
+      return { kind: "failed", code: state.failure.code, message: failureText(state.failure) };
+    }
+    return { kind: "ok", state };
   } catch (err) {
     return {
       kind: "failed",
@@ -652,6 +694,31 @@ export const mygoTransport: Transport = {
       const outcome = await WindowService.saveSettings(view);
       if (outcome.failure) throw new Error(failureMessage(outcome.failure.code, outcome.failure.detail));
     }),
+  onSettingsChange: (listener) => subscribe(() => events.settingsChanged.on(listener)),
+  getWindowView: () => viewOutcome(() => WindowService.getWindowView()),
+  setFullScreen: (value) => viewOutcome(() => WindowService.setFullScreen(value)),
+  setAlwaysOnTop: (value) => viewOutcome(() => WindowService.setAlwaysOnTop(value)),
+  setZoom: (factor) => viewOutcome(() => WindowService.setZoom(factor)),
+  cycleWindow: (backwards) =>
+    wrap(async () => {
+      const result = await WindowService.cycleWindow(backwards);
+      if (result.failure) throw new Error(failureMessage(result.failure.code, result.failure.detail));
+    }),
+  countWords: async (source, selection) => {
+    try {
+      const result = await WindowService.countWords(source, selection);
+      if (result.failure) {
+        return { kind: "failed", code: result.failure.code, message: failureText(result.failure) };
+      }
+      return { kind: "ok", count: result };
+    } catch (err) {
+      return {
+        kind: "failed",
+        code: "unknown",
+        message: failureText({ code: "unknown", detail: err instanceof Error ? err.message : "" }),
+      };
+    }
+  },
   clearRecent: () =>
     wrap(async () => {
       const outcome = await WindowService.clearRecent();

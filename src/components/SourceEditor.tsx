@@ -1,6 +1,7 @@
 import { useEffect, useImperativeHandle, useRef } from "react";
 import type { EditorView } from "@codemirror/view";
-import type { AnnotationType, Extension } from "@codemirror/state";
+import type { Decoration as DecorationType } from "@codemirror/view";
+import type { AnnotationType, Extension, StateEffect } from "@codemirror/state";
 import type { HeadingLevel, ParagraphEdit, Snapshot } from "../editor/paragraph";
 import {
   imageAt,
@@ -120,6 +121,10 @@ type Props = {
   writeClipboard: (text: string) => Promise<boolean>;
   /** Reports what sits under the caret, for menu enablement. */
   onContext?: (context: EditorContext) => void;
+  /** Dims every paragraph except the one holding the caret (M5-7 VIEW-07). */
+  focusMode?: boolean;
+  /** Keeps the caret line at about 40% of the viewport (VIEW-08). */
+  typewriter?: boolean;
   ref?: React.Ref<SourceCommands>;
 };
 
@@ -130,7 +135,8 @@ export type EditorContext = { inTable: boolean; inLink: boolean; inImage: boolea
  * when editing starts, so reading pays nothing for it. The buffer is the
  * editor's document; preview renders the same string through Go.
  */
-export function SourceEditor({ value, onChange, readClipboard, writeClipboard, onContext, ref }: Props) {  const host = useRef<HTMLDivElement>(null);
+export function SourceEditor({ value, onChange, readClipboard, writeClipboard, onContext, focusMode = false, typewriter = false, ref }: Props) {
+  const host = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const contextRef = useRef(onContext);
   contextRef.current = onContext;
@@ -154,6 +160,12 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
   const isolateHistory = useRef<AnnotationType<"after" | "before" | "full"> | null>(null);
   const stateCtor = useRef<typeof import("@codemirror/state").EditorState | null>(null);
   const extensions = useRef<Extension[] | null>(null);
+  const focusModeRef = useRef(focusMode);
+  focusModeRef.current = focusMode;
+  const typewriterRef = useRef(typewriter);
+  typewriterRef.current = typewriter;
+  const focusEffectRef = useRef<((value: boolean) => StateEffect<boolean>) | null>(null);
+  const scrollTypewriterRef = useRef<(() => void) | null>(null);
 
   /** applyEdit dispatches one transaction so one command is one undo step. */
   const applyEdit = (edit: ParagraphEdit, focus = true): boolean => {
@@ -507,11 +519,21 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
   );
 
   useEffect(() => {
+    const view = viewRef.current;
+    const effect = focusEffectRef.current;
+    if (view && effect) view.dispatch({ effects: effect(focusMode) });
+  }, [focusMode]);
+
+  useEffect(() => {
+    if (typewriter) scrollTypewriterRef.current?.();
+  }, [typewriter]);
+
+  useEffect(() => {
     let alive = true;
     void (async () => {
       const [
-        { EditorView, keymap, lineNumbers, drawSelection, highlightActiveLine },
-        { EditorState },
+        { EditorView, keymap, lineNumbers, drawSelection, highlightActiveLine, Decoration, ViewPlugin },
+        { EditorState, StateEffect, StateField, RangeSetBuilder },
         { defaultKeymap, history, historyKeymap, undo, redo, isolateHistory: isolateHistoryType },
         { markdown },
         paragraphModule,
@@ -566,14 +588,83 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
         },
         ".cm-activeLineGutter": { backgroundColor: "var(--bg-hover)" },
         ".cm-cursor": { borderLeftColor: "var(--accent)" },
+        ".cm-line": { transition: "opacity var(--dur-base) var(--ease)" },
+        ".cm-focus-dim": { opacity: "0.32" },
         "&.cm-focused": { outline: "none" },
       });
+
+      const focusEffect = StateEffect.define<boolean>();
+      focusEffectRef.current = (value) => focusEffect.of(value);
+      const focusField = StateField.define<boolean>({
+        create: () => focusModeRef.current,
+        update(value, transaction) {
+          let next = value;
+          for (const effect of transaction.effects) {
+            if (effect.is(focusEffect)) next = effect.value;
+          }
+          return next;
+        },
+      });
+      const buildFocusDecorations = (view: EditorView) => {
+        if (!view.state.field(focusField)) return Decoration.none;
+        const doc = view.state.doc;
+        const head = view.state.selection.main.head;
+        const current = doc.lineAt(head).number;
+        let first = current;
+        let last = current;
+        if (doc.line(current).text.trim() !== "") {
+          while (first > 1 && doc.line(first - 1).text.trim() !== "") first--;
+          while (last < doc.lines && doc.line(last + 1).text.trim() !== "") last++;
+        }
+        const builder = new RangeSetBuilder<DecorationType>();
+        for (const range of view.visibleRanges) {
+          const from = doc.lineAt(range.from).number;
+          const to = doc.lineAt(range.to).number;
+          for (let number = from; number <= to; number++) {
+            if (number >= first && number <= last) continue;
+            const line = doc.line(number);
+            builder.add(line.from, line.from, Decoration.line({ class: "cm-focus-dim" }));
+          }
+        }
+        return builder.finish();
+      };
+      const focusPlugin = ViewPlugin.fromClass(
+        class {
+          decorations = Decoration.none;
+          constructor(view: EditorView) {
+            this.decorations = buildFocusDecorations(view);
+          }
+          update(update: import("@codemirror/view").ViewUpdate) {
+            if (
+              update.docChanged ||
+              update.selectionSet ||
+              update.viewportChanged ||
+              update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(focusEffect)))
+            ) {
+              this.decorations = buildFocusDecorations(update.view);
+            }
+          }
+        },
+        { decorations: (value) => value.decorations },
+      );
+
+      const scrollTypewriter = () => {
+        const view = viewRef.current;
+        if (!view || !typewriterRef.current) return;
+        const block = view.lineBlockAt(view.state.selection.main.head);
+        const scroller = view.scrollDOM;
+        scroller.scrollTop = Math.max(0, block.top - scroller.clientHeight * 0.4);
+      };
+      scrollTypewriterRef.current = scrollTypewriter;
 
       const editorExtensions: Extension[] = [
         lineNumbers(),
         history(),
         drawSelection(),
         highlightActiveLine(),
+        focusField,
+        focusPlugin,
+        EditorView.lineWrapping,
         EditorView.lineWrapping,
         keymap.of([...defaultKeymap.filter((binding) => binding.key !== "Mod-/"), ...historyKeymap]),
         markdown(),
@@ -587,6 +678,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
             update.state.selection.main.head,
             !update.state.selection.main.empty,
           ));
+          if (typewriterRef.current) scrollTypewriter();
         }),
       ];
       extensions.current = editorExtensions;
@@ -595,6 +687,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
         state: EditorState.create({ doc: valueRef.current, extensions: editorExtensions }),
       });
       viewRef.current = view;
+      if (typewriterRef.current) scrollTypewriter();
       contextRef.current?.(contextAt(valueRef.current, 0, false));
       view.focus();
     })();
@@ -622,7 +715,7 @@ export function SourceEditor({ value, onChange, readClipboard, writeClipboard, o
     const anchor = Math.min(previous.anchor, value.length);
     const head = Math.min(previous.head, value.length);
     view.dispatch({ selection: { anchor, head } });
-    view.scrollDOM.scrollTop = scrollTop;
+    if (!typewriterRef.current) view.scrollDOM.scrollTop = scrollTop;
     if (hadFocus) view.focus();
   }, [value]);
 

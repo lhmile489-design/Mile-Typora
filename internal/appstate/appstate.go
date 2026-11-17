@@ -61,11 +61,15 @@ type Settings struct {
 	Recent []Recent `json:"recent"`
 	// Resume is the target of the next "resume" launch, if there is one.
 	Resume *Resume `json:"resume,omitempty"`
+	// ShowStatusBar is the shared status-bar preference (M5-7 VIEW-09).
+	// A pointer keeps old files without the field defaulting to shown.
+	ShowStatusBar *bool `json:"showStatusBar,omitempty"`
 }
 
 // Defaults are what a fresh install uses.
 func Defaults() Settings {
-	return Settings{Startup: StartupBlank, Appearance: AppearanceSystem, Recent: nil}
+	show := true
+	return Settings{Startup: StartupBlank, Appearance: AppearanceSystem, Recent: nil, ShowStatusBar: &show}
 }
 
 // Store owns the settings file. It is safe for concurrent use: native events
@@ -234,6 +238,10 @@ func normalize(s Settings) Settings {
 	default:
 		s.Appearance = AppearanceSystem
 	}
+	if s.ShowStatusBar == nil {
+		show := true
+		s.ShowStatusBar = &show
+	}
 
 	seen := make(map[string]struct{}, len(s.Recent))
 	recent := make([]Recent, 0, len(s.Recent))
@@ -281,6 +289,10 @@ func copyOf(s Settings) Settings {
 	if s.Resume != nil {
 		resume := *s.Resume
 		out.Resume = &resume
+	}
+	if s.ShowStatusBar != nil {
+		show := *s.ShowStatusBar
+		out.ShowStatusBar = &show
 	}
 	return out
 }

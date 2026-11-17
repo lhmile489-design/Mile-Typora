@@ -19,10 +19,29 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     openLink: async () => ({ kind: "none" }),
     getSettings: async () => ({
       kind: "ok" as const,
-      settings: { startup: "blank", appearance: "system", recent: [] },
+      settings: { startup: "blank", appearance: "system", showStatusBar: true, recent: [] },
       corrupt: false,
     }),
     saveSettings: async () => ({ ok: true as const, value: undefined }),
+    onSettingsChange: () => () => {},
+    getWindowView: async () => ({
+      kind: "ok" as const,
+      state: { fullScreen: false, alwaysOnTop: false, zoom: 1 },
+    }),
+    setFullScreen: async (value) => ({
+      kind: "ok" as const,
+      state: { fullScreen: value, alwaysOnTop: false, zoom: 1 },
+    }),
+    setAlwaysOnTop: async (value) => ({
+      kind: "ok" as const,
+      state: { fullScreen: false, alwaysOnTop: value, zoom: 1 },
+    }),
+    setZoom: async (zoom) => ({ kind: "ok" as const, state: { fullScreen: false, alwaysOnTop: false, zoom } }),
+    cycleWindow: async () => ({ ok: true as const, value: undefined }),
+    countWords: async () => ({
+      kind: "ok" as const,
+      count: { characters: 0, charactersNoSpaces: 0, words: 0, paragraphs: 0 },
+    }),
     clearRecent: async () => ({ ok: true as const, value: undefined }),
     newDocument: async () => ({ ok: true as const, value: 3 }),
     clearStartUntitled: async () => {},
@@ -759,6 +778,104 @@ describe("file operations", () => {
     expect(await screen.findByText("已打开打印预览")).toBeTruthy();
   });
 
+  it("explains that focus and typewriter modes need source editing", async () => {
+    render(<App transport={fakeTransport({ openFile: async () => loadedDoc })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.keyDown(window, { key: "F8" });
+    expect(await screen.findByText("专注模式只在编辑模式可用")).toBeTruthy();
+    fireEvent.keyDown(window, { key: "F9" });
+    expect(await screen.findByText("打字机模式只在编辑模式可用")).toBeTruthy();
+  });
+
+  it("toggles focus and typewriter modes in the editor", async () => {
+    render(<App transport={fakeTransport({ openFile: async () => loadedDoc })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    content.focus();
+    fireEvent.keyDown(window, { key: "F8" });
+    await waitFor(() => expect(document.querySelector(".cm-focus-dim")).not.toBeNull());
+    fireEvent.click(screen.getByRole("menuitem", { name: "视图" }));
+    expect(screen.getByRole("menuitemcheckbox", { name: /专注模式/ }).getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /打字机模式/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "视图" }));
+    await waitFor(() =>
+      expect(screen.getByRole("menuitemcheckbox", { name: /打字机模式/ }).getAttribute("aria-checked")).toBe("true"),
+    );
+  });
+
+  it("changes fullscreen and zoom only through the view bindings", async () => {
+    const setFullScreen = vi.fn(async (value: boolean) => ({
+      kind: "ok" as const,
+      state: { fullScreen: value, alwaysOnTop: false, zoom: 1 },
+    }));
+    const setZoom = vi.fn(async (zoom: number) => ({
+      kind: "ok" as const,
+      state: { fullScreen: false, alwaysOnTop: false, zoom },
+    }));
+    render(<App transport={fakeTransport({ openFile: async () => loadedDoc, setFullScreen, setZoom })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.keyDown(window, { key: "F11" });
+    await waitFor(() => expect(setFullScreen).toHaveBeenCalledWith(true));
+    fireEvent.keyDown(window, { key: "=", ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(setZoom).toHaveBeenCalledWith(1.1));
+    fireEvent.click(screen.getByRole("menuitem", { name: "视图" }));
+    expect(screen.getByText("缩放：110%")).toBeTruthy();
+  });
+
+  it("switches windows with Ctrl+Tab and shows word statistics", async () => {
+    const cycleWindow = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    const countWords = vi.fn(async () => ({
+      kind: "ok" as const,
+      count: { characters: 12, charactersNoSpaces: 10, words: 5, paragraphs: 2 },
+    }));
+    render(<App transport={fakeTransport({ openFile: async () => loadedDoc, cycleWindow, countWords })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.keyDown(window, { key: "Tab", ctrlKey: true });
+    await waitFor(() => expect(cycleWindow).toHaveBeenCalledWith(false));
+    fireEvent.click(screen.getByRole("menuitem", { name: "视图" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "字数统计…" }));
+    const dialog = await screen.findByRole("dialog", { name: "字数统计" });
+    expect(dialog.textContent).toContain("12");
+    expect(dialog.textContent).toContain("5");
+    fireEvent.click(within(dialog).getByRole("button", { name: "关闭" }));
+  });
+
+  it("keeps a connection failure visible with the status bar hidden", async () => {
+    render(
+      <App
+        transport={fakeTransport({
+          ready: async () => ({ ok: false as const, message: "绑定不可用" }),
+          getSettings: async () => ({
+            kind: "ok" as const,
+            settings: { startup: "blank", appearance: "system", showStatusBar: false, recent: [] },
+            corrupt: false,
+          }),
+        })}
+      />,
+    );
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("绑定不可用");
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("persists the status bar preference from the view menu", async () => {
+    const saveSettings = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    render(<App transport={fakeTransport({ openFile: async () => loadedDoc, saveSettings })} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
+    await screen.findByRole("heading", { name: "标题" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "视图" }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "显示状态栏" }));
+    await waitFor(() =>
+      expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({ showStatusBar: false })),
+    );
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   it("keeps keyboard control of a menu opened with the mouse", async () => {
     render(<App transport={fakeTransport({ openFile: async () => loadedDoc })} />);
     const format = screen.getByRole("menuitem", { name: "格式" });
@@ -1204,6 +1321,7 @@ describe("the recent list", () => {
     settings: {
       startup: "blank",
       appearance: "system",
+      showStatusBar: true,
       recent: [
         { path: "E:/notes\a.md", name: "a.md", isDir: false },
         { path: "E:/notes", name: "notes", isDir: true },
@@ -1231,7 +1349,7 @@ describe("the recent list", () => {
   it("says when the settings could not be read", async () => {
     const broken = {
       kind: "ok" as const,
-      settings: { startup: "blank", appearance: "system", recent: [] },
+      settings: { startup: "blank", appearance: "system", showStatusBar: true, recent: [] },
       corrupt: true,
       notice: "设置文件损坏，已按默认设置启动，原文件已保留",
     };
@@ -1288,7 +1406,7 @@ describe("the appearance preference", () => {
   it("applies the saved preference once the settings load", async () => {
     const settings = {
       kind: "ok" as const,
-      settings: { startup: "blank", appearance: "dark", recent: [] },
+      settings: { startup: "blank", appearance: "dark", showStatusBar: true, recent: [] },
       corrupt: false,
     };
     render(<App transport={fakeTransport({ getSettings: async () => settings })} />);

@@ -26,7 +26,7 @@ func (s *WindowService) SaveAll(ctx context.Context) (contract.SaveAllStart, err
 	if !ok {
 		return contract.SaveAllStart{}, ErrNoCallerWindow
 	}
-	ids := s.windows.IDs()
+	ids := s.windows.Order()
 	if len(ids) == 0 {
 		return contract.SaveAllStart{}, ErrWindowNotOpen
 	}

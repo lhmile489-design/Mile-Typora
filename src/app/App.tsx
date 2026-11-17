@@ -48,6 +48,7 @@ import { SearchPanel } from "../components/SearchPanel";
 import { TableDialog } from "../components/TableDialog";
 import { LinkDialog } from "../components/LinkDialog";
 import { ExportNoticeDialog } from "../components/ExportNoticeDialog";
+import { WordCountDialog } from "../components/WordCountDialog";
 import { readerSelectionHTML, readerSelectionText, selectedReaderImage } from "../lib/clipboard";
 import { serializeExportBody } from "../lib/export";
 import { SettingsDialog } from "../components/SettingsDialog";
@@ -91,6 +92,12 @@ type MenuState = {
   leftView: LeftView;
   showLeft: boolean;
   showRight: boolean;
+  focusMode: boolean;
+  typewriter: boolean;
+  fullScreen: boolean;
+  alwaysOnTop: boolean;
+  zoom: number;
+  showStatusBar: boolean;
   inTable: boolean;
   inLink: boolean;
   inImage: boolean;
@@ -382,6 +389,68 @@ function buildMenus(state: MenuState): MenuGroup[] {
         },
         sep,
         editing("toggle-source", "源码 / 预览模式", "Ctrl+/", !state.hasDoc, "尚未打开文档"),
+        sep,
+        {
+          id: "focus-mode",
+          label: "专注模式",
+          shortcut: "F8",
+          checked: state.focusMode,
+          disabled: !state.editing,
+          reason: "专注模式只在编辑模式可用",
+        },
+        {
+          id: "typewriter-mode",
+          label: "打字机模式",
+          shortcut: "F9",
+          checked: state.typewriter,
+          disabled: !state.editing,
+          reason: "打字机模式只在编辑模式可用",
+        },
+        sep,
+        {
+          id: "fullscreen",
+          label: "切换全屏",
+          shortcut: "F11",
+          checked: state.fullScreen,
+        },
+        {
+          id: "always-on-top",
+          label: "保持窗口在最前端",
+          checked: state.alwaysOnTop,
+        },
+        sep,
+        {
+          id: "zoom-level",
+          label: `缩放：${Math.round(state.zoom * 100)}%`,
+          disabled: true,
+          reason: "当前窗口缩放比例",
+        },
+        {
+          id: "zoom-in",
+          label: "放大",
+          shortcut: "Ctrl+Shift+=",
+          disabled: state.zoom >= 2,
+          reason: "已达到最大缩放 200%",
+        },
+        {
+          id: "zoom-out",
+          label: "缩小",
+          shortcut: "Ctrl+Shift+-",
+          disabled: state.zoom <= 0.5,
+          reason: "已达到最小缩放 50%",
+        },
+        {
+          id: "zoom-reset",
+          label: "实际大小",
+          shortcut: "Ctrl+Shift+9",
+        },
+        sep,
+        item("word-count", "字数统计…"),
+        {
+          id: "toggle-statusbar",
+          label: "显示状态栏",
+          checked: state.showStatusBar,
+        },
       ],
     },
     {
@@ -427,6 +496,15 @@ export function App({ transport }: { transport: Transport }) {
   const [doc, setDoc] = useState<OpenedDoc | null>(null);
   // M4-1: one buffer per window; preview renders the same string through Go.
   const [mode, setMode] = useState<ViewMode>("reading");
+  const [focusMode, setFocusMode] = useState(false);
+  const [typewriter, setTypewriter] = useState(false);
+  const [viewState, setViewState] = useState({ fullScreen: false, alwaysOnTop: false, zoom: 1 });
+  const [wordCount, setWordCount] = useState<{
+    characters: number;
+    charactersNoSpaces: number;
+    words: number;
+    paragraphs: number;
+  } | null>(null);
   const [editorInTable, setEditorInTable] = useState(false);
   const [editorInLink, setEditorInLink] = useState(false);
   const [editorInImage, setEditorInImage] = useState(false);
@@ -525,9 +603,10 @@ export function App({ transport }: { transport: Transport }) {
   const [findIndex, setFindIndex] = useState(0);
   const [findCount, setFindCount] = useState(0);
   const [recent, setRecent] = useState<RecentEntry[]>([]);
-  const [settings, setSettings] = useState<{ startup: string; appearance: string }>({
+  const [settings, setSettings] = useState<{ startup: string; appearance: string; showStatusBar: boolean }>({
     startup: "blank",
     appearance: "system",
+    showStatusBar: true,
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
@@ -689,6 +768,39 @@ export function App({ transport }: { transport: Transport }) {
   }, [applyTheme, transport]);
 
   useEffect(() => {
+    return transport.onSettingsChange((change) => {
+      setSettings((current) => ({ ...current, showStatusBar: change.showStatusBar }));
+    });
+  }, [transport]);
+
+  useEffect(() => {
+    if (ready.kind !== "ready") return;
+    void transport.getWindowView().then((result) => {
+      if (result.kind === "ok") {
+        setViewState({
+          fullScreen: result.state.fullScreen,
+          alwaysOnTop: result.state.alwaysOnTop,
+          zoom: result.state.zoom || 1,
+        });
+      }
+    });
+  }, [ready.kind, transport]);
+
+  useEffect(() => {
+    // Zoom is the app's View command; a WebView2 Ctrl+wheel zoom would bypass
+    // the menu's percentage and limits.
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey) event.preventDefault();
+    };
+    window.addEventListener("wheel", onWheel, { passive: false });
+    return () => window.removeEventListener("wheel", onWheel);
+  }, []);
+
+  useEffect(() => {
+    document.title = `${doc?.name ?? "Mile Typora"}${dirty ? " •" : ""}`;
+  }, [doc?.name, dirty]);
+
+  useEffect(() => {
     docRef.current = doc;
   }, [doc]);
 
@@ -830,7 +942,11 @@ export function App({ transport }: { transport: Transport }) {
       return;
     }
     setRecent(result.settings.recent ?? []);
-    setSettings({ startup: result.settings.startup, appearance: result.settings.appearance });
+    setSettings({
+      startup: result.settings.startup,
+      appearance: result.settings.appearance,
+      showStatusBar: result.settings.showStatusBar !== false,
+    });
     applyTheme(result.settings.appearance);
     if (result.notice) setNotice(result.notice);
   }, [applyTheme, transport]);
@@ -1174,6 +1290,7 @@ export function App({ transport }: { transport: Transport }) {
     const result = await transport.saveSettings({
       startup: settings.startup,
       appearance: settings.appearance,
+      showStatusBar: settings.showStatusBar,
       recent: [],
     });
     setSettingsSaving(false);
@@ -2131,6 +2248,99 @@ export function App({ transport }: { transport: Transport }) {
     [buildExportDocument, transport],
   );
 
+  const applyViewState = useCallback((state: { fullScreen: boolean; alwaysOnTop: boolean; zoom: number }) => {
+    setViewState({ fullScreen: state.fullScreen, alwaysOnTop: state.alwaysOnTop, zoom: state.zoom || 1 });
+  }, []);
+
+  const toggleFocusMode = useCallback(() => {
+    if (modeRef.current !== "editing") {
+      setNotice("专注模式只在编辑模式可用");
+      return;
+    }
+    setFocusMode((value) => !value);
+  }, []);
+
+  const toggleTypewriter = useCallback(() => {
+    if (modeRef.current !== "editing") {
+      setNotice("打字机模式只在编辑模式可用");
+      return;
+    }
+    setTypewriter((value) => !value);
+  }, []);
+
+  const toggleFullScreen = useCallback(async () => {
+    const result = await transport.setFullScreen(!viewState.fullScreen);
+    if (result.kind === "failed") {
+      setNotice(result.message);
+      return;
+    }
+    applyViewState(result.state);
+  }, [applyViewState, transport, viewState.fullScreen]);
+
+  const toggleAlwaysOnTop = useCallback(async () => {
+    const result = await transport.setAlwaysOnTop(!viewState.alwaysOnTop);
+    if (result.kind === "failed") {
+      setNotice(result.message);
+      return;
+    }
+    applyViewState(result.state);
+  }, [applyViewState, transport, viewState.alwaysOnTop]);
+
+  const changeZoom = useCallback(
+    async (factor: number) => {
+      const result = await transport.setZoom(factor);
+      if (result.kind === "failed") {
+        setNotice(result.message);
+        return;
+      }
+      applyViewState(result.state);
+    },
+    [applyViewState, transport],
+  );
+
+  const requestWordCount = useCallback(async () => {
+    let source = "";
+    let selected = false;
+    if (modeRef.current === "editing") {
+      const selection = editorRef.current?.selectionText() ?? "";
+      selected = selection !== "";
+      source = selection || bufferRef.current;
+    } else {
+      const selection = readerSelectionText(window.getSelection());
+      selected = selection !== "";
+      source =
+        selection ||
+        (modeRef.current === "preview" ? bufferRef.current : docRef.current?.text) ||
+        "";
+    }
+    const result = await transport.countWords(source, selected);
+    if (result.kind === "failed") {
+      setNotice(result.message);
+      return;
+    }
+    setWordCount({
+      characters: result.count.characters,
+      charactersNoSpaces: result.count.charactersNoSpaces,
+      words: result.count.words,
+      paragraphs: result.count.paragraphs,
+    });
+  }, [transport]);
+
+  const toggleStatusBar = useCallback(async () => {
+    const next = !settings.showStatusBar;
+    setSettings((current) => ({ ...current, showStatusBar: next }));
+    const result = await transport.saveSettings({
+      startup: settings.startup,
+      appearance: settings.appearance,
+      showStatusBar: next,
+      recent: [],
+    });
+    if (!result.ok) {
+      setSettings((current) => ({ ...current, showStatusBar: !next }));
+      setNotice(result.message);
+    }
+  }, [settings.appearance, settings.showStatusBar, settings.startup, transport]);
+
   const onMenuCommand = useCallback(
     (id: string) => {
       const editor = editorRef.current;
@@ -2179,6 +2389,15 @@ export function App({ transport }: { transport: Transport }) {
           setLeftView("tree");
           return;
         case "search-folder": openSearch(); return;
+        case "focus-mode": toggleFocusMode(); return;
+        case "typewriter-mode": toggleTypewriter(); return;
+        case "fullscreen": void toggleFullScreen(); return;
+        case "always-on-top": void toggleAlwaysOnTop(); return;
+        case "zoom-in": void changeZoom(viewState.zoom + 0.1); return;
+        case "zoom-out": void changeZoom(viewState.zoom - 0.1); return;
+        case "zoom-reset": void changeZoom(1); return;
+        case "word-count": void requestWordCount(); return;
+        case "toggle-statusbar": void toggleStatusBar(); return;
         case "undo": run((c) => c.undo()); return;
         case "redo": run((c) => c.redo()); return;
         case "cut": run((c) => void c.cut()); return;
@@ -2292,7 +2511,7 @@ export function App({ transport }: { transport: Transport }) {
         case "help-about": setHelpKind("about"); return;
       }
     },
-    [newDocument, newWindow, openFile, openFolder, openList, openSearch, requestClose, requestDelete, requestMove, requestProperties, revealFile, revealInSidebar, save, saveAs, startSaveAll, toggleRight, toggleSource, chooseImage, pasteAuto, pasteImageFromClipboard, copyImage, copyPlainText, copyHTMLFragment, runExport, transport],
+    [newDocument, newWindow, openFile, openFolder, openList, openSearch, requestClose, requestDelete, requestMove, requestProperties, revealFile, revealInSidebar, save, saveAs, startSaveAll, toggleRight, toggleSource, chooseImage, pasteAuto, pasteImageFromClipboard, copyImage, copyPlainText, copyHTMLFragment, runExport, toggleFocusMode, toggleTypewriter, toggleFullScreen, toggleAlwaysOnTop, changeZoom, requestWordCount, toggleStatusBar, viewState.zoom, transport],
   );
 
   // Links in the preview do not replace the buffer before M4-2's protection.
@@ -2428,7 +2647,7 @@ export function App({ transport }: { transport: Transport }) {
       if (e.defaultPrevented) return;
       const command = commandFor(e);
       if (!command) return;
-      if ((settingsOpen || unsavedOpen || conflict !== null || reloadOpen || deleteTarget !== null || properties !== null || sidebarConfirm || searchConfirm || listConfirm || tableOpen || linkDialog !== null || imageConfirm !== null || exportNotice !== null || exporting || saveAllSummary !== null || recentOpen || helpKind !== null) && command !== "dismiss") return;
+      if ((settingsOpen || unsavedOpen || conflict !== null || reloadOpen || deleteTarget !== null || properties !== null || sidebarConfirm || searchConfirm || listConfirm || tableOpen || linkDialog !== null || imageConfirm !== null || exportNotice !== null || wordCount !== null || exporting || saveAllSummary !== null || recentOpen || helpKind !== null) && command !== "dismiss") return;
       const editorAction = EDITOR_ACTIONS[command];
       if (editorAction) {
         const active = document.activeElement;
@@ -2478,6 +2697,44 @@ export function App({ transport }: { transport: Transport }) {
         case "refresh":
           e.preventDefault();
           void refresh();
+          return;
+        case "focus-mode":
+          e.preventDefault();
+          toggleFocusMode();
+          return;
+        case "typewriter-mode":
+          e.preventDefault();
+          toggleTypewriter();
+          return;
+        case "fullscreen":
+          e.preventDefault();
+          void toggleFullScreen();
+          return;
+        case "zoom-in":
+          e.preventDefault();
+          void changeZoom(viewState.zoom + 0.1);
+          return;
+        case "zoom-out":
+          e.preventDefault();
+          void changeZoom(viewState.zoom - 0.1);
+          return;
+        case "zoom-reset":
+          e.preventDefault();
+          void changeZoom(1);
+          return;
+        case "next-window":
+          e.preventDefault();
+          void (async () => {
+            const result = await transport.cycleWindow(false);
+            if (!result.ok) setNotice(result.message);
+          })();
+          return;
+        case "previous-window":
+          e.preventDefault();
+          void (async () => {
+            const result = await transport.cycleWindow(true);
+            if (!result.ok) setNotice(result.message);
+          })();
           return;
         case "close-window":
           e.preventDefault();
@@ -2599,6 +2856,7 @@ export function App({ transport }: { transport: Transport }) {
     linkDialog,
     imageConfirm,
     exportNotice,
+    wordCount,
     exporting,
     saveAllSummary,
     recentOpen,
@@ -2609,6 +2867,11 @@ export function App({ transport }: { transport: Transport }) {
     pasteAuto,
     pasteImageFromClipboard,
     runExport,
+    toggleFocusMode,
+    toggleTypewriter,
+    toggleFullScreen,
+    changeZoom,
+    viewState.zoom,
   ]);
 
   return (
@@ -2625,6 +2888,12 @@ export function App({ transport }: { transport: Transport }) {
           leftView,
           showLeft,
           showRight,
+          focusMode,
+          typewriter,
+          fullScreen: viewState.fullScreen,
+          alwaysOnTop: viewState.alwaysOnTop,
+          zoom: viewState.zoom,
+          showStatusBar: settings.showStatusBar,
           inTable: editorInTable,
           inLink: editorInLink,
           inImage: editorInImage,
@@ -2818,6 +3087,8 @@ export function App({ transport }: { transport: Transport }) {
               ref={editorRef}
               value={buffer}
               onChange={setBuffer}
+              focusMode={focusMode}
+              typewriter={typewriter}
               onContext={(context) => {
                 setEditorInTable(context.inTable);
                 setEditorInLink(context.inLink);
@@ -2900,7 +3171,8 @@ export function App({ transport }: { transport: Transport }) {
           </aside>
         )}
       </div>
-      <footer className="statusbar" role="status">
+      {settings.showStatusBar && (
+        <footer className="statusbar" role="status">
         {doc ? (
           <>
             <span className="badge-ro">
@@ -2963,6 +3235,13 @@ export function App({ transport }: { transport: Transport }) {
         )}
         <ReadyBadge state={ready} />
       </footer>
+      )}
+      {!settings.showStatusBar && (ready.kind === "failed" || notice) && (
+        <div className="notice-float" role="alert">
+          <CircleAlert aria-hidden="true" />
+          {ready.kind === "failed" ? `连接失败：${ready.message}` : notice}
+        </div>
+      )}
       {unsavedOpen && (
         <UnsavedDialog
           saving={saving}
@@ -3107,6 +3386,15 @@ export function App({ transport }: { transport: Transport }) {
           onClose={() => setExportNotice(null)}
         />
       )}
+      {wordCount && (
+        <WordCountDialog
+          characters={wordCount.characters}
+          charactersNoSpaces={wordCount.charactersNoSpaces}
+          words={wordCount.words}
+          paragraphs={wordCount.paragraphs}
+          onClose={() => setWordCount(null)}
+        />
+      )}
       {tableOpen && (
         <TableDialog
           onInsert={(rows, columns) => {
@@ -3154,6 +3442,8 @@ export function App({ transport }: { transport: Transport }) {
             setSettings({ ...settings, appearance });
             applyTheme(appearance);
           }}
+          showStatusBar={settings.showStatusBar}
+          onChangeShowStatusBar={(showStatusBar) => setSettings({ ...settings, showStatusBar })}
           onCancel={() => setSettingsOpen(false)}
           onSave={() => void saveSettings()}
           saving={settingsSaving}

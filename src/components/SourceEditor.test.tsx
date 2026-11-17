@@ -27,6 +27,23 @@ function Harness() {
   );
 }
 
+describe("source editor view modes", () => {
+  it("dims paragraphs outside the caret when focus mode is on", async () => {
+    render(
+      <SourceEditor
+        value={"第一段\n\n第二段"}
+        onChange={() => {}}
+        readClipboard={async () => ""}
+        writeClipboard={async () => true}
+        focusMode
+      />,
+    );
+    const content = await screen.findByLabelText("Markdown 源码", {}, { timeout: 3000 });
+    content.focus();
+    await waitFor(() => expect(content.querySelectorAll(".cm-focus-dim").length).toBeGreaterThan(0));
+  });
+});
+
 describe("source editor buffers", () => {
   it("does not let undo cross a document replacement", async () => {
     render(<Harness />);

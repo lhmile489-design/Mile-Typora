@@ -7,6 +7,8 @@ type Props = {
   /** "system", "light" or "dark" (PRD FR-10.12). */
   appearance: string;
   onChangeAppearance: (appearance: string) => void;
+  showStatusBar: boolean;
+  onChangeShowStatusBar: (show: boolean) => void;
   onCancel: () => void;
   onSave: () => void;
   saving?: boolean;
@@ -43,6 +45,8 @@ export function SettingsDialog({
   onChangeStartup,
   appearance,
   onChangeAppearance,
+  showStatusBar,
+  onChangeShowStatusBar,
   onCancel,
   onSave,
   saving,
@@ -125,6 +129,20 @@ export function SettingsDialog({
                   </span>
                 </label>
               ))}
+            </fieldset>
+            <fieldset className="settings-group">
+              <legend>界面</legend>
+              <label className="radio-row">
+                <input
+                  type="checkbox"
+                  checked={showStatusBar}
+                  onChange={(e) => onChangeShowStatusBar(e.target.checked)}
+                />
+                <span className="txt">
+                  <span className="label">显示状态栏</span>
+                  <span className="hint">关闭后仍通过窗口标题与提示消息显示保存失败等关键状态。</span>
+                </span>
+              </label>
             </fieldset>
           </div>
         </div>

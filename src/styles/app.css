@@ -504,6 +504,16 @@ body {
 }
 .export-warnings li { margin: var(--sp-1) 0; overflow-wrap: anywhere; }
 
+.notice-float {
+  position: fixed; right: var(--sp-4); bottom: var(--sp-4); z-index: var(--z-toast);
+  display: flex; align-items: flex-start; gap: var(--sp-2);
+  max-width: 420px; padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-raised); color: var(--danger);
+  border: 1px solid var(--line-strong); border-radius: var(--r-md);
+  box-shadow: var(--shadow-1); font-size: var(--ui-sm);
+}
+.notice-float svg { width: var(--icon-sm); height: var(--icon-sm); flex: none; margin-top: 2px; }
+
 .props-list { margin: 0 0 var(--sp-4); display: grid; gap: var(--sp-2); }
 .props-row { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: var(--sp-3); font-size: var(--ui-sm); }
 .props-row dt { color: var(--text-muted); }

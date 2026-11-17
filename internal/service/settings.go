@@ -20,7 +20,7 @@ func (s *WindowService) GetSettings(ctx context.Context) (contract.SettingsResul
 	}
 	if s.state == nil {
 		return contract.SettingsResult{
-			Settings: contract.SettingsView{Startup: appstate.StartupBlank, Appearance: appstate.AppearanceSystem},
+			Settings: contract.SettingsView{Startup: appstate.StartupBlank, Appearance: appstate.AppearanceSystem, ShowStatusBar: true},
 			Failure: &contract.Failure{
 				Code:   "settings_unavailable",
 				Detail: "设置无法读取，本次按默认设置启动",
@@ -29,11 +29,16 @@ func (s *WindowService) GetSettings(ctx context.Context) (contract.SettingsResul
 	}
 	stored := s.state.Get()
 	_, corrupt := s.state.Corrupt()
+	showStatusBar := true
+	if stored.ShowStatusBar != nil {
+		showStatusBar = *stored.ShowStatusBar
+	}
 	result := contract.SettingsResult{
 		Settings: contract.SettingsView{
-			Startup:    stored.Startup,
-			Appearance: stored.Appearance,
-			Recent:     recentView(stored.Recent),
+			Startup:       stored.Startup,
+			Appearance:    stored.Appearance,
+			ShowStatusBar: showStatusBar,
+			Recent:        recentView(stored.Recent),
 		},
 		Corrupt: corrupt,
 	}
@@ -65,12 +70,14 @@ func (s *WindowService) SaveSettings(ctx context.Context, view contract.Settings
 			Detail: "本次设置未保存",
 		}}, nil
 	}
+	show := view.ShowStatusBar
 	current := s.state.Get()
 	next := appstate.Settings{
-		Startup:    view.Startup,
-		Appearance: view.Appearance,
-		Recent:     current.Recent, // the page never replaces the list
-		Resume:     current.Resume, // nor the resume target
+		Startup:       view.Startup,
+		Appearance:    view.Appearance,
+		ShowStatusBar: &show,
+		Recent:        current.Recent, // the page never replaces the list
+		Resume:        current.Resume, // nor the resume target
 	}
 	if err := s.state.Save(next); err != nil {
 		log.Printf("settings: cannot save: %v", err)
@@ -82,6 +89,9 @@ func (s *WindowService) SaveSettings(ctx context.Context, view contract.Settings
 	// Every open window follows the new appearance at once (PRD FR-10.12).
 	if s.themeChanged != nil && view.Appearance != current.Appearance {
 		s.themeChanged(view.Appearance)
+	}
+	if s.settingsChanged != nil && (current.ShowStatusBar == nil || view.ShowStatusBar != *current.ShowStatusBar) {
+		s.settingsChanged(view.ShowStatusBar)
 	}
 	return contract.SaveOutcome{}, nil
 }
@@ -177,6 +187,7 @@ func (s *WindowService) RecordFocus(id int) {
 	if !ok {
 		return
 	}
+	s.touchWindowMRU(id)
 	s.recordResumeOf(w)
 }
 

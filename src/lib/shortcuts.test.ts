@@ -22,6 +22,15 @@ describe("the P0 shortcut table", () => {
     ["n", { ctrlKey: true }, "new-document"],
     ["f", { ctrlKey: true }, "find"],
     ["F5", {}, "refresh"],
+    ["F8", {}, "focus-mode"],
+    ["F9", {}, "typewriter-mode"],
+    ["F11", {}, "fullscreen"],
+    ["Tab", { ctrlKey: true }, "next-window"],
+    ["Tab", { ctrlKey: true, shiftKey: true }, "previous-window"],
+    ["=", { ctrlKey: true, shiftKey: true }, "zoom-in"],
+    ["-", { ctrlKey: true, shiftKey: true }, "zoom-out"],
+    ["9", { ctrlKey: true, shiftKey: true }, "zoom-reset"],
+    ["(", { ctrlKey: true, shiftKey: true }, "zoom-reset"],
     ["w", { ctrlKey: true }, "close-window"],
     [",", { ctrlKey: true }, "settings"],
     ["l", { ctrlKey: true, shiftKey: true }, "toggle-left"],
@@ -75,9 +84,7 @@ describe("the P0 shortcut table", () => {
     expect(commandFor(press("F5", { shiftKey: true }))).toBeNull();
     expect(commandFor(press("F5", { ctrlKey: true }))).toBeNull();
     expect(commandFor(press("l", { ctrlKey: true }))).toBeNull();
-    // The Shift variants stay free for P2 zoom and are not heading commands.
-    expect(commandFor(press("=", { ctrlKey: true, shiftKey: true }))).toBeNull();
-    expect(commandFor(press("-", { ctrlKey: true, shiftKey: true }))).toBeNull();
+    // The shifted zoom keys now own zoom; the heading pair stays unshifted.
     expect(commandFor(press("b", { ctrlKey: true, shiftKey: true }))).toBeNull();
     expect(commandFor(press("i", { ctrlKey: true, shiftKey: true }))).toBeNull();
     expect(commandFor(press("`", { ctrlKey: true }))).toBeNull();

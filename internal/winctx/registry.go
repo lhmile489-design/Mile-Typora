@@ -289,6 +289,7 @@ func (w *Window) OpenFile() (string, bool) {
 type Registry struct {
 	mu     sync.RWMutex
 	byID   map[int]*Window
+	order  []int
 	closed bool
 }
 
@@ -312,6 +313,7 @@ func (r *Registry) Add(id int) *Window {
 	}
 	w := &Window{id: id, ctx: ctx, cancel: cancel}
 	r.byID[id] = w
+	r.order = append(r.order, id)
 	return w
 }
 
@@ -322,6 +324,12 @@ func (r *Registry) Remove(id int) bool {
 	w, ok := r.byID[id]
 	if ok {
 		delete(r.byID, id)
+		for i, current := range r.order {
+			if current == id {
+				r.order = append(r.order[:i], r.order[i+1:]...)
+				break
+			}
+		}
 	}
 	r.mu.Unlock()
 	if ok {
@@ -356,6 +364,14 @@ func (r *Registry) IDs() []int {
 		ids = append(ids, id)
 	}
 	return ids
+}
+
+// Order lists open windows in creation order, the fallback for Ctrl+Tab when
+// no focus history exists yet.
+func (r *Registry) Order() []int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return append([]int(nil), r.order...)
 }
 
 // Close cancels every window's context and refuses later registrations. The

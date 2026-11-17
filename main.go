@@ -97,6 +97,9 @@ var windows = winctx.NewRegistry()
 // themeChange tells every window that the appearance preference changed.
 var themeChange = mygo.NewEvent[contract.ThemeChange]("theme-change")
 
+// settingsChange tells every window that a shared preference changed.
+var settingsChange = mygo.NewEvent[contract.SettingsChange]("settings-changed")
+
 // docUpdated tells one window its document changed outside the app.
 var docUpdated = mygo.NewEvent[contract.DocUpdate]("doc-updated")
 
@@ -228,6 +231,52 @@ func main() {
 		State:         state,
 		StartupNotice: notice,
 		ThemeChanged:  applyAppearance,
+		SettingsChanged: func(showStatusBar bool) {
+			for _, w := range mygo.Windows() {
+				if !isPrintWindow(w.ID()) {
+					_ = settingsChange.Emit(w, contract.SettingsChange{ShowStatusBar: showStatusBar})
+				}
+			}
+		},
+		ViewState: func(windowID int) (contract.WindowViewState, error) {
+			w := mygo.WindowByID(windowID)
+			if w == nil || isPrintWindow(windowID) {
+				return contract.WindowViewState{Failure: &contract.Failure{Code: "view_unavailable", Detail: "窗口视图控制不可用"}}, nil
+			}
+			return windowViewState(w), nil
+		},
+		SetFullScreen: func(windowID int, value bool) (contract.WindowViewState, error) {
+			w := mygo.WindowByID(windowID)
+			if w == nil || isPrintWindow(windowID) {
+				return contract.WindowViewState{Failure: &contract.Failure{Code: "view_unavailable", Detail: "窗口视图控制不可用"}}, nil
+			}
+			w.SetFullScreen(value)
+			return windowViewState(w), nil
+		},
+		SetAlwaysOnTop: func(windowID int, value bool) (contract.WindowViewState, error) {
+			w := mygo.WindowByID(windowID)
+			if w == nil || isPrintWindow(windowID) {
+				return contract.WindowViewState{Failure: &contract.Failure{Code: "view_unavailable", Detail: "窗口视图控制不可用"}}, nil
+			}
+			w.SetAlwaysOnTop(value)
+			return windowViewState(w), nil
+		},
+		SetZoom: func(windowID int, factor float64) (contract.WindowViewState, error) {
+			w := mygo.WindowByID(windowID)
+			if w == nil || isPrintWindow(windowID) {
+				return contract.WindowViewState{Failure: &contract.Failure{Code: "view_unavailable", Detail: "窗口视图控制不可用"}}, nil
+			}
+			w.Page().SetZoomFactor(factor)
+			return windowViewState(w), nil
+		},
+		FocusWindow: func(windowID int) bool {
+			w := mygo.WindowByID(windowID)
+			if w == nil || isPrintWindow(windowID) {
+				return false
+			}
+			w.Focus()
+			return true
+		},
 		SaveAllRequest: func(windowID, requestID int) bool {
 			for _, w := range mygo.Windows() {
 				if w.ID() == windowID {
@@ -539,6 +588,15 @@ func focusedWindow() *mygo.Window {
 
 // enqueue adds open requests to a window's queue. A full queue is reported to
 // the user rather than dropping the request silently (PRD §9.2.3).
+// windowViewState reads the per-window values the View menu shows.
+func windowViewState(w *mygo.Window) contract.WindowViewState {
+	return contract.WindowViewState{
+		FullScreen:  w.IsFullScreen(),
+		AlwaysOnTop: w.IsAlwaysOnTop(),
+		Zoom:        w.Page().ZoomFactor(),
+	}
+}
+
 // applyAppearance switches every open window at once: the native controls
 // through Theme.SetSource, and each page through an event (PRD FR-10.12).
 func applyAppearance(appearance string) {

@@ -372,6 +372,11 @@ export interface SearchMatch {
   isName?: boolean;
 }
 
+/** SettingsChange tells every window that a shared preference changed. */
+export interface SettingsChange {
+  showStatusBar: boolean;
+}
+
 /**
  * SettingsResult answers the settings read. Corrupt is true when the file
  * could not be read and defaults are in use (PRD FR-10.11).
@@ -386,6 +391,7 @@ export interface SettingsResult {
 export interface SettingsView {
   startup: string;
   appearance: string;
+  showStatusBar: boolean;
   recent: RecentEntry[];
 }
 
@@ -411,6 +417,31 @@ export interface TreeEntry {
   path: string;
   name: string;
   isDir: boolean;
+}
+
+/** WindowCount is the read-only word-count result (M5-7 VIEW-10). */
+export interface WindowCount {
+  characters: number;
+  charactersNoSpaces: number;
+  words: number;
+  paragraphs: number;
+  failure?: Failure;
+}
+
+/**
+ * WindowCycleResult reports an in-app window switch; it carries no window id
+ * because the frontend never names another window.
+ */
+export interface WindowCycleResult {
+  failure?: Failure;
+}
+
+/** WindowViewState is the per-window state the view menu shows (M5-7). */
+export interface WindowViewState {
+  fullScreen: boolean;
+  alwaysOnTop: boolean;
+  zoom: number;
+  failure?: Failure;
 }
 
 // ---- Services ----
@@ -511,6 +542,17 @@ export const WindowService = {
     return call("WindowService.CopyImage", token);
   },
   /**
+   * CountWords returns the read-only word statistics for the source the page
+   * sends (VIEW-10).
+   */
+  countWords(source: string, selection: boolean): Promise<WindowCount> {
+    return call("WindowService.CountWords", source, selection);
+  },
+  /** CycleWindow activates the next app window in MRU order (M5-7 VIEW-16). */
+  cycleWindow(backwards: boolean): Promise<WindowCycleResult> {
+    return call("WindowService.CycleWindow", backwards);
+  },
+  /**
    * DocumentProperties returns the read-only details the properties dialog shows
    * (M5-1 FILE-11).
    */
@@ -545,6 +587,13 @@ export const WindowService = {
    */
   getSettings(): Promise<SettingsResult> {
     return call("WindowService.GetSettings");
+  },
+  /**
+   * GetWindowView returns the current window's fullscreen, topmost and zoom
+   * state for the View menu (M5-7 VIEW-11..15).
+   */
+  getWindowView(): Promise<WindowViewState> {
+    return call("WindowService.GetWindowView");
   },
   /**
    * MoveDocument moves the current document, or a file selected in the tree,
@@ -724,12 +773,27 @@ export const WindowService = {
   searchDirectory(query: string, frames: Channel<SearchFrame>): Promise<void> {
     return call("WindowService.SearchDirectory", query, frames);
   },
+  /** SetAlwaysOnTop changes only the calling window (M5-7 VIEW-12). */
+  setAlwaysOnTop(value: boolean): Promise<WindowViewState> {
+    return call("WindowService.SetAlwaysOnTop", value);
+  },
   /**
    * SetEditState lets the page tell the backend whether its buffer is dirty and
    * which file version it started from. The native close handler uses it.
    */
   setEditState(dirty: boolean, hash: string, hasBOM: boolean, lineEnding: string): Promise<void> {
     return call("WindowService.SetEditState", dirty, hash, hasBOM, lineEnding);
+  },
+  /** SetFullScreen changes only the calling window (M5-7 VIEW-11). */
+  setFullScreen(value: boolean): Promise<WindowViewState> {
+    return call("WindowService.SetFullScreen", value);
+  },
+  /**
+   * SetZoom sets the calling window's whole-page zoom, clamped to 50%..200%
+   * (M5-7 VIEW-13..15).
+   */
+  setZoom(factor: number): Promise<WindowViewState> {
+    return call("WindowService.SetZoom", factor);
   },
   /**
    * TrashDocument sends the current document, or a file selected in the tree, to
@@ -751,6 +815,8 @@ export const WindowService = {
 export const events = {
   /** themeChange tells every window that the appearance preference changed. */
   themeChange: event<ThemeChange>("theme-change"),
+  /** settingsChange tells every window that a shared preference changed. */
+  settingsChanged: event<SettingsChange>("settings-changed"),
   /** docUpdated tells one window its document changed outside the app. */
   docUpdated: event<DocUpdate>("doc-updated"),
   /** fileTrashed tells one window its file went to the recycle bin. */

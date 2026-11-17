@@ -82,6 +82,15 @@ type Deps struct {
 	StartupNotice string
 	// ThemeChanged tells every window the appearance preference changed.
 	ThemeChanged func(appearance string)
+	// SettingsChanged tells every window a shared preference changed.
+	SettingsChanged func(showStatusBar bool)
+	// View controls the calling window's fullscreen, topmost and zoom state.
+	ViewState      func(windowID int) (contract.WindowViewState, error)
+	SetFullScreen  func(windowID int, value bool) (contract.WindowViewState, error)
+	SetAlwaysOnTop func(windowID int, value bool) (contract.WindowViewState, error)
+	SetZoom        func(windowID int, factor float64) (contract.WindowViewState, error)
+	// FocusWindow activates one app window for Ctrl+Tab.
+	FocusWindow func(windowID int) bool
 	// Confirm asks the user a yes/no question with the reason spelled out.
 	Confirm func(ctx context.Context, title, message, detail string) bool
 	// External opens a URL with the system browser.
@@ -113,17 +122,25 @@ type WindowService struct {
 	watcher   *watch.Pool
 	state     *appstate.Store
 	// startupNotice is handed to the first page once.
-	startupNotice string
-	themeChanged  func(appearance string)
-	docUpdated    func(windowID int, update contract.DocUpdate)
-	treeWatcher   *watch.Pool
-	treeChanged   func(windowID int)
-	closeWindow   func(windowID int) error
-	savePick      SavePicker
-	exportPick    ExportPicker
-	printRunner   PrintRunner
-	exportBusy    atomic.Bool
-	startedAt     time.Time
+	startupNotice   string
+	themeChanged    func(appearance string)
+	settingsChanged func(showStatusBar bool)
+	viewState       func(windowID int) (contract.WindowViewState, error)
+	setFullScreen   func(windowID int, value bool) (contract.WindowViewState, error)
+	setAlwaysOnTop  func(windowID int, value bool) (contract.WindowViewState, error)
+	setZoom         func(windowID int, factor float64) (contract.WindowViewState, error)
+	focusWindow     func(windowID int) bool
+	windowMRU       []int
+	windowMRUMu     sync.Mutex
+	docUpdated      func(windowID int, update contract.DocUpdate)
+	treeWatcher     *watch.Pool
+	treeChanged     func(windowID int)
+	closeWindow     func(windowID int) error
+	savePick        SavePicker
+	exportPick      ExportPicker
+	printRunner     PrintRunner
+	exportBusy      atomic.Bool
+	startedAt       time.Time
 	// metaFailed records that an implicit settings write failed, so the next
 	// GetSettings can tell the user without blocking the reading (PRD FR-08.8).
 	metaFailed atomic.Bool
@@ -207,6 +224,12 @@ func NewWindowService(d Deps) *WindowService {
 		state:              d.State,
 		startupNotice:      d.StartupNotice,
 		themeChanged:       d.ThemeChanged,
+		settingsChanged:    d.SettingsChanged,
+		viewState:          d.ViewState,
+		setFullScreen:      d.SetFullScreen,
+		setAlwaysOnTop:     d.SetAlwaysOnTop,
+		setZoom:            d.SetZoom,
+		focusWindow:        d.FocusWindow,
 		confirm:            d.Confirm,
 		external:           d.External,
 		saveAllRequest:     d.SaveAllRequest,

@@ -309,9 +309,38 @@ type RecentEntry struct {
 
 // SettingsView is what the page shows and edits.
 type SettingsView struct {
-	Startup    string        `json:"startup"`
-	Appearance string        `json:"appearance"`
-	Recent     []RecentEntry `json:"recent"`
+	Startup       string        `json:"startup"`
+	Appearance    string        `json:"appearance"`
+	ShowStatusBar bool          `json:"showStatusBar"`
+	Recent        []RecentEntry `json:"recent"`
+}
+
+// WindowViewState is the per-window state the view menu shows (M5-7).
+type WindowViewState struct {
+	FullScreen  bool     `json:"fullScreen"`
+	AlwaysOnTop bool     `json:"alwaysOnTop"`
+	Zoom        float64  `json:"zoom"`
+	Failure     *Failure `json:"failure,omitempty"`
+}
+
+// WindowCycleResult reports an in-app window switch; it carries no window id
+// because the frontend never names another window.
+type WindowCycleResult struct {
+	Failure *Failure `json:"failure,omitempty"`
+}
+
+// WindowCount is the read-only word-count result (M5-7 VIEW-10).
+type WindowCount struct {
+	Characters         int      `json:"characters"`
+	CharactersNoSpaces int      `json:"charactersNoSpaces"`
+	Words              int      `json:"words"`
+	Paragraphs         int      `json:"paragraphs"`
+	Failure            *Failure `json:"failure,omitempty"`
+}
+
+// SettingsChange tells every window that a shared preference changed.
+type SettingsChange struct {
+	ShowStatusBar bool `json:"showStatusBar"`
 }
 
 // SettingsResult answers the settings read. Corrupt is true when the file

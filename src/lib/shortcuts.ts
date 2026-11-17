@@ -21,6 +21,14 @@ export type Command =
   | "save-blocked"
   | "save-as"
   | "print-document"
+  | "focus-mode"
+  | "typewriter-mode"
+  | "fullscreen"
+  | "zoom-in"
+  | "zoom-out"
+  | "zoom-reset"
+  | "next-window"
+  | "previous-window"
   | "copy-markdown"
   | "paste"
   | "paste-plain"
@@ -82,7 +90,13 @@ export function commandFor(e: KeyPress): Command | null {
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
 
   if (!ctrl && !shift && !e.altKey && key === "F5") return "refresh";
+  if (!ctrl && !shift && !e.altKey && key === "F8") return "focus-mode";
+  if (!ctrl && !shift && !e.altKey && key === "F9") return "typewriter-mode";
+  if (!ctrl && !shift && !e.altKey && key === "F11") return "fullscreen";
   if (!ctrl && !shift && !e.altKey && key === "Escape") return "dismiss";
+  if (e.ctrlKey && !e.altKey && !e.metaKey && key === "Tab") {
+    return shift ? "previous-window" : "next-window";
+  }
   if (!e.ctrlKey && shift && e.altKey && !e.metaKey && (key === "p" || key === "P")) return "print-document";
   if (!e.ctrlKey && shift && e.altKey && !e.metaKey && (key === "5" || key === "%")) return "strikethrough";
   if (!e.ctrlKey && !shift && e.altKey && !e.metaKey && key === "ArrowUp") return "move-line-up";
@@ -98,6 +112,9 @@ export function commandFor(e: KeyPress): Command | null {
   if (!shift && key === "s") return "save-blocked";
   if (!shift && key === "/") return "toggle-source";
   if (shift && key === "s") return "save-as";
+  if (shift && (key === "=" || key === "+")) return "zoom-in";
+  if (shift && (key === "-" || key === "_")) return "zoom-out";
+  if (shift && (key === "9" || key === "(")) return "zoom-reset";
   if (shift && key === "c") return "copy-markdown";
   if (shift && key === "v") return "paste-plain";
   if (!shift && key === "v") return "paste";
@@ -145,6 +162,14 @@ export const SHORTCUT_HINT: Partial<Record<Command, string>> = {
   "save-blocked": "Ctrl+S",
   "save-as": "Ctrl+Shift+S",
   "print-document": "Alt+Shift+P",
+  "focus-mode": "F8",
+  "typewriter-mode": "F9",
+  fullscreen: "F11",
+  "zoom-in": "Ctrl+Shift+=",
+  "zoom-out": "Ctrl+Shift+-",
+  "zoom-reset": "Ctrl+Shift+9",
+  "next-window": "Ctrl+Tab",
+  "previous-window": "Ctrl+Shift+Tab",
   "copy-markdown": "Ctrl+Shift+C",
   "paste-plain": "Ctrl+Shift+V",
   "heading-1": "Ctrl+1",

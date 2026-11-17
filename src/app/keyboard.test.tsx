@@ -19,10 +19,29 @@ function fakeTransport(overrides: Partial<Transport> = {}): Transport {
     openLink: async () => ({ kind: "none" as const }),
     getSettings: async () => ({
       kind: "ok" as const,
-      settings: { startup: "blank", appearance: "system", recent: [] },
+      settings: { startup: "blank", appearance: "system", showStatusBar: true, recent: [] },
       corrupt: false,
     }),
     saveSettings: async () => ({ ok: true as const, value: undefined }),
+    onSettingsChange: () => () => {},
+    getWindowView: async () => ({
+      kind: "ok" as const,
+      state: { fullScreen: false, alwaysOnTop: false, zoom: 1 },
+    }),
+    setFullScreen: async (value) => ({
+      kind: "ok" as const,
+      state: { fullScreen: value, alwaysOnTop: false, zoom: 1 },
+    }),
+    setAlwaysOnTop: async (value) => ({
+      kind: "ok" as const,
+      state: { fullScreen: false, alwaysOnTop: value, zoom: 1 },
+    }),
+    setZoom: async (zoom) => ({ kind: "ok" as const, state: { fullScreen: false, alwaysOnTop: false, zoom } }),
+    cycleWindow: async () => ({ ok: true as const, value: undefined }),
+    countWords: async () => ({
+      kind: "ok" as const,
+      count: { characters: 0, charactersNoSpaces: 0, words: 0, paragraphs: 0 },
+    }),
     clearRecent: async () => ({ ok: true as const, value: undefined }),
     newDocument: async () => ({ ok: true as const, value: 3 }),
     clearStartUntitled: async () => {},
@@ -206,6 +225,7 @@ describe("exception feedback", () => {
             settings: {
               startup: "blank",
               appearance: "system",
+              showStatusBar: true,
               recent: [{ path: "E:/big.md", name: "big.md", isDir: false }],
             },
             corrupt: false,
@@ -275,6 +295,7 @@ describe("exception feedback", () => {
             settings: {
               startup: "blank",
               appearance: "system",
+              showStatusBar: true,
               recent: [{ path: "E:/gone.md", name: "gone.md", isDir: false }],
             },
             corrupt: false,
