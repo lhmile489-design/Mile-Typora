@@ -1,6 +1,6 @@
 # Mile Typora
 
-Windows 11 上的本地 Markdown 阅读与源码编辑器。P0 只读阅读已完成；P1 基础编辑进行中，当前支持源码编辑与预览、保存与未保存保护、常用段落命令。所有行为以 [docs/PRD.md](docs/PRD.md) 为准。
+Windows 11 上的本地 Markdown 阅读与源码编辑器。P0 只读阅读与 P1 基础编辑已完成；P2 效率与高级排版需求已冻结、尚未实现。当前支持源码编辑与预览、保存与未保存保护、常用段落命令。所有行为以 [docs/PRD.md](docs/PRD.md) 为准，P2 范围见 [docs/P2-效率与排版需求.md](docs/P2-效率与排版需求.md)。
 
 ## 功能
 

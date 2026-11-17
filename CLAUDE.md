@@ -2,11 +2,11 @@
 
 > 给 AI 的项目级说明。优先级：用户当次指令 > 本文 > `docs/PRD.md` > `DESIGN.md` / `docs/decisions.md` > 项目 skills > 全局 `~/.claude/CLAUDE.md` > 通用经验。
 > 全局规范（UTF-8、不编造、无 emoji、破坏性操作先确认、没有证据不算完成）照常生效，本文只写本项目特有的内容。
-> 最后更新：2026-11-17（PRD v0.4；P0 完成，P1 完成；M4 总验收记录在 docs/develop/M4-验收记录.md，M5-0 需先冻结 P2 需求）
+> 最后更新：2026-11-17（PRD v0.4；P0、P1 完成；P2 需求已冻结，M5-1 下一阶段）
 
 ## 0. 先读这几条
 
-1. **P0 已完成（G4，29/29），P1 已完成（M4-8），P2 尚未冻结。** M4 验收证据见 [docs/develop/M4-验收记录.md](docs/develop/M4-验收记录.md)；P1-AC-05 的真实 ACL 拒绝和 P1-AC-16 的多窗口保存全部组合仍待用户桌面验收。进入 M5 前先做 M5-0 需求细化并让用户确认，不能直接开工。
+1. **P0 已完成（G4，29/29），P1 已完成（M4-8），P2 需求已冻结（M5-0，2026-11-17）。** P1 验收见 [docs/develop/M4-验收记录.md](docs/develop/M4-验收记录.md)，P2 需求与验收基线见 [docs/P2-效率与排版需求.md](docs/P2-效率与排版需求.md)；P1-AC-05 的真实 ACL 拒绝和 P1-AC-16 的多窗口保存全部组合仍待用户桌面验收。下一步从 M5-1 开始，按 M5 阶段表执行，不能跳过 M5-0 已冻结的范围。
 2. **需求以 [docs/PRD.md](docs/PRD.md) 为准**，[PRODUCT.md](PRODUCT.md) 是精简版。PRD 区分"已确认项"（C-01 至 C-12）和"建议默认项"（D-01 至 D-11、性能与容量数值），不能把建议项说成用户已确认。
 3. **P0 是只读阅读器。** 任何写用户文件、写工作区目录的代码在 P0 都是缺陷。
 4. **视觉以 [DESIGN.md](DESIGN.md) 为准**，组件不硬编码颜色、字号、间距。
@@ -41,6 +41,8 @@ Mile-Typora/
 ├── mygo.config.ts / vite.config.ts / vitest.config.ts / tsconfig.json
 ├── docs/
 │   ├── PRD.md                    需求权威来源
+│   ├── P1-编辑需求.md            P1 需求基线（已冻结）
+│   ├── P2-效率与排版需求.md      P2 需求与验收基线（M5-0 冻结）
 │   ├── 开发计划.md               M1–M6 小阶段拆分、门禁、AC 覆盖矩阵、进度
 │   ├── decisions.md              技术与产品决策（含依赖版本）
 │   ├── develop/接口契约.md       绑定方法、事件、错误码
@@ -136,7 +138,7 @@ Git：远程 `https://github.com/lhmile489-design/Mile-Typora.git`，分支 `mai
 
 ## 6. 安全与容量红线
 
-- 原始 HTML 转义成文本展示；输出经 bluemonday 白名单清理。
+- 原始 HTML 转义成文本展示；输出经 bluemonday 白名单清理。P2 唯一例外是精确的无属性 `<u>`/`</u>`；警告框、TOC、脚注、下划线的结构与类名由渲染器生成，不得放开任意 HTML、`id`、`class` 或 `role`。
 - 禁止 `javascript:`、`data:`、`file:` 及自定义协议链接；禁止脚本、事件属性、iframe、用户 SVG。
 - 远程图片不请求；外部 HTTP(S) 链接确认后交系统浏览器。
 - 本地图片只经 `mtres` 协议，按文件头只放行 PNG、JPEG、GIF、WebP；URL 只解码一次。
@@ -195,6 +197,7 @@ bun run build          # mygo build，产物在 build/
 | 文档 | 用途 | 何时更新 |
 | --- | --- | --- |
 | `docs/PRD.md` | 需求权威来源 | 用户评审改动后；改建议默认项要同步需求、异常规则和验收条目 |
+| `docs/P2-效率与排版需求.md` | P2 需求与验收基线（M5-0 冻结） | M5 实现若要改行为，先改本文并重新确认 |
 | `PRODUCT.md` | 产品概览 | PRD 版本变化时 |
 | `DESIGN.md` | 设计令牌与组件规范 | 改视觉前先改这里，同步 `tokens.css` 与设计稿 |
 | `docs/decisions.md` | 技术与产品决策 | 选型、版本、重要取舍变化时新增条目 |

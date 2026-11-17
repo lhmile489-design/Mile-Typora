@@ -2,12 +2,12 @@
 
 > 本文是产品层面的精简概览，给人和 AI 快速建立共识用。
 > 权威来源是 [docs/PRD.md](docs/PRD.md)（当前 v0.4，需求评审稿）。两者冲突时以 PRD 为准，并回来修正本文。
-> 最后同步：2026-11-16，对应 PRD v0.4。
-> 相关文档：视觉规范 [DESIGN.md](DESIGN.md)，设计稿 [docs/design/mile-typora-design.html](docs/design/mile-typora-design.html)，技术选型 [docs/decisions.md](docs/decisions.md)。
+> 最后同步：2026-11-17，对应 PRD v0.4 与 P2 需求冻结。
+> 相关文档：视觉规范 [DESIGN.md](DESIGN.md)，设计稿 [docs/design/mile-typora-design.html](docs/design/mile-typora-design.html)，技术选型 [docs/decisions.md](docs/decisions.md)，P2 需求 [docs/P2-效率与排版需求.md](docs/P2-效率与排版需求.md)。
 
 ## 1. 一句话定位
 
-Windows 11 本地桌面 Markdown 阅读器：接近 Typora 的简洁阅读体验，支持单文件预览、原生多窗口并行阅读、目录文件树浏览，公式与 Mermaid 离线渲染。首版只读，编辑放到 P1。
+Windows 11 本地桌面 Markdown 阅读与源码编辑器：接近 Typora 的简洁阅读体验，支持单文件预览、原生多窗口并行阅读、目录文件树浏览、源码编辑与预览、离线公式与 Mermaid。P0 只读、P1 基础编辑已完成，P2 效率与高级排版需求已冻结。
 
 - 产品名称：Mile Typora（暂定）
 - 平台：仅 Windows 11 x64，使用系统 WebView2
@@ -114,9 +114,9 @@ PRD 中其余交互细节、容量、性能数值都是**建议默认值**（D-0
 | 里程碑 | 内容 | 状态 |
 | --- | --- | --- |
 | M0 | PRD 评审，确认建议默认值与验收样本 | 文档已交付（设计规范、设计稿、技术选型、mygo v0.9.0 API 核对）；建议默认值与容量样本仍可在评审中调整 |
-| M1 | 技术验证：mygo 多窗口、对话框、按窗口通信、目录监听、离线公式/Mermaid、安全限制、打包 | 进行中（2026-11-16 授权）；M1-0 脚手架完成，小阶段拆分见 [docs/开发计划.md](docs/开发计划.md) |
-| M2 | 阅读闭环 | 未开始 |
-| M3 | 可靠性与 P0 发布（29 项验收） | 未开始 |
-| M4–M6 | P1 / P2 / P3 | 未开始 |
+| M1 | 技术验证：mygo 多窗口、对话框、按窗口通信、目录监听、离线公式/Mermaid、安全限制、打包 | 完成（见 docs/decisions.md） |
+| M2 | 阅读闭环 | 完成 |
+| M3 | 可靠性与 P0 发布（29 项验收） | 完成（29/29） |
+| M4–M6 | P1 / P2 / P3 | M4 完成；M5-0 需求已冻结，待 M5-1；M6 未开始 |
 
-PRD 第 14 节列出的开放项（P0 范围、窗口习惯、图表范围、隐私策略、容量基线、P1 编辑方式、菜单细节）仍待评审。Mermaid 的安全配置拦截、超时能否真正中断、KaTeX 与 mermaid 产物体积三项留到 M1 实测（docs/decisions.md D-T11）。
+PRD 第 14 节列出的开放项中，P0 范围、P1 编辑方式与 P2 需求已在阶段门禁中确认；P1 验收记录见 `docs/develop/M4-验收记录.md`，P2 需求见 `docs/P2-效率与排版需求.md`。Mermaid 的安全配置拦截、超时能否真正中断、KaTeX 与 mermaid 产物体积三项已在 M1 实测并记录在 docs/decisions.md。
